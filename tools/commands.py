@@ -1,23 +1,26 @@
 import os
 from datetime import datetime
 
+from langchain_core.tools import tool
+
 from tools.runner import run_cmd
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _EVIDENCE_DIR = os.path.join(_PROJECT_ROOT, "evidence")
 
 
-def list_dir(path: str = None) -> str:
+@tool
+def list_dir(path: str = "/evidence") -> str:
+    """Lista ficheiros e pastas numa diretoria.
+    Usa /evidence para ver os ficheiros de evidência dentro do container."""
     # paths Linux (ex: /evidence) → correr dentro do container
-    if path is not None and path.startswith("/"):
+    if path.startswith("/"):
         r = run_cmd(["ls", "-la", path])
         if r["returncode"] != 0:
             return f"ERRO a listar {path}\n{r['stderr']}"
         return r["stdout"]
 
     # paths Windows → listar localmente
-    if path is None:
-        path = _EVIDENCE_DIR
     try:
         entries = os.listdir(path)
         lines = []
@@ -33,22 +36,25 @@ def list_dir(path: str = None) -> str:
         return f"ERRO a listar {path}\n{e}"
 
 
+@tool
 def mmls_partitions(e01_path: str) -> str:
+    """Lista as partições de um ficheiro de imagem forense (.E01).
+    Usa o path do ficheiro dentro do container (ex: /evidence/imagem.E01)."""
     r = run_cmd(["mmls", "-i", "ewf", e01_path])
     if r["returncode"] != 0:
         return f"ERRO mmls\n{r['stderr']}"
     return r["stdout"]
 
 
+@tool
 def fls_list(e01_path: str, offset: str, directory_inode: str = "") -> str:
-    """
-    Lista ficheiros via fls usando EWF + offset.
-    directory_inode é opcional; se vazio lista a raiz.
-    """
+    """Lista ficheiros e directorias dentro de uma partição de uma imagem forense.
+    e01_path: path do ficheiro .E01 dentro do container.
+    offset: offset da partição (em sectores).
+    directory_inode: inode do directório a listar; se vazio lista a raiz."""
     argv = ["fls", "-i", "ewf", "-o", str(offset), e01_path]
     if directory_inode:
         argv.append(directory_inode)
-
     r = run_cmd(argv)
     if r["returncode"] != 0:
         return f"ERRO fls\n{r['stderr']}"
