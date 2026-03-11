@@ -1,10 +1,15 @@
 import os
+import subprocess
 
 from langchain_ollama import ChatOllama
 from langchain.agents import create_agent
 
 from tools.commands import list_dir, mmls_partitions, fls_list
 
+_PROJECT_ROOT  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_EVIDENCE_DIR  = os.path.join(_PROJECT_ROOT, "evidence")
+_DOCKER_IMAGE  = os.getenv("FORENSICS_IMAGE", "forensics")
+_DOCKER_CONTAINER = os.getenv("FORENSICS_CONTAINER", "forensics")
 E01_DEFAULT    = "/evidence/2020JimmyWilson.E01"
 OFFSET_DEFAULT = "65664"
 
@@ -24,6 +29,36 @@ SYSTEM_PROMPT = (
 )
 
 
+def ensure_container():
+    """Arranca o container Docker com a pasta evidence montada, se ainda não estiver a correr."""
+    running = subprocess.run(
+        ["docker", "ps", "-q", "--filter", f"name=^{_DOCKER_CONTAINER}$"],
+        capture_output=True, text=True
+    ).stdout.strip()
+
+    if running:
+        print(f"Container '{_DOCKER_CONTAINER}' já está a correr.")
+        return
+
+    # Remover container parado com o mesmo nome, se existir
+    subprocess.run(
+        ["docker", "rm", "-f", _DOCKER_CONTAINER],
+        capture_output=True
+    )
+
+    print(f"A arrancar container '{_DOCKER_CONTAINER}' com imagem '{_DOCKER_IMAGE}'...")
+    result = subprocess.run(
+        ["docker", "run", "-d", "--name", _DOCKER_CONTAINER,
+         "--network", "none",
+         "-v", f"{_EVIDENCE_DIR}:/evidence:ro",
+         _DOCKER_IMAGE],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Falha ao arrancar o container:\n{result.stderr}")
+    print("Container pronto.\n")
+
+
 def build_agent():
     llm = ChatOllama(
         model=OLLAMA_MODEL,
@@ -35,6 +70,7 @@ def build_agent():
 
 def main():
     """Loop interativo: o agent LangChain decide, executa e interpreta sozinho."""
+    ensure_container()
     agent = build_agent()
 
     while True:
