@@ -8,11 +8,14 @@ from tools.commands import list_dir, mmls_partitions, fls_list
 from agent.json_utils import extract_json_from_llm
 from agent.validation import validate_decision_structure
 
-E01_DEFAULT = "/evidence/2020JimmyWilson.E01"   
-OFFSET_DEFAULT = "65664"                        
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+E01_DEFAULT = os.path.join(_PROJECT_ROOT, "evidence", "2020JimmyWilson.E01")
+EVIDENCE_DIR_DEFAULT = os.path.join(_PROJECT_ROOT, "evidence")
+OFFSET_DEFAULT = "65664"
 
 # Variáveis de ambiente para configurar o modelo Ollama (opcional, com valores padrão)
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
 
 
@@ -50,7 +53,7 @@ def decide_tool(query: str) -> dict:
          "Responde APENAS com JSON válido no formato:\n"  # força JSON para facilitar o parsing
          '{{"tool":"list_dir|mmls_partitions|fls_list","args":{{}}}}'
          "Regras:\n"
-         "- Se o utilizador pedir o que existe em /evidence, usa list_dir.\n"
+         "- Se o utilizador pedir o que existe na pasta de evidências, usa list_dir.\n"
          "- Se pedir partições, usa mmls_partitions.\n"
          "- Se pedir listar ficheiros da partição ou raiz, usa fls_list.\n"
          f"- Se não indicar offset, usa {OFFSET_DEFAULT}.\n"
@@ -83,7 +86,7 @@ def execute_tool(decision: dict):
     # Argumentos com fallback para os valores padrão
     e01_path = args.get("e01_path", E01_DEFAULT)
     offset = args.get("offset", OFFSET_DEFAULT)
-    path = args.get("path", "/evidence")
+    path = args.get("path", EVIDENCE_DIR_DEFAULT)
 
     if tool == "list_dir":
         return list_dir(path)

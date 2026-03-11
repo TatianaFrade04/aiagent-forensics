@@ -1,4 +1,5 @@
-# define o ambiente linux insolado com ferramentas forenses
+# Container Linux isolado apenas com ferramentas forenses (sleuthkit)
+# O código Python corre no Windows — este container expõe só os binários forenses
 
 FROM ubuntu:22.04
 
@@ -7,23 +8,10 @@ RUN apt update && apt install -y \
     grep \
     findutils \
     coreutils \
-    python3 \
-    python3-pip \
  && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Pasta onde o ficheiro .E01 será montado via volume
+WORKDIR /evidence
 
-# Instalar dependências Python
-COPY requirements.txt /app/requirements.txt
-RUN python3 -m pip install --no-cache-dir -r /app/requirements.txt
-
-# Copiar o código do projeto (agente + tools)
-COPY agent/ /app/agent/
-COPY tools/ /app/tools/
-
-# (opcional mas recomendado) garantir que são packages Python
-# Se já tens __init__.py no repo, isto é redundante, mas não faz mal:
-RUN touch /app/agent/__init__.py /app/tools/__init__.py
-
-# Entry-point: correr o agente LangChain
-CMD ["python3", "-m", "agent.llm_langchain"]
+# Manter o container em execução para receber comandos via docker exec
+CMD ["sleep", "infinity"]
