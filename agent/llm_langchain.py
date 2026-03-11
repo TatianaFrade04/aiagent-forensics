@@ -1,22 +1,68 @@
 import os
 
-from langchain_ollama import ChatOllama                  #importa uma classe que permite comunicar com um modelo local do ollama atraves do langchain
-from langchain_core.prompts import ChatPromptTemplate    #importa a classe usada ara construir prompts com mensagens do tipo system e human
+from langchain_ollama import ChatOllama
+from langchain.agents import create_agent
 
 from tools.commands import list_dir, mmls_partitions, fls_list
 
-from agent.json_utils import extract_json_from_llm
-from agent.validation import validate_decision_structure
-
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-E01_DEFAULT = os.path.join(_PROJECT_ROOT, "evidence", "2020JimmyWilson.E01")
-EVIDENCE_DIR_DEFAULT = os.path.join(_PROJECT_ROOT, "evidence")
+E01_DEFAULT    = "/evidence/2020JimmyWilson.E01"
 OFFSET_DEFAULT = "65664"
 
-# Variáveis de ambiente para configurar o modelo Ollama (opcional, com valores padrão)
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
+OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "llama3.1")
+
+TOOLS = [list_dir, mmls_partitions, fls_list]
+
+SYSTEM_PROMPT = (
+    "És um assistente forense.\n"
+    "Tens acesso a estas tools: list_dir, mmls_partitions, fls_list.\n"
+    "Usa-as para responder às perguntas do utilizador.\n"
+    f"Se não indicarem e01_path, usa {E01_DEFAULT}.\n"
+    f"Se não indicarem offset, usa {OFFSET_DEFAULT}.\n"
+    "Explica os resultados de forma clara e técnica.\n"
+    "Não inventes informação — baseia-te apenas no output das tools."
+)
+
+
+def build_agent():
+    llm = ChatOllama(
+        model=OLLAMA_MODEL,
+        base_url=OLLAMA_BASE_URL,
+        temperature=0,
+    )
+    return create_agent(llm, TOOLS, system_prompt=SYSTEM_PROMPT)
+
+
+def main():
+    """Loop interativo: o agent LangChain decide, executa e interpreta sozinho."""
+    agent = build_agent()
+
+    while True:
+        query = input("Pergunta (ou 'sair'): ").strip()
+        if query.lower() in ("sair", "exit", "quit"):
+            break
+
+        try:
+            result = agent.invoke({"messages": [("human", query)]})
+            for msg in result["messages"][1:]:  # ignora a mensagem inicial do utilizador
+                kind = type(msg).__name__
+                if kind == "AIMessage" and msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        print(f"\n--- Tool chamada: {tc['name']} ---")
+                        print(tc["args"])
+                elif kind == "ToolMessage":
+                    print(f"\n--- Resultado da tool ---")
+                    print(msg.content)
+                elif kind == "AIMessage" and msg.content:
+                    print(f"\n--- Resposta final ---")
+                    print(msg.content)
+            print()
+        except Exception as e:
+            print(f"Erro: {e}")
+
+
+if __name__ == "__main__":
+    main()
 
 
 ALLOWED_TOOLS = {
@@ -83,19 +129,21 @@ def execute_tool(decision: dict):
     if tool not in ALLOWED_TOOLS:
         raise ValueError(f"Tool não permitida: {tool}")
 
-    # Argumentos com fallback para os valores padrão
     e01_path = args.get("e01_path", E01_DEFAULT)
     offset = args.get("offset", OFFSET_DEFAULT)
     path = args.get("path", EVIDENCE_DIR_DEFAULT)
 
     if tool == "list_dir":
-        return list_dir(path)
+        return list_dir.invoke({"path": path})
 
     elif tool == "mmls_partitions":
-        return mmls_partitions(e01_path)
+        return mmls_partitions.invoke({"e01_path": e01_path})
 
     elif tool == "fls_list":
-        return fls_list(e01_path, offset)
+        return fls_list.invoke({
+            "e01_path": e01_path,
+            "offset": offset
+        })
 
 
 def answer_from_tool_result(query: str, decision: dict, tool_result: str):
