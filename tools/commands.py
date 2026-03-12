@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+import subprocess
 
 from langchain_core.tools import tool
 
@@ -48,18 +49,32 @@ def mmls_partitions(e01_path: str) -> str:
 
 @tool
 def fls_list(e01_path: str, offset: str, directory_inode: str = "") -> str:
-    """Lista ficheiros e directorias dentro de uma partição de uma imagem forense.
-    e01_path: path do ficheiro .E01 dentro do container.
-    offset: offset da partição (em sectores).
-    directory_inode: inode do directório a listar; se vazio lista a raiz."""
-    argv = ["fls", "-i", "ewf", "-o", str(offset), e01_path]
-    if directory_inode:
-        argv.append(directory_inode)
-    r = run_cmd(argv)
-    if r["returncode"] != 0:
-        return f"ERRO fls\n{r['stderr']}"
-    return r["stdout"]
+    """
+    Lista ficheiros de um filesystem usando fls.
 
+    Argumentos:
+    - e01_path: caminho para a imagem E01
+    - offset: start sector real da partição
+    - directory_inode: inode opcional de uma diretoria específica
+
+    Regras:
+    - o offset deve ser um número em string
+    - o offset deve vir de get_main_partition_offset ou mmls_partitions
+    - não usar partition number, slot ou nomes de tools
+    """
+    if not isinstance(offset, str) or not offset.strip().isdigit():
+        return "ERRO fls\nOffset inválido. Usa primeiro get_main_partition_offset e passa o valor devolvido em offset."
+
+    cmd = ["fls", "-o", offset, e01_path]
+    if directory_inode and str(directory_inode).strip():
+        cmd.extend(["-d", str(directory_inode).strip()])
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        return f"ERRO fls\n{result.stderr.strip()}"
+
+    return result.stdout.strip()
 
 def find_on_mounted(path: str = None) -> str:
     """
