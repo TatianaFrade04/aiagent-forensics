@@ -2,4 +2,8 @@ langchain
 langchain-ollama
 langchain-community
 langchainhub
+langgraph
 python-dotenv
+# MCP (Model Context Protocol)
+mcp
+langchain-mcp-adapters

@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     xxd \
     kpartx \
     chntpw \
+    libhivex-bin \
     qemu-utils \
     ntfs-3g \
     python3 \

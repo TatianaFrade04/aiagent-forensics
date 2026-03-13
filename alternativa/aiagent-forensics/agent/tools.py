@@ -6,6 +6,7 @@ Executa comandos dentro do container Docker de forma segura e controlada.
 import subprocess
 import shlex
 import os
+import sys
 import time
 
 # ─── Configuração ─────────────────────────────────────────────────────────────
@@ -40,21 +41,29 @@ ALLOWED_COMMANDS = [
 # ─── Gestão do container ──────────────────────────────────────────────────────
 
 def ensure_container_running() -> bool:
-    """Garante que o container está activo com a imagem montada."""
+    """Garante que o container está activo com a imagem montada.
+    Todos os prints vão para stderr para não corromper o canal MCP stdio."""
     try:
         result = subprocess.run(
             ["docker", "inspect", "-f", "{{.State.Running}}", CONTAINER_NAME],
             capture_output=True, text=True
         )
-        if result.stdout.strip() == "true":
+        state = result.stdout.strip()
+        if state == "true":
+            return True
+        # Container existe mas está parado — basta arrancá-lo
+        if state == "false":
+            print("[*] A arrancar container parado...", file=sys.stderr)
+            subprocess.run(["docker", "start", CONTAINER_NAME],
+                           check=True, capture_output=True)
+            time.sleep(5)
             return True
     except Exception:
         pass
 
-    print("[*] A iniciar container forense...")
+    # Container não existe — criar de raiz
+    print("[*] A criar container forense...", file=sys.stderr)
     try:
-        # O entrypoint.sh corre automaticamente e faz ewfmount
-        # "sleep infinity" é o CMD que mantém o container vivo depois do entrypoint
         subprocess.run([
             "docker", "run", "-d",
             "--name", CONTAINER_NAME,
@@ -67,34 +76,32 @@ def ensure_container_running() -> bool:
             "sleep", "infinity"
         ], check=True, capture_output=True)
 
-        # Aguarda o entrypoint terminar (ewfmount pode demorar alguns segundos)
-        print("[*] A aguardar montagem da imagem forense...")
+        print("[*] A aguardar montagem da imagem forense...", file=sys.stderr)
         time.sleep(10)
 
-        # Confirma que o ewfmount correu
         check = subprocess.run(
             ["docker", "exec", CONTAINER_NAME, "ls", "/forensics_ewf"],
             capture_output=True, text=True
         )
         if "ewf1" in check.stdout:
-            print("[+] Container iniciado e imagem E01 montada com sucesso!")
+            print("[+] Container iniciado e imagem E01 montada com sucesso!", file=sys.stderr)
         else:
-            print("[!] Container iniciado mas ewf1 nao encontrado.")
-            print(f"[!] Verifica com: docker logs {CONTAINER_NAME}")
+            print("[!] Container iniciado mas ewf1 nao encontrado.", file=sys.stderr)
+            print(f"[!] Verifica com: docker logs {CONTAINER_NAME}", file=sys.stderr)
 
         return True
 
     except subprocess.CalledProcessError as e:
-        print(f"[!] Erro ao iniciar container: {e.stderr.decode()}")
+        print(f"[!] Erro ao iniciar container: {e.stderr.decode()}", file=sys.stderr)
         return False
 
 
 def stop_container():
     """Para e remove o container (chamado no fecho do programa)."""
-    print("\n[*] A parar container...")
+    print("\n[*] A parar container...", file=sys.stderr)
     subprocess.run(["docker", "stop", CONTAINER_NAME], capture_output=True)
     subprocess.run(["docker", "rm",   CONTAINER_NAME], capture_output=True)
-    print("[+] Container removido.")
+    print("[+] Container removido.", file=sys.stderr)
 
 
 # ─── Execução de comandos ─────────────────────────────────────────────────────
