@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Ambiente
+.env
+
+# Imagens forenses (nunca commitar)
+forensics_image/
+*.E01
+*.E02
+*.dd
+*.raw
+*.img
+*.vhd
+*.vmdk
+
+# VSCode
+.vscode/settings.json

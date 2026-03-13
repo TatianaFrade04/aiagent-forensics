@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "AIAgent@forensics",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/agent/main.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/agent",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/agent"
+            },
+            "justMyCode": true
+        }
+    ]
+}
