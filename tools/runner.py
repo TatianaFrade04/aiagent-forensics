@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any
 
 # Binários e comandos que só existem no container Linux
 _DOCKER_CONTAINER = "forensics"
-_FORENSIC_BINARIES = {"mmls", "fls", "fsstat", "icat", "ils", "ls"}
+_FORENSIC_BINARIES = {"mmls", "fls", "fsstat", "icat", "ils", "ls", "bash"}
 
 # Pasta de evidências: Windows → container
 _EVIDENCE_WIN = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "evidence")

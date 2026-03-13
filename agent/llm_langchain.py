@@ -2,11 +2,9 @@ import os
 import subprocess
 
 from langchain.agents import create_agent
-from langchain.tools import tool
 from langchain_ollama import ChatOllama
 
-from tools.commands import list_dir, mmls_partitions
-from tools.runner import run_cmd
+from tools.commands import bash_cmd
 
 
 # =========================
@@ -18,8 +16,6 @@ _EVIDENCE_DIR = os.path.join(_PROJECT_ROOT, "evidence")
 
 _DOCKER_IMAGE = os.getenv("FORENSICS_IMAGE") or "forensics"
 _DOCKER_CONTAINER = os.getenv("FORENSICS_CONTAINER") or "forensics"
-
-E01_DEFAULT = "/evidence/2020JimmyWilson.E01"
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434"
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL") or "llama3.1"
@@ -44,127 +40,10 @@ def is_error_text(text: str) -> bool:
     lowered = text.lower()
     return (
         "error invoking tool" in lowered
-        or "erro fls" in lowered
-        or "invalid image offset" in lowered
+        or "erro bash" in lowered
         or "field required" in lowered
         or "input should be a valid string" in lowered
     )
-
-
-def extract_main_partition_offset(mmls_output: str) -> str:
-    """
-    Extrai o start sector da maior 'Basic data partition' do output do mmls.
-    """
-
-    candidates = []
-
-    for raw_line in mmls_output.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-
-        # Exemplo:
-        # 006:  001  0000065664  0001736831  0001671168  Basic data partition
-        if "Basic data partition" not in line:
-            continue
-
-        parts = line.split()
-        if len(parts) < 6:
-            continue
-
-        try:
-            start = parts[2]
-            length = int(parts[4])
-            candidates.append(
-                {
-                    "start": start,
-                    "length": length,
-                    "line": raw_line,
-                }
-            )
-        except (ValueError, IndexError):
-            continue
-
-    if not candidates:
-        raise ValueError(
-            "Não foi encontrada nenhuma 'Basic data partition' no output do mmls."
-        )
-
-    best = max(candidates, key=lambda item: item["length"])
-    return str(best["start"])
-
-
-# =========================
-# Tools
-# =========================
-
-def _fls_raw(e01_path: str, offset: str, inode: str = "") -> str:
-    argv = ["fls", "-i", "ewf", "-o", offset, e01_path]
-    if inode:
-        argv.append(inode)
-    r = run_cmd(argv)
-    if r["returncode"] != 0:
-        return f"ERRO fls\n{r['stderr']}"
-    return r["stdout"]
-
-
-def _parse_inode(fls_output: str, name: str) -> str:
-    """Devolve o inode da entrada com o nome dado, ou None se não encontrar."""
-    for line in fls_output.splitlines():
-        parts = line.split("\t", 1)
-        if len(parts) == 2 and parts[1].strip().lower() == name.lower():
-            # formato: 'd/d 4214-144-5:' ou 'r/r 7-128-1:'
-            inode_part = parts[0].split()[-1].rstrip(":")
-            return inode_part
-    return None
-
-
-@tool
-def explore_disk(e01_path: str = E01_DEFAULT, path: str = "/") -> str:
-    """Explora o conteúdo de uma imagem de disco forense.
-    e01_path: caminho do ficheiro .E01 dentro do container.
-    path: caminho a explorar dentro da imagem.
-           Usa "/" ou "" para a raiz.
-           Para subpastas usa o nome: "Windows", "USERS", "USERS/JimmyWilson".
-    Usa esta tool para QUALQUER pergunta sobre ficheiros ou pastas dentro da imagem.
-    """
-    # Passo 1 — offset
-    print("\n[passo] A descobrir o offset da partição principal...")
-    print("[decisão] mmls_partitions")
-    print(f"[args] {{'e01_path': '{e01_path}'}}")
-    raw_mmls = mmls_partitions.invoke({"e01_path": e01_path})
-    print("\n[resultado:mmls_partitions]")
-    print(shorten_text(raw_mmls))
-    offset = extract_main_partition_offset(raw_mmls)
-    print(f"\n[passo] Offset da partição principal: {offset}")
-
-    # Componentes do caminho (vazio = raiz)
-    components = [p for p in path.strip("/").split("/") if p]
-
-    # Passo 2 — listar raiz
-    print("\n[passo] A listar a raiz da partição...")
-    print("[decisão] fls (raiz)")
-    print(f"[args] {{'e01_path': '{e01_path}', 'offset': '{offset}'}}")
-    current_output = _fls_raw(e01_path, offset)
-    print("\n[resultado:fls (raiz)]")
-    print(shorten_text(current_output))
-
-    if not components:
-        return current_output
-
-    # Passo 3 — navegar pelas subpastas
-    for component in components:
-        inode = _parse_inode(current_output, component)
-        if not inode:
-            return f"Não foi encontrada a entrada '{component}'. Conteúdo atual:\n{current_output}"
-        print(f"\n[passo] A entrar na pasta '{component}' (inode: {inode})...")
-        print("[decisão] fls")
-        print(f"[args] {{'e01_path': '{e01_path}', 'offset': '{offset}', 'inode': '{inode}'}}")
-        current_output = _fls_raw(e01_path, offset, inode)
-        print(f"\n[resultado:fls '{component}']")
-        print(shorten_text(current_output))
-
-    return current_output
 
 
 # =========================
@@ -172,8 +51,7 @@ def explore_disk(e01_path: str = E01_DEFAULT, path: str = "/") -> str:
 # =========================
 
 TOOLS = [
-    list_dir,
-    explore_disk,
+    bash_cmd,
 ]
 
 
@@ -181,24 +59,35 @@ TOOLS = [
 # Prompt
 # =========================
 
-SYSTEM_PROMPT = f"""
+SYSTEM_PROMPT = """
 És um assistente forense especializado em análise de imagens de disco.
 
 Tens acesso a estas tools:
 
-1. list_dir(path)
-   Usa quando o utilizador perguntar sobre o container ou a pasta /evidence do sistema de ficheiros do container.
-   Exemplos: "o que existe em /evidence", "que ficheiros de imagem tens", "lista /evidence".
-
-2. explore_disk(e01_path, path)
-   Usa quando o utilizador perguntar sobre o INTERIOR de uma imagem de disco (.E01).
-   Exemplos: "que ficheiros existem na raiz da imagem", "o que existe na pasta Windows", "lista USERS".
-   - e01_path: usa {E01_DEFAULT} se o utilizador não indicar outro.
-   - path: "/" para a raiz da imagem; "Windows", "USERS", "USERS/JimmyWilson" para subpastas.
+1. bash_cmd(command)
+    Executa texto bash ad-hoc diretamente no container.
+    - command: comando bash (ex: "ls -la /evidence", "fls -i ewf -o 65664 /evidence/2020JimmyWilson.E01").
+    - timeout: opcional, em segundos.
 
 Regras:
-- Não uses explore_disk para perguntas sobre o container.
-- Não uses list_dir para explorar o interior de uma imagem.
+- Usa esta tool para executar comandos e depois responde com base no output.
+- Quando uma pergunta exigir vários passos, encadeia numa única chamada com `&&`, `;` e pipes `|`.
+- Quando precisares separar outputs por etapa, usa `echo` entre comandos para marcar secções.
+- Em pipelines, nunca uses `grep -r`; usa `grep` simples para filtrar o output do comando anterior.
+- Exemplo correto para raiz da partição: `fls -i ewf -o <offset> <e01>` (sem grep) ou `fls ... | grep '^d/'`.
+- Se for necessário, aumenta `timeout` para comandos mais longos.
+- `/evidence` é uma pasta montada com ficheiros de evidência, não um device block.
+- Para perguntas sobre partições de uma evidência, usa este fluxo:
+    1) listar ficheiros em `/evidence` para encontrar `.E01`
+    2) correr `mmls -i ewf /evidence/<ficheiro>.E01`
+- Se a pergunta for sobre partições forenses, nunca uses `lsblk`, `fdisk` ou `parted` para inferir a resposta.
+- Só usa `lsblk`, `fdisk` ou `parted` quando o utilizador pedir explicitamente dispositivos do sistema (`/dev/*`).
+- Para perguntas sobre utilizadores na imagem ("quais users", "quantos users"), segue OBRIGATORIAMENTE este fluxo:
+    1) encontrar o ficheiro `.E01` em `/evidence`
+    2) obter offset principal com `mmls -i ewf`
+    3) listar recursivamente com `fls -r -i ewf -o <offset> <e01>` e extrair nomes de perfis em `/Users/...`
+- Nunca uses `getent passwd`, `/etc/passwd` ou equivalentes para responder sobre utilizadores da imagem.
+- Quando responderes "quantos", indica também os nomes encontrados (ou diz explicitamente que não encontrou nenhum).
 - Baseia-te APENAS no output das tools para responder.
 - Não respondas com JSON.
 """
@@ -284,11 +173,8 @@ def print_step(text: str):
 
 
 def print_tool_call(tool_name: str, args: dict):
-    if tool_name == "explore_disk":
-        # os passos são impressos dentro da própria tool
-        return
-    elif tool_name == "list_dir":
-        print_step(f"A listar '{args.get('path', '/evidence')}' no container...")
+    if tool_name == "bash_cmd":
+        print_step("A executar comando bash no container...")
     else:
         print_step(f"A executar tool: {tool_name}")
 
@@ -301,10 +187,7 @@ def print_tool_result(tool_name: str, content: str):
 
     if is_error_text(text):
         print(f"\n[aviso:{tool_name}] tentativa falhou, a corrigir...")
-        return
-
-    # explore_disk já imprimiu tudo internamente — não repetir
-    if tool_name == "explore_disk":
+        print(shorten_text(text, max_len=600))
         return
 
     print(f"\n[resultado:{tool_name}]")
