@@ -1,10 +1,15 @@
+import base64
+import json
 import os
+import re
 import subprocess
+from typing import List, Literal, Optional
 
-from langchain.agents import create_agent
+from langchain_core.messages import HumanMessage
 from langchain_ollama import ChatOllama
+from pydantic import BaseModel, Field
 
-from tools.commands import bash_cmd
+from mcp_local import LocalMCPClient, create_default_server
 
 
 # =========================
@@ -22,6 +27,83 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL") or "llama3.1"
 
 
 # =========================
+# Structured decision model
+# 
+VISUAL_INTENTS = [
+    "general_description",
+    "object_presence",
+    "object_location",
+    "forensic_trace_detection",
+    "scene_relationships",
+]
+
+ARTIFACT_INTENTS = [
+    "directory_listing",
+    "image_partition_inspection",
+    "partition_root_listing",
+    "user_enumeration",
+    "path_lookup",
+    "file_search",
+    "timeline_lookup",
+    "artifact_lookup",
+    "insufficient_evidence",
+    "unsafe_inference",
+]
+
+ALLOWED_DOMAINS = ["visual", "artifact"]
+ALLOWED_INTENTS = VISUAL_INTENTS + ARTIFACT_INTENTS
+
+
+class DecisionEntities(BaseModel):
+    user: Optional[str] = None
+    application: Optional[str] = None
+    target_path: Optional[str] = None
+    action: Optional[str] = None
+    path_scope: Optional[Literal["host_filesystem", "forensic_image", "user_profile", "unknown"]] = None
+    artifact_type: Optional[str] = None
+    timestamp_target: Optional[str] = None
+    operation: Optional[Literal["list", "find", "inspect", "inspect_partitions", "enumerate_users", "query_last_used", "query_timestamp"]] = None
+    reference_source: Optional[str] = None
+
+
+class ConversationState(BaseModel):
+    last_path: Optional[str] = None
+    last_artifact: Optional[str] = None
+    last_artifact_type: Optional[str] = None
+    last_user: Optional[str] = None
+
+
+class OrchestrationDecision(BaseModel):
+    domain: Literal["visual", "artifact"]
+    intent: Literal[
+        "general_description",
+        "object_presence",
+        "object_location",
+        "forensic_trace_detection",
+        "scene_relationships",
+        "directory_listing",
+        "image_partition_inspection",
+        "partition_root_listing",
+        "user_enumeration",
+        "path_lookup",
+        "file_search",
+        "timeline_lookup",
+        "artifact_lookup",
+        "insufficient_evidence",
+        "unsafe_inference",
+    ]
+    rewritten_question: str
+    entities: DecisionEntities = Field(default_factory=DecisionEntities)
+    constraints: List[str] = Field(default_factory=list)
+    tool_plan: List[str] = Field(default_factory=list)
+    needs_image: bool = Field(default=False)
+
+
+ALLOWED_TEMPLATE_NAMES = set(ALLOWED_INTENTS + ["safe_generic_visual_analysis"])
+RESULT_OK = "ok"
+
+
+# =========================
 # Helpers
 # =========================
 
@@ -31,7 +113,7 @@ def shorten_text(text: str, max_len: int = 1800) -> str:
     text = str(text)
     if len(text) <= max_len:
         return text
-    return text[:max_len] + "\n...[output truncado]..."
+    return text[:max_len] + "\n...[truncated]..."
 
 
 def is_error_text(text: str) -> bool:
@@ -46,51 +128,125 @@ def is_error_text(text: str) -> bool:
     )
 
 
+def _read_image_as_data_url(image_path: str) -> str:
+    with open(image_path, "rb") as image_file:
+        encoded = base64.b64encode(image_file.read()).decode("ascii")
+
+    ext = os.path.splitext(image_path)[1].lower()
+    mime = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+    }.get(ext, "application/octet-stream")
+    return f"data:{mime};base64,{encoded}"
+
+
+def _history_to_text(history: List[str], max_turns: int = 8) -> str:
+    if not history:
+        return ""
+    return "\n".join(history[-max_turns:])
+
+
+def _normalize_template_name(template_name: str) -> str:
+    raw = (template_name or "").strip().lower().replace(" ", "_")
+    aliases = {
+        "insufficient_visual_evidence": "insufficient_evidence",
+        "directory_navigation": "directory_listing",
+        "evidence_inventory": "artifact_lookup",
+    }
+    normalized = aliases.get(raw, raw)
+    return normalized if normalized in ALLOWED_TEMPLATE_NAMES else "safe_generic_visual_analysis"
+
+
+def _intent_to_template(intent: str) -> str:
+    candidate = _normalize_template_name(intent)
+    return candidate if candidate in ALLOWED_TEMPLATE_NAMES else "safe_generic_visual_analysis"
+
+
+def _find_default_forensic_image_path() -> Optional[str]:
+    try:
+        if not os.path.isdir(_EVIDENCE_DIR):
+            return None
+        candidates = []
+        for root, _, files in os.walk(_EVIDENCE_DIR):
+            for filename in files:
+                if filename.lower().endswith((".e01", ".dd", ".img", ".raw", ".001")):
+                    full = os.path.join(root, filename)
+                    rel = os.path.relpath(full, _PROJECT_ROOT).replace("\\", "/")
+                    candidates.append("/" + rel)
+        if not candidates:
+            return None
+        candidates.sort()
+        return candidates[0]
+    except Exception:
+        return None
+
+
 # =========================
-# Tool list
+# Classification prompt
 # =========================
 
-TOOLS = [
-    bash_cmd,
-]
+CLASSIFIER_PROMPT = """
+You are the orchestration agent for a forensic analysis system.
 
+There are two domains:
+1) visual questions about the current image
+2) artifact questions about directories, files, application usage, and timelines
 
-# =========================
-# Prompt
-# =========================
+For each user question:
+1) classify domain as either visual or artifact
+2) classify intent using the allowed intents
+3) extract entities
+4) produce a tool_plan
+5) set needs_image
 
-SYSTEM_PROMPT = """
-És um assistente forense especializado em análise de imagens de disco.
+Allowed intents:
+- general_description
+- object_presence
+- object_location
+- forensic_trace_detection
+- scene_relationships
+- directory_listing
+- image_partition_inspection
+- partition_root_listing
+- user_enumeration
+- path_lookup
+- file_search
+- timeline_lookup
+- artifact_lookup
+- insufficient_evidence
+- unsafe_inference
 
-Tens acesso a estas tools:
+Return structured fields:
+- domain
+- intent
+- rewritten_question
+- entities: user, application, target_path, path_scope, action, artifact_type, timestamp_target, operation
+- constraints
+- tool_plan
+- needs_image
 
-1. bash_cmd(command)
-    Executa texto bash ad-hoc diretamente no container.
-    - command: comando bash (ex: "ls -la /evidence", "fls -i ewf -o 65664 /evidence/2020JimmyWilson.E01").
-    - timeout: opcional, em segundos.
-
-Regras:
-- Usa esta tool para executar comandos e depois responde com base no output.
-- Quando uma pergunta exigir vários passos, encadeia numa única chamada com `&&`, `;` e pipes `|`.
-- Quando precisares separar outputs por etapa, usa `echo` entre comandos para marcar secções.
-- Em pipelines, nunca uses `grep -r`; usa `grep` simples para filtrar o output do comando anterior.
-- Exemplo correto para raiz da partição: `fls -i ewf -o <offset> <e01>` (sem grep) ou `fls ... | grep '^d/'`.
-- Se for necessário, aumenta `timeout` para comandos mais longos.
-- `/evidence` é uma pasta montada com ficheiros de evidência, não um device block.
-- Para perguntas sobre partições de uma evidência, usa este fluxo:
-    1) listar ficheiros em `/evidence` para encontrar `.E01`
-    2) correr `mmls -i ewf /evidence/<ficheiro>.E01`
-- Se a pergunta for sobre partições forenses, nunca uses `lsblk`, `fdisk` ou `parted` para inferir a resposta.
-- Só usa `lsblk`, `fdisk` ou `parted` quando o utilizador pedir explicitamente dispositivos do sistema (`/dev/*`).
-- Para perguntas sobre utilizadores na imagem ("quais users", "quantos users"), segue OBRIGATORIAMENTE este fluxo:
-    1) encontrar o ficheiro `.E01` em `/evidence`
-    2) obter offset principal com `mmls -i ewf`
-    3) listar recursivamente com `fls -r -i ewf -o <offset> <e01>` e extrair nomes de perfis em `/Users/...`
-- Nunca uses `getent passwd`, `/etc/passwd` ou equivalentes para responder sobre utilizadores da imagem.
-- Quando responderes "quantos", indica também os nomes encontrados (ou diz explicitamente que não encontrou nenhum).
-- Baseia-te APENAS no output das tools para responder.
-- Não respondas com JSON.
+Critical classification rules:
+- If query refers to Desktop, Downloads, Documents, or folders, map to target_path (never application).
+- For literal paths (/evidence, /tmp, ./output, ../data), set path_scope=host_filesystem and keep application=null.
+- If query asks to list files in a folder, use intent=directory_listing and operation=list.
+- For follow-up partition questions ("que particoes existem?", "what partitions are there?") with an implicit prior forensic image reference, use intent=image_partition_inspection and operation=inspect_partitions.
+- For questions about files in the root of the primary partition ("ficheiros na raiz da particao principal", "files in the root of the primary partition"), use intent=partition_root_listing.
+- For user profile inventory questions ("quais os users que existem?", "which users exist?", "list users", "show user profiles"), use intent=user_enumeration and operation=enumerate_users.
+- If query asks when an app was last opened, use intent=timeline_lookup and operation=query_last_used.
+- Artifact queries must use needs_image=false.
+- Visual queries must use needs_image=true.
+- For artifact queries, tool_plan must include specific MCP tools and not only generic reasoning.
 """
+
+
+SAFE_GENERIC_TEMPLATE = (
+    "Analyze only visible evidence in the image. "
+    "If uncertainty exists, state it explicitly. "
+    "Do not infer intent, identity, chronology, or hidden facts."
+)
 
 
 # =========================
@@ -98,23 +254,22 @@ Regras:
 # =========================
 
 def ensure_container():
-    running = subprocess.run(
-        ["docker", "ps", "-q", "--filter", f"name=^{_DOCKER_CONTAINER}$"],
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-    if running:
-        print(f"[docker] Container '{_DOCKER_CONTAINER}' já está a correr.")
+    try:
+        running = subprocess.run(
+            ["docker", "ps", "-q", "--filter", f"name=^{_DOCKER_CONTAINER}$"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except FileNotFoundError:
+        print("[docker] Warning: Docker is unavailable. Continuing without container startup.")
         return
 
-    subprocess.run(
-        ["docker", "rm", "-f", _DOCKER_CONTAINER],
-        capture_output=True,
-        text=True,
-    )
+    if running:
+        print(f"[docker] Container '{_DOCKER_CONTAINER}' is already running.")
+        return
 
-    print(f"[docker] A arrancar container '{_DOCKER_CONTAINER}' com imagem '{_DOCKER_IMAGE}'...")
+    subprocess.run(["docker", "rm", "-f", _DOCKER_CONTAINER], capture_output=True, text=True)
+    print(f"[docker] Starting container '{_DOCKER_CONTAINER}' from image '{_DOCKER_IMAGE}'...")
 
     result = subprocess.run(
         [
@@ -134,18 +289,440 @@ def ensure_container():
     )
 
     if result.returncode != 0:
-        raise RuntimeError(f"Falha ao arrancar o container:\n{result.stderr}")
+        print(f"[docker] Warning: failed to start container: {result.stderr.strip()}")
+        print("[docker] Continuing application startup.")
+        return
 
-    print("[docker] Container pronto.\n")
+    print("[docker] Container ready.\n")
 
 
 # =========================
-# Agent
+# Decision normalization
 # =========================
 
-def build_agent():
+def _normalize_decision(raw_plan: dict) -> OrchestrationDecision:
+    payload = dict(raw_plan or {})
+
+    domain = str(payload.get("domain") or "").strip().lower()
+    if domain not in ALLOWED_DOMAINS:
+        domain = "artifact"
+
+    intent = str(payload.get("intent") or "").strip()
+    if intent not in ALLOWED_INTENTS:
+        intent = "insufficient_evidence"
+
+    rewritten_question = str(payload.get("rewritten_question") or "").strip()
+    if not rewritten_question:
+        rewritten_question = "Find the requested evidence safely."
+
+    entities_payload = payload.get("entities")
+    if not isinstance(entities_payload, dict):
+        entities_payload = {}
+
+    constraints = payload.get("constraints")
+    if not isinstance(constraints, list):
+        constraints = []
+    constraints = [str(item).strip() for item in constraints if str(item).strip()]
+
+    tool_plan = payload.get("tool_plan")
+    if not isinstance(tool_plan, list):
+        tool_plan = []
+    tool_plan = [str(item).strip() for item in tool_plan if str(item).strip()]
+
+    needs_image = bool(payload.get("needs_image", domain == "visual"))
+
+    return OrchestrationDecision(
+        domain=domain,
+        intent=intent,
+        rewritten_question=rewritten_question,
+        entities=DecisionEntities.model_validate(entities_payload),
+        constraints=constraints,
+        tool_plan=tool_plan,
+        needs_image=needs_image,
+    )
+
+
+def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str) -> OrchestrationDecision:
+    lowered_q = (question or "").lower()
+    folder_tokens = ["desktop", "downloads", "documents", "documentos", "music", "pictures", "videos"]
+    special_folders = {"desktop", "downloads", "documents", "documentos", "music", "pictures", "videos"}
+    file_words = ["ficheiro", "ficheiros", "file", "files"]
+    folder_words = ["pasta", "pastas", "folder", "folders", "diretoria", "diretório", "directory"]
+
+    literal_path = _extract_literal_path(question)
+
+    if decision.entities.user and decision.entities.user.strip().lower() in {"unknown", "none", "null", "n/a"}:
+        decision.entities.user = None
+
+    # Never treat folder names as application entities.
+    if decision.entities.application and decision.entities.application.lower() in folder_tokens:
+        if not decision.entities.target_path:
+            decision.entities.target_path = decision.entities.application
+        decision.entities.application = None
+
+    for token in folder_tokens:
+        if token in lowered_q and not decision.entities.target_path:
+            decision.entities.target_path = token.capitalize()
+
+    if any(word in lowered_q for word in file_words) and not any(word in lowered_q for word in folder_words):
+        decision.entities.artifact_type = "file"
+    elif any(word in lowered_q for word in folder_words):
+        decision.entities.artifact_type = "folder"
+
+    if literal_path:
+        decision.entities.target_path = literal_path
+        decision.entities.path_scope = "host_filesystem"
+        decision.entities.application = None
+        # Keep user if this is actually a user-profile folder request like '/Desktop do Jimmy Wilson'.
+        if not decision.entities.user:
+            decision.entities.user = None
+        if decision.entities.operation is None:
+            decision.entities.operation = "list"
+        if decision.entities.artifact_type is None:
+            decision.entities.artifact_type = "filesystem_entry"
+
+    # If a user is present and folder target is a known user profile folder, force forensic user-profile scope.
+    normalized_target = (decision.entities.target_path or "").strip().lstrip("/").lower()
+    if decision.domain == "artifact" and decision.entities.user and normalized_target in special_folders:
+        canonical_folder = "Documents" if normalized_target == "documentos" else normalized_target.capitalize()
+        decision.entities.target_path = canonical_folder
+        decision.entities.path_scope = "user_profile"
+        decision.entities.artifact_type = decision.entities.artifact_type or "folder"
+        decision.entities.operation = "list"
+        decision.intent = "directory_listing"
+        decision.needs_image = False
+
+    # Domain correction: questions about files/documents in the forensic image are artifact queries.
+    artifact_image_markers = ["imagem de evid", "forensic image", "nesta imagem", "this image"]
+    artifact_file_markers = ["document", "ficheiro", "file", "personal", "pessoal", "users", "parti"]
+    if decision.domain == "visual":
+        if any(marker in lowered_q for marker in artifact_image_markers) and any(
+            marker in lowered_q for marker in artifact_file_markers
+        ):
+            decision.domain = "artifact"
+            decision.intent = "artifact_lookup"
+            decision.needs_image = False
+            if not decision.entities.operation:
+                decision.entities.operation = "find"
+            if not decision.entities.path_scope:
+                decision.entities.path_scope = "forensic_image"
+
+    # For forensic-image artifact questions, keep target_path anchored to the current image by default.
+    if decision.domain == "artifact" and decision.entities.path_scope == "forensic_image":
+        existing_target = (decision.entities.target_path or "").strip()
+        if existing_target and not _is_forensic_image_path(existing_target):
+            if not decision.entities.action:
+                decision.entities.action = existing_target
+            existing_target = ""
+
+        if not existing_target or existing_target in {"/", ".", "./"}:
+            default_image = _find_default_forensic_image_path()
+            if default_image:
+                decision.entities.target_path = default_image
+
+    if decision.domain == "artifact":
+        decision.needs_image = False
+
+    # Intent refinements for artifact branch.
+    if decision.domain == "artifact":
+        if decision.entities.path_scope == "host_filesystem":
+            decision.intent = "directory_listing"
+
+        if any(token in lowered_q for token in ["parti", "partition", "/evidence", "evidence"]):
+            if not decision.entities.user:
+                decision.intent = "artifact_lookup"
+                if not decision.entities.operation:
+                    decision.entities.operation = "inspect"
+
+        if decision.entities.path_scope == "host_filesystem":
+            decision.intent = "directory_listing"
+            decision.entities.operation = "list"
+
+        if decision.entities.operation == "list" or "lista" in lowered_q or "list" in lowered_q:
+            if decision.entities.target_path:
+                decision.intent = "directory_listing"
+        if decision.entities.operation == "query_last_used" or "ultima vez" in lowered_q or "last time" in lowered_q:
+            decision.intent = "timeline_lookup"
+        if decision.entities.operation == "find" and decision.intent not in ("timeline_lookup", "directory_listing"):
+            decision.intent = "file_search"
+
+    return decision
+
+
+def _is_partition_question(question: str) -> bool:
+    lowered = (question or "").lower()
+    return any(token in lowered for token in ["partition", "parti", "parti\u00e7", "particao", "parti\u00e7\u00e3o", "volumes", "layout"])
+
+
+def _is_partition_root_listing_question(question: str) -> bool:
+    lowered = (question or "").lower()
+    partition_markers = ["partition", "parti", "parti\u00e7", "particao", "parti\u00e7\u00e3o", "particao principal", "parti\u00e7\u00e3o principal"]
+    root_markers = ["root", "raiz"]
+    file_markers = ["files", "ficheiros", "file", "entries", "conte\u00fado", "conteudo"]
+    return (
+        any(marker in lowered for marker in partition_markers)
+        and any(marker in lowered for marker in root_markers)
+        and any(marker in lowered for marker in file_markers)
+    )
+
+
+def _is_user_enumeration_question(question: str) -> bool:
+    lowered = (question or "").lower()
+    user_tokens = ["users", "user profiles", "user profile", "profiles", "usuarios", "utilizadores", "usu\u00e1rios", "users que existem"]
+    if any(token in lowered for token in user_tokens):
+        return True
+    return bool(re.search(r"\b(which|quais|listar|list|show)\b.*\b(users?|profiles?)\b", lowered))
+
+
+def _is_forensic_image_path(path: Optional[str]) -> bool:
+    if not path:
+        return False
+    lowered = path.lower()
+    return lowered.endswith((".e01", ".dd", ".img", ".raw", ".001"))
+
+
+def _apply_conversation_reference_rules(
+    decision: OrchestrationDecision,
+    question: str,
+    conversation_state: Optional[ConversationState],
+) -> OrchestrationDecision:
+    if decision.domain != "artifact":
+        return decision
+
+    if not conversation_state:
+        return decision
+
+    if _is_partition_root_listing_question(question):
+        resolved_target = decision.entities.target_path
+        reference_source = None
+
+        if resolved_target and not _is_forensic_image_path(resolved_target):
+            resolved_target = None
+
+        if (
+            not resolved_target
+            and conversation_state.last_artifact_type == "forensic_image"
+            and _is_forensic_image_path(conversation_state.last_artifact)
+        ):
+            resolved_target = conversation_state.last_artifact
+            reference_source = "conversation_context"
+
+        if not resolved_target:
+            default_image = _find_default_forensic_image_path()
+            if default_image:
+                resolved_target = default_image
+                reference_source = reference_source or "case_context"
+
+        if resolved_target:
+            decision.intent = "partition_root_listing"
+            decision.entities.target_path = resolved_target
+            decision.entities.path_scope = "forensic_image"
+            decision.entities.artifact_type = "filesystem_entry"
+            decision.entities.operation = "list"
+            decision.entities.application = None
+            decision.entities.reference_source = reference_source
+            if "use the most recent forensic image referenced in the conversation" not in decision.constraints:
+                decision.constraints.append("use the most recent forensic image referenced in the conversation")
+            if "return root entries from the primary partition only" not in decision.constraints:
+                decision.constraints.append("return root entries from the primary partition only")
+            decision.rewritten_question = (
+                f"List root directory entries from the primary partition in forensic image {resolved_target}."
+            )
+
+    elif _is_partition_question(question):
+        resolved_target = decision.entities.target_path
+        reference_source = None
+
+        # Partition inspection requires an image file, never a directory path.
+        if resolved_target and not _is_forensic_image_path(resolved_target):
+            resolved_target = None
+
+        if (
+            not resolved_target
+            and conversation_state.last_artifact_type == "forensic_image"
+            and _is_forensic_image_path(conversation_state.last_artifact)
+        ):
+            resolved_target = conversation_state.last_artifact
+            reference_source = "conversation_context"
+
+        if not resolved_target:
+            default_image = _find_default_forensic_image_path()
+            if default_image:
+                resolved_target = default_image
+                reference_source = reference_source or "case_context"
+
+        if resolved_target and (
+            _is_forensic_image_path(resolved_target)
+            or conversation_state.last_artifact == resolved_target
+            or conversation_state.last_artifact_type == "forensic_image"
+        ):
+            decision.intent = "image_partition_inspection"
+            decision.entities.target_path = resolved_target
+            decision.entities.path_scope = "host_filesystem"
+            decision.entities.artifact_type = "forensic_image"
+            decision.entities.operation = "inspect_partitions"
+            decision.entities.application = None
+            if conversation_state.last_user and not decision.entities.user:
+                decision.entities.user = conversation_state.last_user
+            if reference_source:
+                decision.entities.reference_source = reference_source
+
+            if reference_source and "use the most recent forensic image referenced in the conversation" not in decision.constraints:
+                decision.constraints.append("use the most recent forensic image referenced in the conversation")
+            if "return partition information only" not in decision.constraints:
+                decision.constraints.append("return partition information only")
+            decision.rewritten_question = (
+                f"List the partitions contained in the forensic image {resolved_target}."
+            )
+
+    if _is_user_enumeration_question(question):
+        decision.intent = "user_enumeration"
+        decision.entities.user = None
+        decision.entities.application = None
+        decision.entities.path_scope = "forensic_image"
+        decision.entities.artifact_type = "user_profile"
+        decision.entities.operation = "enumerate_users"
+
+        if conversation_state.last_artifact_type == "forensic_image" and conversation_state.last_artifact:
+            decision.entities.target_path = conversation_state.last_artifact
+            decision.entities.reference_source = "conversation_context"
+        else:
+            decision.entities.target_path = _find_default_forensic_image_path()
+            if decision.entities.target_path:
+                decision.entities.reference_source = "case_context"
+
+        if "use the current forensic image or case context" not in decision.constraints:
+            decision.constraints.append("use the current forensic image or case context")
+        if "return only identified user profiles" not in decision.constraints:
+            decision.constraints.append("return only identified user profiles")
+
+        decision.rewritten_question = "List the user profiles present in the current forensic image or case evidence."
+
+    return decision
+
+
+def _derive_artifact_tool_plan(decision: OrchestrationDecision) -> List[str]:
+    entities = decision.entities
+
+    if decision.intent == "image_partition_inspection":
+        return ["inspect_image_partitions"]
+    if decision.intent == "partition_root_listing":
+        return ["list_primary_partition_root"]
+    if decision.intent == "user_enumeration":
+        return ["list_users"]
+
+    if entities.path_scope == "host_filesystem":
+        if decision.intent in ("path_lookup",):
+            return ["stat_path"]
+        return ["list_directory"]
+
+    if decision.intent == "directory_listing":
+        if not entities.user:
+            return ["get_case_context", "query_evidence"]
+        return ["resolve_user_profile", "get_special_folder", "list_user_directory"]
+    if decision.intent == "path_lookup":
+        if not entities.user:
+            return ["get_case_context", "query_evidence"]
+        return ["resolve_user_profile", "get_special_folder"]
+    if decision.intent == "file_search":
+        if not entities.user:
+            return ["get_case_context", "query_evidence"]
+        return ["resolve_user_profile", "search_user_files"]
+    if decision.intent == "timeline_lookup":
+        if not entities.user:
+            return ["query_timeline"]
+        if entities.application:
+            return ["resolve_user_profile", "get_last_app_execution"]
+        return ["resolve_user_profile", "query_timeline"]
+    if decision.intent == "artifact_lookup":
+        if not entities.user:
+            return ["get_case_context", "query_evidence"]
+        if entities.target_path:
+            return ["resolve_user_profile", "get_special_folder", "list_user_directory"]
+        if entities.application:
+            return ["resolve_user_profile", "get_last_app_execution"]
+        return ["resolve_user_profile", "query_timeline"]
+    if not entities.user:
+        return ["get_case_context", "query_evidence"]
+    return ["resolve_user_profile", "query_timeline"]
+
+
+def _apply_tool_plan_rules(decision: OrchestrationDecision) -> OrchestrationDecision:
+    if decision.domain == "artifact":
+        if decision.intent in {"image_partition_inspection", "partition_root_listing", "user_enumeration"}:
+            decision.tool_plan = _derive_artifact_tool_plan(decision)
+            return decision
+
+        if decision.entities.path_scope == "user_profile":
+            decision.tool_plan = _derive_artifact_tool_plan(decision)
+            return decision
+
+        user_specific = {
+            "resolve_user_profile",
+            "get_special_folder",
+            "list_user_directory",
+            "search_user_files",
+            "get_last_app_execution",
+        }
+        specific = {
+            "get_case_context",
+            "query_evidence",
+            "stat_path",
+            "list_directory",
+            "inspect_image_partitions",
+            "list_primary_partition_root",
+            "list_users",
+            "resolve_user_profile",
+            "get_special_folder",
+            "list_user_directory",
+            "search_user_files",
+            "get_last_app_execution",
+            "query_timeline",
+        }
+        has_specific = any(tool in specific for tool in decision.tool_plan)
+        if not has_specific:
+            decision.tool_plan = _derive_artifact_tool_plan(decision)
+        else:
+            # Keep only known artifact tools if planner mixes generic placeholders.
+            cleaned = [tool for tool in decision.tool_plan if tool in specific]
+            if not decision.entities.user and any(tool in user_specific for tool in cleaned):
+                decision.tool_plan = _derive_artifact_tool_plan(decision)
+            else:
+                decision.tool_plan = cleaned or _derive_artifact_tool_plan(decision)
+
+        if decision.entities.path_scope == "host_filesystem" and decision.intent != "image_partition_inspection":
+            decision.tool_plan = _derive_artifact_tool_plan(decision)
+
+    if decision.domain == "visual":
+        decision.needs_image = True
+        if "get_current_image" not in decision.tool_plan:
+            decision.tool_plan = ["get_current_image"]
+
+    return decision
+
+
+def _build_classifier(llm: ChatOllama):
+    classifier_llm = llm.with_structured_output(OrchestrationDecision)
+
+    def classify_question(question: str, history: str):
+        prompt = (
+            f"{CLASSIFIER_PROMPT}\n\n"
+            f"Conversation history:\n{history or '(empty)'}\n\n"
+            f"User question:\n{question}"
+        )
+        plan = classifier_llm.invoke(prompt)
+        return plan.model_dump()
+
+    return classify_question
+
+
+# =========================
+# Build pipeline
+# =========================
+
+def build_pipeline():
     if not OLLAMA_MODEL:
-        raise ValueError("OLLAMA_MODEL está vazio.")
+        raise ValueError("OLLAMA_MODEL is empty.")
 
     print(f"[ollama] base_url={OLLAMA_BASE_URL}")
     print(f"[ollama] model={OLLAMA_MODEL}")
@@ -157,11 +734,528 @@ def build_agent():
         validate_model_on_init=False,
     )
 
-    return create_agent(
-        model=llm,
-        tools=TOOLS,
-        system_prompt=SYSTEM_PROMPT,
+    classify_question = _build_classifier(llm)
+    mcp_server = create_default_server(
+        evidence_dir=_EVIDENCE_DIR,
+        classify_question=classify_question,
     )
+    mcp_client = LocalMCPClient(mcp_server)
+    return llm, mcp_client
+
+
+# =========================
+# Artifact execution
+# =========================
+
+def _execute_artifact_tool(
+    mcp_client: LocalMCPClient,
+    tool_name: str,
+    entities: DecisionEntities,
+    rewritten_question: str,
+) -> dict:
+    user = entities.user or ""
+    target_path = entities.target_path or "Desktop"
+
+    if tool_name == "stat_path":
+        return mcp_client.stat_path(target_path)
+    if tool_name == "list_directory":
+        include_dirs = entities.artifact_type != "file"
+        return mcp_client.list_directory(
+            target_path,
+            recursive=False,
+            include_dirs=bool(include_dirs),
+        )
+    if tool_name == "inspect_image_partitions":
+        return mcp_client.inspect_image_partitions(target_path)
+    if tool_name == "list_primary_partition_root":
+        image_path = target_path if _is_forensic_image_path(target_path) else None
+        return mcp_client.list_primary_partition_root(image_path=image_path)
+    if tool_name == "list_users":
+        image_path = target_path if _is_forensic_image_path(target_path) else None
+        return mcp_client.list_users(image_path=image_path)
+
+    if tool_name == "resolve_user_profile":
+        if hasattr(mcp_client, "resolve_user_profile"):
+            return mcp_client.resolve_user_profile(user)
+        return {
+            "status": "ok",
+            "message": "Fallback artifact query executed for profile resolution.",
+            "data": {"output": mcp_client.query_evidence(rewritten_question)},
+        }
+    if tool_name == "get_special_folder":
+        if hasattr(mcp_client, "get_special_folder"):
+            return mcp_client.get_special_folder(user=user, folder_name=target_path)
+        return {
+            "status": "ok",
+            "message": "Fallback artifact query executed for folder resolution.",
+            "data": {"output": mcp_client.query_evidence(rewritten_question)},
+        }
+    if tool_name == "list_user_directory":
+        include_dirs = entities.artifact_type in (None, "directory", "folder")
+        if hasattr(mcp_client, "list_user_directory"):
+            return mcp_client.list_user_directory(
+                user=user,
+                folder_name=target_path,
+                include_dirs=bool(include_dirs),
+                recursive=False,
+            )
+        return {
+            "status": "ok",
+            "message": "Fallback artifact query executed for directory listing.",
+            "data": {"output": mcp_client.query_evidence(rewritten_question)},
+        }
+    if tool_name == "search_user_files":
+        pattern = entities.action if entities.action and "." in entities.action else None
+        if hasattr(mcp_client, "search_user_files"):
+            return mcp_client.search_user_files(user=user, path=entities.target_path, pattern=pattern)
+        return {
+            "status": "ok",
+            "message": "Fallback artifact query executed for file search.",
+            "data": {"output": mcp_client.query_evidence(rewritten_question)},
+        }
+    if tool_name == "get_last_app_execution":
+        if hasattr(mcp_client, "get_last_app_execution"):
+            return mcp_client.get_last_app_execution(user=user, app_name=entities.application or "")
+        return {
+            "status": "ok",
+            "message": "Fallback artifact query executed for app execution lookup.",
+            "data": {"output": mcp_client.query_evidence(rewritten_question)},
+        }
+    if tool_name == "query_timeline":
+        if hasattr(mcp_client, "query_timeline"):
+            return mcp_client.query_timeline(
+                user=entities.user,
+                application=entities.application,
+                action=entities.action,
+            )
+        return {
+            "status": "ok",
+            "message": "Fallback artifact query executed for timeline lookup.",
+            "data": {"output": mcp_client.query_evidence(rewritten_question)},
+        }
+    if tool_name == "get_case_context":
+        return {
+            "status": "ok",
+            "message": "Case context retrieved.",
+            "data": {"context": mcp_client.get_case_context()},
+        }
+    if tool_name == "query_evidence":
+        return {
+            "status": "ok",
+            "message": "Evidence query executed.",
+            "data": {"output": mcp_client.query_evidence(rewritten_question)},
+        }
+
+    return {
+        "status": "tool_error",
+        "message": f"Unknown artifact tool '{tool_name}'.",
+        "data": {},
+    }
+
+
+def _artifact_failure_message(status: str, message: str) -> str:
+    mapping = {
+        "user_not_found": "The requested user profile was not found in the evidence image.",
+        "path_not_resolved": "The requested folder or path could not be resolved for that user.",
+        "directory_empty": "The target directory exists but no entries matched the requested filters.",
+        "artifact_not_found": "The artifact was not found in the indexed evidence set.",
+        "insufficient_index_data": "Evidence indexes are insufficient to answer this query reliably.",
+        "tool_error": "The forensic toolchain failed while processing the query.",
+    }
+    base = mapping.get(status, "No relevant evidence was found for this artifact query.")
+    if message:
+        return f"{base} Details: {message}"
+    return base
+
+
+def _run_artifact_flow(
+    llm: ChatOllama,
+    mcp_client: LocalMCPClient,
+    decision: OrchestrationDecision,
+    conversation_state: Optional[ConversationState] = None,
+) -> tuple[OrchestrationDecision, str]:
+    if decision.intent == "image_partition_inspection":
+        return _run_image_partition_inspection_flow(mcp_client, decision, conversation_state)
+    if decision.intent == "partition_root_listing":
+        return _run_partition_root_listing_flow(mcp_client, decision, conversation_state)
+    if decision.intent == "user_enumeration":
+        return _run_user_enumeration_flow(mcp_client, decision, conversation_state)
+
+    if decision.entities.path_scope == "host_filesystem":
+        # Literal filesystem operations must not be mixed with case context or forensic-image expansion.
+        return _run_literal_path_flow(mcp_client, decision, conversation_state)
+
+    case_context = mcp_client.get_case_context()
+    template_payload = mcp_client.get_prompt_template(intent=_intent_to_template(decision.intent))
+    template_text = template_payload.get("template") if isinstance(template_payload, dict) else SAFE_GENERIC_TEMPLATE
+    template_name = _normalize_template_name(
+        template_payload.get("name") if isinstance(template_payload, dict) else decision.intent
+    )
+
+    tool_results = []
+    for tool_name in decision.tool_plan:
+        result = _execute_artifact_tool(
+            mcp_client,
+            tool_name,
+            decision.entities,
+            decision.rewritten_question,
+        )
+        tool_results.append({"tool": tool_name, "result": result})
+
+    ok_results = [item for item in tool_results if item["result"].get("status") == RESULT_OK]
+    if not ok_results:
+        first = tool_results[0]["result"] if tool_results else {"status": "artifact_not_found", "message": "No tool result."}
+        return decision, _artifact_failure_message(first.get("status", "artifact_not_found"), first.get("message", ""))
+
+    if decision.intent == "directory_listing":
+        direct_answer = _build_directory_listing_answer(tool_results, decision)
+        if direct_answer:
+            return decision, direct_answer
+
+    final_instruction = (
+        "You are a forensic artifact analysis assistant.\n"
+        "Task: answer only from MCP tool outputs.\n\n"
+        f"Prompt template ({template_name}): {template_text}\n\n"
+        f"Case context:\n{shorten_text(case_context, max_len=1400)}\n\n"
+        f"Rewritten question:\n{decision.rewritten_question}\n\n"
+        "Tool results (JSON):\n"
+        f"{json.dumps(tool_results, ensure_ascii=False, indent=2)}\n\n"
+        "Response policy:\n"
+        "- Never invent timestamps, paths, or events.\n"
+        "- If status is not ok, explain the exact failure reason from status/message.\n"
+        "- Distinguish: user_not_found, path_not_resolved, directory_empty, artifact_not_found, insufficient_index_data, tool_error."
+    )
+    response = llm.invoke([HumanMessage(content=[{"type": "text", "text": final_instruction}])])
+    answer = (response.content if hasattr(response, "content") else str(response)).strip()
+    _update_conversation_state(conversation_state, decision, tool_results)
+    return decision, answer
+
+
+def _build_directory_listing_answer(tool_results: List[dict], decision: OrchestrationDecision) -> Optional[str]:
+    for item in reversed(tool_results):
+        result = item.get("result") or {}
+        if result.get("status") != "ok":
+            continue
+        entries = result.get("entries")
+        if not isinstance(entries, list):
+            continue
+
+        if not entries:
+            return "Directory exists but is empty."
+
+        include_files = decision.entities.artifact_type != "folder"
+        include_dirs = decision.entities.artifact_type != "file"
+
+        filtered = []
+        for entry in entries:
+            etype = entry.get("type")
+            if etype == "file" and include_files:
+                filtered.append(entry)
+            elif etype == "dir" and include_dirs:
+                filtered.append(entry)
+
+        if not filtered:
+            kind = "files" if decision.entities.artifact_type == "file" else "directories"
+            return f"No {kind} were found in the requested location."
+
+        lines = [f"- {entry.get('name')} ({entry.get('type')})" for entry in filtered]
+        return "\n".join(lines)
+
+    return None
+
+
+def _run_literal_path_flow(
+    mcp_client: LocalMCPClient,
+    decision: OrchestrationDecision,
+    conversation_state: Optional[ConversationState] = None,
+) -> tuple[OrchestrationDecision, str]:
+    results = []
+    for tool_name in decision.tool_plan:
+        result = _execute_artifact_tool(
+            mcp_client,
+            tool_name,
+            decision.entities,
+            decision.rewritten_question,
+        )
+        results.append({"tool": tool_name, "result": result})
+
+    _update_conversation_state(conversation_state, decision, results)
+
+    if not results:
+        return decision, "No filesystem tool was executed."
+
+    final = results[-1]["result"]
+    status = final.get("status")
+    if status == "ok":
+        if "entries" in final:
+            entries = final.get("entries", [])
+            if not entries:
+                return decision, "Directory exists but is empty."
+            lines = []
+            for entry in entries:
+                lines.append(f"- {entry.get('name')} ({entry.get('type')})")
+            return decision, "\n".join(lines)
+        if final.get("is_dir") is not None:
+            return decision, json.dumps(final, ensure_ascii=False, indent=2)
+
+    if status == "path_not_resolved":
+        return decision, f"Path not resolved: {final.get('message', 'Path does not exist.')}"
+    if status == "directory_empty":
+        return decision, "Directory exists but is empty."
+
+    return decision, f"Filesystem operation failed: {final.get('message', 'unknown error')}"
+
+
+def _run_image_partition_inspection_flow(
+    mcp_client: LocalMCPClient,
+    decision: OrchestrationDecision,
+    conversation_state: Optional[ConversationState] = None,
+) -> tuple[OrchestrationDecision, str]:
+    results = []
+    for tool_name in decision.tool_plan:
+        result = _execute_artifact_tool(
+            mcp_client,
+            tool_name,
+            decision.entities,
+            decision.rewritten_question,
+        )
+        results.append({"tool": tool_name, "result": result})
+
+    _update_conversation_state(conversation_state, decision, results)
+
+    if not results:
+        return decision, "No partition inspection tool was executed."
+
+    final = results[-1]["result"]
+    status = final.get("status")
+    if status != "ok":
+        return decision, _artifact_failure_message(status, final.get("message", ""))
+
+    partitions = final.get("partitions", [])
+    if not partitions:
+        return decision, "No partitions were reported for the forensic image."
+
+    lines = []
+    for part in partitions:
+        lines.append(
+            "- slot {slot}: start={start} end={end} length={length} desc={desc}".format(
+                slot=part.get("slot"),
+                start=part.get("start_sector"),
+                end=part.get("end_sector"),
+                length=part.get("length_sectors"),
+                desc=part.get("description"),
+            )
+        )
+    return decision, "\n".join(lines)
+
+
+def _run_user_enumeration_flow(
+    mcp_client: LocalMCPClient,
+    decision: OrchestrationDecision,
+    conversation_state: Optional[ConversationState] = None,
+) -> tuple[OrchestrationDecision, str]:
+    results = []
+    for tool_name in decision.tool_plan:
+        result = _execute_artifact_tool(
+            mcp_client,
+            tool_name,
+            decision.entities,
+            decision.rewritten_question,
+        )
+        results.append({"tool": tool_name, "result": result})
+
+    _update_conversation_state(conversation_state, decision, results)
+
+    if not results:
+        return decision, "No user-enumeration tool was executed."
+
+    final = results[-1]["result"]
+    status = final.get("status")
+    if status != "ok":
+        return decision, _artifact_failure_message(status, final.get("message", ""))
+
+    users = final.get("users", [])
+    if not users:
+        return decision, "No user profiles were identified in the selected evidence source."
+
+    lines = [f"- {name}" for name in users]
+    return decision, "\n".join(lines)
+
+
+def _run_partition_root_listing_flow(
+    mcp_client: LocalMCPClient,
+    decision: OrchestrationDecision,
+    conversation_state: Optional[ConversationState] = None,
+) -> tuple[OrchestrationDecision, str]:
+    results = []
+    for tool_name in decision.tool_plan:
+        result = _execute_artifact_tool(
+            mcp_client,
+            tool_name,
+            decision.entities,
+            decision.rewritten_question,
+        )
+        results.append({"tool": tool_name, "result": result})
+
+    _update_conversation_state(conversation_state, decision, results)
+
+    if not results:
+        return decision, "No partition root listing tool was executed."
+
+    final = results[-1]["result"]
+    status = final.get("status")
+    if status != "ok":
+        return decision, _artifact_failure_message(status, final.get("message", ""))
+
+    entries = final.get("entries", [])
+    if not entries:
+        return decision, "No entries were found in the root of the primary partition."
+
+    lines = [f"- {entry.get('name')} ({entry.get('type')})" for entry in entries]
+    return decision, "\n".join(lines)
+
+
+def _update_conversation_state(
+    conversation_state: Optional[ConversationState],
+    decision: OrchestrationDecision,
+    tool_results: List[dict],
+) -> None:
+    if not conversation_state:
+        return
+
+    if decision.entities.target_path:
+        conversation_state.last_path = decision.entities.target_path
+    if decision.entities.user:
+        conversation_state.last_user = decision.entities.user
+
+    if decision.intent == "image_partition_inspection" and _is_forensic_image_path(decision.entities.target_path):
+        conversation_state.last_artifact = decision.entities.target_path
+        conversation_state.last_artifact_type = "forensic_image"
+
+    for item in tool_results:
+        tool_name = item.get("tool")
+        result = item.get("result") or {}
+        if result.get("status") != "ok":
+            continue
+
+        if tool_name == "inspect_image_partitions":
+            image_path = result.get("image_path") or decision.entities.target_path
+            if image_path:
+                conversation_state.last_artifact = image_path
+                conversation_state.last_artifact_type = "forensic_image"
+                conversation_state.last_path = image_path
+
+        if tool_name == "list_directory":
+            base_path = result.get("path") or decision.entities.target_path
+            entries = result.get("entries") or []
+            for entry in entries:
+                if entry.get("type") != "file":
+                    continue
+                name = str(entry.get("name") or "")
+                if _is_forensic_image_path(name):
+                    artifact_path = _join_paths(base_path, name)
+                    conversation_state.last_artifact = artifact_path
+                    conversation_state.last_artifact_type = "forensic_image"
+                    break
+
+
+def _join_paths(base_path: Optional[str], name: str) -> str:
+    base = (base_path or "").replace("\\", "/").rstrip("/")
+    if not base:
+        return name
+    if base == ".":
+        return f"./{name}"
+    return f"{base}/{name}"
+
+
+def _extract_literal_path(question: str) -> Optional[str]:
+    text = question or ""
+    # Supports /evidence, ./out, ../data and Windows absolute paths.
+    match = re.search(r"(?<!\w)(/[\w\-./]+|\.{1,2}/[\w\-./]+|[A-Za-z]:\\[^\s]+)", text)
+    if not match:
+        return None
+    token = match.group(1).rstrip("?.!,;:")
+    return token
+
+
+# =========================
+# Main query flow
+# =========================
+
+def _safe_no_evidence_response(reason: str) -> str:
+    return (
+        "Insufficient visual evidence to answer safely. "
+        f"Reason: {reason}. "
+        "Please provide a relevant image to continue."
+    )
+
+
+def run_forensic_visual_flow(
+    llm: ChatOllama,
+    mcp_client: LocalMCPClient,
+    question: str,
+    history: List[str],
+    conversation_state: Optional[ConversationState] = None,
+):
+    history_text = _history_to_text(history)
+    raw_plan = mcp_client.classify_question(question=question, history=history_text)
+    decision = _normalize_decision(raw_plan)
+    decision = _apply_artifact_entity_rules(decision, question)
+    decision = _apply_conversation_reference_rules(decision, question, conversation_state)
+    decision = _apply_tool_plan_rules(decision)
+
+    if decision.intent == "unsafe_inference":
+        return decision, (
+            "I cannot help with speculative or unsafe inference requests. "
+            "I can only describe directly supported evidence."
+        )
+
+    if decision.domain == "artifact":
+        # Artifact policy: always execute planned MCP tools before final answer.
+        return _run_artifact_flow(llm, mcp_client, decision, conversation_state)
+
+    case_context = mcp_client.get_case_context()
+    image_path = mcp_client.get_current_image()
+    if not image_path:
+        decision.intent = "insufficient_evidence"
+        return decision, _safe_no_evidence_response("no image found in evidence directory")
+
+    template_payload = mcp_client.get_prompt_template(intent=_intent_to_template(decision.intent))
+    template_text = template_payload.get("template") if isinstance(template_payload, dict) else None
+    template_name = template_payload.get("name") if isinstance(template_payload, dict) else None
+
+    if not template_text:
+        template_text = SAFE_GENERIC_TEMPLATE
+    resolved_template_name = _normalize_template_name(template_name or decision.intent)
+
+    constraints_text = "\n".join(f"- {c}" for c in (decision.constraints or []))
+    if not constraints_text:
+        constraints_text = "- Use only visible evidence from the provided image."
+
+    final_instruction = (
+        "You are a forensic visual analysis assistant.\n"
+        "Task: answer only from visible evidence.\n\n"
+        f"Prompt template ({resolved_template_name}): {template_text}\n\n"
+        f"Case context:\n{shorten_text(case_context, max_len=1600)}\n\n"
+        f"Rewritten question:\n{decision.rewritten_question}\n\n"
+        f"Constraints:\n{constraints_text}\n\n"
+        "Response policy:\n"
+        "- If evidence is insufficient, explicitly say so.\n"
+        "- Do not infer identity, intent, timeline, or hidden causes.\n"
+        "- Keep the answer grounded in what is directly visible."
+    )
+
+    content = [{"type": "text", "text": final_instruction}]
+    content.append(
+        {
+            "type": "image_url",
+            "image_url": {"url": _read_image_as_data_url(image_path)},
+        }
+    )
+
+    response = llm.invoke([HumanMessage(content=content)])
+    answer = (response.content if hasattr(response, "content") else str(response)).strip()
+    return decision, answer
 
 
 # =========================
@@ -173,12 +1267,8 @@ def print_step(text: str):
 
 
 def print_tool_call(tool_name: str, args: dict):
-    if tool_name == "bash_cmd":
-        print_step("A executar comando bash no container...")
-    else:
-        print_step(f"A executar tool: {tool_name}")
-
-    print(f"[decisão] {tool_name}")
+    print_step(f"A executar tool: {tool_name}")
+    print(f"[decisao] {tool_name}")
     print(f"[args] {args}")
 
 
@@ -201,39 +1291,10 @@ def print_final_answer(text: str):
         print(text)
 
 
-def print_stream_chunk(chunk: dict):
-    """
-    Interpreta os chunks devolvidos por agent.stream(..., stream_mode='updates').
-    """
-    if not isinstance(chunk, dict):
-        return
-
-    for _, node_data in chunk.items():
-        if not isinstance(node_data, dict):
-            continue
-
-        messages = node_data.get("messages", [])
-        if not messages:
-            continue
-
-        for msg in messages:
-            tool_calls = getattr(msg, "tool_calls", None)
-            if tool_calls:
-                for tc in tool_calls:
-                    tool_name = tc.get("name", "tool")
-                    args = tc.get("args", {})
-                    print_tool_call(tool_name, args)
-                continue
-
-            tool_name = getattr(msg, "name", None)
-            if tool_name:
-                content = getattr(msg, "content", "")
-                print_tool_result(tool_name, content)
-                continue
-
-            content = getattr(msg, "content", None)
-            if isinstance(content, str) and content.strip():
-                print_final_answer(content)
+def print_plan(plan: OrchestrationDecision):
+    payload = plan.model_dump()
+    print_step("Plano estruturado (classificacao)")
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
 
 
 # =========================
@@ -242,7 +1303,9 @@ def print_stream_chunk(chunk: dict):
 
 def main():
     ensure_container()
-    agent = build_agent()
+    llm, mcp_client = build_pipeline()
+    history: List[str] = []
+    conversation_state = ConversationState()
 
     while True:
         query = input("\nPergunta (ou 'sair'): ").strip()
@@ -251,11 +1314,19 @@ def main():
             break
 
         try:
-            for chunk in agent.stream(
-                {"messages": [{"role": "user", "content": query}]},
-                stream_mode="updates",
-            ):
-                print_stream_chunk(chunk)
+            plan, answer = run_forensic_visual_flow(
+                llm=llm,
+                mcp_client=mcp_client,
+                question=query,
+                history=history,
+                conversation_state=conversation_state,
+            )
+
+            print_plan(plan)
+            print_final_answer(answer)
+
+            history.append(f"user: {query}")
+            history.append(f"assistant: {shorten_text(answer, max_len=500)}")
 
             print()
 
