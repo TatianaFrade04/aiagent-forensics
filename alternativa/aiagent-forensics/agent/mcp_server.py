@@ -404,9 +404,9 @@ def read_registry_key(hive_inode: str, key_path: str) -> str:
     else:
         # Listar subchaves da chave especificada
         cmd = (f"icat -o {_get_offset()} {IMAGE} {hive_num} > {tmp} && "
-               f"hivexls {tmp} '{key_path}' 2>/dev/null ; "
+               f"hivexls {tmp} '{key_path}' 2>&1 ; "
                f"echo '--- valores ---' ; "
-               f"hivexget {tmp} '{key_path}' 2>/dev/null || true ; "
+               f"hivexget {tmp} '{key_path}' 2>&1 || true ; "
                f"rm -f {tmp}")
     return _exec_shell(cmd)
 
