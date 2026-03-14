@@ -558,6 +558,22 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
         if any(kw in lowered_q for kw in _FILE_SEARCH_TOKENS):
             _flip_to_file_search()
 
+    # Computer-activity guard: questions about whether the COMPUTER was on/active on a date
+    # should not carry a hallucinated user from conversation context.
+    # e.g. "o computador esteve ligado no dia X?" (no user mentioned)
+    _COMPUTER_ACTIVITY_TOKENS = [
+        "computador esteve", "computer was", "computer on", "was the computer",
+        "esteve ligado", "estava ligado", "ligado no dia", "active on", "used on",
+        "activity on", "atividade no dia", "atividade em",
+    ]
+    if (
+        decision.intent == "timeline_lookup"
+        and decision.entities.user
+        and any(tok in lowered_q for tok in _COMPUTER_ACTIVITY_TOKENS)
+        and not any(name_tok in lowered_q for name_tok in ["jimmy", "wilson", "admin", "user"])
+    ):
+        decision.entities.user = None
+
     return decision
 
 
@@ -1038,7 +1054,7 @@ def _execute_artifact_tool(
             "data": {"output": mcp_client.query_evidence(rewritten_question)},
         }
     if tool_name == "query_timeline":
-        return mcp_client.query_timeline(user=entities.user)
+        return mcp_client.query_timeline(user=entities.user, timestamp=entities.timestamp_target)
     if tool_name == "get_case_context":
         return {
             "status": "ok",

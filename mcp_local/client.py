@@ -127,5 +127,10 @@ class LocalMCPClient:
             username=username,
         )
 
-    def query_timeline(self, user: Optional[str] = None, image_path: Optional[str] = None) -> Any:
-        return self._server.call_tool("query_timeline", user=user, image_path=image_path)
+    def query_timeline(
+        self,
+        user: Optional[str] = None,
+        timestamp: Optional[str] = None,
+        image_path: Optional[str] = None,
+    ) -> Any:
+        return self._server.call_tool("query_timeline", user=user, timestamp=timestamp, image_path=image_path)

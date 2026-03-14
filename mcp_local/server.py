@@ -1610,16 +1610,18 @@ _LOGON_EVENT_IDS = [4624, 4647, 4634, 4648]
 def _default_query_timeline(
     evidence_dir: str,
     user: Optional[str] = None,
+    timestamp: Optional[str] = None,
     image_path: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Find logon/logoff events for a user to determine last computer use."""
-    if not user:
-        return {"status": "tool_error", "message": "User name required for timeline lookup."}
-
+    """Find logon/logoff events for a user or on a specific date.
+    - user: filter by username (optional)
+    - timestamp: ISO date or datetime prefix to filter events (optional)
+    """
     result = _default_query_event_log(
         evidence_dir,
         log_name="security",
         event_ids=_LOGON_EVENT_IDS,
+        timestamp=timestamp,
         username=user,
         image_path=image_path,
     )
@@ -1628,10 +1630,13 @@ def _default_query_timeline(
 
     events = result.get("events", [])
     if not events:
+        who = f"user '{user}'" if user else "any user"
+        when = f" on {timestamp}" if timestamp else ""
         return {
             "status": "artifact_not_found",
             "user": user,
-            "message": f"No logon/logoff events found for user '{user}' in Security event log.",
+            "timestamp_filter": timestamp,
+            "message": f"No logon/logoff events found for {who}{when} in Security event log.",
         }
 
     # Sort by timestamp and return last event plus summary
@@ -1641,6 +1646,7 @@ def _default_query_timeline(
     return {
         "status": "ok",
         "user": user,
+        "timestamp_filter": timestamp,
         "last_event": last_event,
         "first_event": first_event,
         "total_events": len(events),
@@ -1764,6 +1770,8 @@ def create_default_server(
     )
     server.register_tool(
         "query_timeline",
-        lambda user=None, image_path=None: _default_query_timeline(evidence_dir, user, image_path),
+        lambda user=None, timestamp=None, image_path=None: _default_query_timeline(
+            evidence_dir, user, timestamp, image_path
+        ),
     )
     return server
