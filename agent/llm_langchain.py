@@ -505,6 +505,9 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
     if decision.domain == "artifact":
         if decision.entities.path_scope == "host_filesystem" and decision.intent not in _protected_intents:
             decision.intent = "directory_listing"
+        # Clear stale host_filesystem scope from protected intents — these tools work on the forensic image directly.
+        if decision.entities.path_scope == "host_filesystem" and decision.intent in _protected_intents:
+            decision.entities.path_scope = "forensic_image"
 
         if any(token in lowered_q for token in ["parti", "partition", "/evidence", "evidence"]):
             if not decision.entities.user and decision.intent not in _protected_intents | {"partition_root_listing"} \
@@ -1142,7 +1145,11 @@ def _run_artifact_flow(
     if decision.intent == "user_enumeration":
         return _run_user_enumeration_flow(mcp_client, decision, conversation_state)
 
-    if decision.entities.path_scope == "host_filesystem":
+    _flow_protected_intents = {
+        "file_content_inspection", "file_hash_lookup", "file_size_lookup",
+        "filesystem_stats", "disk_metadata", "registry_lookup", "event_log_lookup",
+    }
+    if decision.entities.path_scope == "host_filesystem" and decision.intent not in _flow_protected_intents:
         # Literal filesystem operations must not be mixed with case context or forensic-image expansion.
         return _run_literal_path_flow(mcp_client, decision, conversation_state)
 

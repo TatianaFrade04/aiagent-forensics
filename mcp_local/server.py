@@ -1049,7 +1049,9 @@ def _default_get_prompt_template(intent: str) -> Dict[str, str]:
 # =========================
 
 def _find_inode_for_path(image_path: str, primary_offset: str, file_path: str) -> Optional[str]:
-    """Return the inode string (e.g. '12345-128-1') for a file path inside the forensic image."""
+    """Return the inode string (e.g. '12345-128-1') for a file path inside the forensic image.
+    Falls back to basename-only matching to handle LLM-hallucinated paths like /path/to/file.ext.
+    """
     fls_result = run_cmd(
         ["fls", "-r", "-p", "-i", "ewf", "-o", primary_offset, image_path],
         timeout=300,
@@ -1058,17 +1060,26 @@ def _find_inode_for_path(image_path: str, primary_offset: str, file_path: str) -
     if not output:
         return None
 
-    target_lower = file_path.strip().lstrip("/").lower()
     inode_regex = re.compile(r"^[drv]/[drv]\s+(\S+):\s*(.+)$", re.IGNORECASE)
-
+    lines_parsed = []
     for line in output.splitlines():
         match = inode_regex.match(line.strip())
-        if not match:
-            continue
-        inode = match.group(1)
-        path_val = match.group(2).strip().lstrip("/").lower()
+        if match:
+            lines_parsed.append((match.group(1), match.group(2).strip().lstrip("/").lower()))
+
+    # First pass: full suffix match
+    target_lower = file_path.strip().lstrip("/").lower()
+    for inode, path_val in lines_parsed:
         if path_val == target_lower or path_val.endswith("/" + target_lower) or path_val.endswith(target_lower):
             return inode
+
+    # Second pass: basename-only match (handles hallucinated paths like /path/to/file.ext)
+    basename_lower = os.path.basename(file_path.replace("\\", "/")).lower()
+    if basename_lower and basename_lower != target_lower:
+        for inode, path_val in lines_parsed:
+            if path_val == basename_lower or path_val.endswith("/" + basename_lower):
+                return inode
+
     return None
 
 
