@@ -1662,6 +1662,73 @@ def _default_query_timeline(
     }
 
 
+_OEACCOUNT_PARSE_SCRIPT = (
+    'import sys,re;'
+    'raw=sys.stdin.buffer.read();'
+    r'text=raw.decode("utf-16",errors="ignore") if raw[:2] in (b"\xff\xfe",b"\xfe\xff") else raw.decode("utf-8",errors="ignore");'
+    r'acct=re.search(r"<Account_Name[^>]*>([^<]+)</Account_Name>",text);'
+    r'imap=re.search(r"<IMAP_User_Name[^>]*>([^<]+)</IMAP_User_Name>",text);'
+    r'smtp=re.search(r"<SMTP_Email_Address[^>]*>([^<]+)</SMTP_Email_Address>",text);'
+    'import json;'
+    'print(json.dumps({"account":acct.group(1).strip() if acct else None,"email":smtp.group(1).strip() if smtp else (imap.group(1).strip() if imap else None)}))'
+)
+
+
+def _default_get_email_accounts(
+    evidence_dir: str,
+    user: Optional[str] = None,
+    image_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Extract email account addresses from Windows Live Mail .oeaccount files."""
+    img, offset, _pt = _resolve_image_and_offset(evidence_dir, image_path)
+    container_image = _to_container_path(img, evidence_dir)
+
+    # Find all .oeaccount files
+    fls_result = run_cmd(["fls", "-r", "-l", "-i", "ewf", "-o", str(offset), container_image])
+    fls_out = (fls_result.get("stdout") or "").strip()
+    if not fls_out:
+        return {"status": "tool_error", "message": "fls returned no output"}
+
+    lines = fls_out.splitlines()
+    accounts = []
+    user_tokens = [t for t in (user or "").lower().split() if len(t) > 2]
+    for line in lines:
+        if ".oeaccount" not in line.lower():
+            continue
+        # Extract inode
+        m = re.search(r"r/r\s+(\d+)-", line)
+        if not m:
+            continue
+        inode = m.group(1)
+        # Read and parse the file
+        parse_cmd = f"icat -o {offset} -i ewf {container_image} {inode} | python3 -c '{_OEACCOUNT_PARSE_SCRIPT}'"
+        out_result = run_cmd(["bash", "-c", parse_cmd])
+        out = (out_result.get("stdout") or "").strip()
+        if not out:
+            continue
+        try:
+            import json as _json
+            parsed = _json.loads(out.strip())
+            if not parsed.get("email"):
+                continue
+            # Filter by user post-parse: check if user tokens appear in account name or email
+            if user_tokens:
+                acct_lower = (parsed.get("account") or "").lower() + " " + (parsed.get("email") or "").lower()
+                if not any(tok in acct_lower for tok in user_tokens):
+                    continue
+            accounts.append(parsed)
+        except Exception:
+            pass
+
+    if not accounts:
+        return {
+            "status": "artifact_not_found",
+            "message": "No .oeaccount files found" + (f" for user '{user}'" if user else "") + ".",
+        }
+
+    return {"status": "ok", "accounts": accounts, "count": len(accounts)}
+
+
 def create_default_server(
     *,
     evidence_dir: str,
@@ -1782,5 +1849,9 @@ def create_default_server(
         lambda user=None, timestamp=None, image_path=None: _default_query_timeline(
             evidence_dir, user, timestamp, image_path
         ),
+    )
+    server.register_tool(
+        "get_email_accounts",
+        lambda user=None, image_path=None: _default_get_email_accounts(evidence_dir, user, image_path),
     )
     return server

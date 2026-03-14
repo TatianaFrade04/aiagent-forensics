@@ -53,6 +53,7 @@ ARTIFACT_INTENTS = [
     "disk_metadata",
     "registry_lookup",
     "event_log_lookup",
+    "email_account_lookup",
     "insufficient_evidence",
     "unsafe_inference",
 ]
@@ -104,6 +105,7 @@ class OrchestrationDecision(BaseModel):
         "disk_metadata",
         "registry_lookup",
         "event_log_lookup",
+        "email_account_lookup",
         "insufficient_evidence",
         "unsafe_inference",
     ]
@@ -265,6 +267,7 @@ Critical classification rules:
 - Questions about partition schema (GPT/MBR), disk GUID, partition GUID, disk serial number → domain=artifact, intent=disk_metadata, operation=inspect_partitions.
 - Questions about SAM registry, RID numbers, last login time, password hint, startup programs, installed encryption software, UserAssist, or any Windows registry key → domain=artifact, intent=registry_lookup, operation=inspect; put the hive name (sam/ntuser/software/system) in artifact_type and the specific key target in action.
 - Questions about system uptime, system boot time, shutdown time, Windows event log, Event ID, evtx, or "what was the uptime at [timestamp]" → domain=artifact, intent=event_log_lookup, operation=inspect; put the log name (system/application/security) in artifact_type and the specific timestamp or event_id in action.
+- Questions asking for a user's email address, Gmail account, or email account details → domain=artifact, intent=email_account_lookup, operation=inspect; put the user name in user.
 - Artifact queries must use needs_image=false.
 - Visual queries must use needs_image=true.
 - For artifact queries, tool_plan must include specific MCP tools and not only generic reasoning.
@@ -497,10 +500,22 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
             if extracted_ts:
                 decision.entities.timestamp_target = extracted_ts
 
+    # Email account address guard: "what is X's email address?" → email_account_lookup
+    _EMAIL_ADDR_TOKENS = [
+        "qual é o email", "qual o email", "what is.*email", "email address",
+        "endereço de email", "conta de email", "conta gmail", "gmail account",
+        "email do ", "email da ", "email account",
+    ]
+    if any(tok in lowered_q for tok in _EMAIL_ADDR_TOKENS):
+        decision.domain = "artifact"
+        decision.intent = "email_account_lookup"
+        decision.needs_image = False
+
     # Intent refinements for artifact branch.
     _protected_intents = {
         "filesystem_stats", "disk_metadata", "file_hash_lookup", "file_size_lookup",
         "file_content_inspection", "registry_lookup", "event_log_lookup",
+        "email_account_lookup",
     }
     if decision.domain == "artifact":
         if decision.entities.path_scope == "host_filesystem" and decision.intent not in _protected_intents:
@@ -877,6 +892,8 @@ def _derive_artifact_tool_plan(decision: OrchestrationDecision) -> List[str]:
         return ["query_registry"]
     if decision.intent == "event_log_lookup":
         return ["query_event_log"]
+    if decision.intent == "email_account_lookup":
+        return ["get_email_accounts"]
 
     if not entities.user:
         return ["get_case_context", "query_evidence"]
@@ -889,7 +906,7 @@ def _apply_tool_plan_rules(decision: OrchestrationDecision) -> OrchestrationDeci
             "image_partition_inspection", "partition_root_listing", "user_enumeration",
             "file_hash_lookup", "file_size_lookup", "file_content_inspection",
             "filesystem_stats", "disk_metadata", "registry_lookup", "event_log_lookup",
-            "file_search", "artifact_lookup",
+            "file_search", "artifact_lookup", "email_account_lookup",
         }:
             decision.tool_plan = _derive_artifact_tool_plan(decision)
             return decision
@@ -1129,6 +1146,9 @@ def _execute_artifact_tool(
         return mcp_client.query_event_log(
             log_name=log_name, event_ids=event_ids, timestamp=timestamp_filter, image_path=image_path
         )
+
+    if tool_name == "get_email_accounts":
+        return mcp_client.get_email_accounts(user=entities.user)
 
     return {
         "status": "tool_error",

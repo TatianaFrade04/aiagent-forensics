@@ -134,3 +134,10 @@ class LocalMCPClient:
         image_path: Optional[str] = None,
     ) -> Any:
         return self._server.call_tool("query_timeline", user=user, timestamp=timestamp, image_path=image_path)
+
+    def get_email_accounts(
+        self,
+        user: Optional[str] = None,
+        image_path: Optional[str] = None,
+    ) -> Any:
+        return self._server.call_tool("get_email_accounts", user=user, image_path=image_path)
