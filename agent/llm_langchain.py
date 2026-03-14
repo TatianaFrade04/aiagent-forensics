@@ -558,21 +558,36 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
         if any(kw in lowered_q for kw in _FILE_SEARCH_TOKENS):
             _flip_to_file_search()
 
-    # Computer-activity guard: questions about whether the COMPUTER was on/active on a date
+    # Computer-activity guard: questions about whether/when the COMPUTER was on/active
     # should not carry a hallucinated user from conversation context.
-    # e.g. "o computador esteve ligado no dia X?" (no user mentioned)
+    # e.g. "o computador esteve ligado no dia X?" / "quais dias o computador foi ligado?"
     _COMPUTER_ACTIVITY_TOKENS = [
         "computador esteve", "computer was", "computer on", "was the computer",
         "esteve ligado", "estava ligado", "ligado no dia", "active on", "used on",
         "activity on", "atividade no dia", "atividade em",
+        "quais dias", "quais foram os dias", "which days", "dias que o computador",
+        "days the computer", "days was", "dias foi ligado", "dias ligado",
     ]
+    _is_computer_activity_q = any(tok in lowered_q for tok in _COMPUTER_ACTIVITY_TOKENS)
+    _has_explicit_user = any(name_tok in lowered_q for name_tok in ["jimmy", "wilson", "admin", "user"])
+
     if (
-        decision.intent == "timeline_lookup"
-        and decision.entities.user
-        and any(tok in lowered_q for tok in _COMPUTER_ACTIVITY_TOKENS)
-        and not any(name_tok in lowered_q for name_tok in ["jimmy", "wilson", "admin", "user"])
+        _is_computer_activity_q
+        and not _has_explicit_user
+        and decision.intent in ("timeline_lookup", "event_log_lookup", "insufficient_evidence", "artifact_lookup")
     ):
-        decision.entities.user = None
+        decision.domain = "artifact"
+        decision.intent = "timeline_lookup"
+        decision.needs_image = False
+        decision.entities.user = None  # clear hallucinated user
+
+    # Validate timestamp_target: must look like a real date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS).
+    # Clear it if the LLM put a word like "days", "today", "all", etc.
+    if decision.entities.timestamp_target:
+        import re as _re
+        _ts = decision.entities.timestamp_target.strip()
+        if not _re.match(r"\d{4}-\d{2}-\d{2}", _ts):
+            decision.entities.timestamp_target = None
 
     return decision
 
@@ -1186,6 +1201,11 @@ def _run_artifact_flow(
         if direct_answer:
             return decision, direct_answer
 
+    if decision.intent == "timeline_lookup":
+        direct_answer = _build_timeline_answer(tool_results, decision)
+        if direct_answer:
+            return decision, direct_answer
+
     final_instruction = (
         "You are a forensic artifact analysis assistant.\n"
         "Task: answer only from MCP tool outputs.\n\n"
@@ -1240,6 +1260,42 @@ def _build_directory_listing_answer(tool_results: List[dict], decision: Orchestr
 
         lines = [f"- {entry.get('name')} ({entry.get('type')})" for entry in filtered]
         return "\n".join(lines)
+
+    return None
+
+
+def _build_timeline_answer(
+    tool_results: List[dict], decision: OrchestrationDecision
+) -> Optional[str]:
+    """Build a direct answer for timeline_lookup when the result has unique_active_dates."""
+    for item in tool_results:
+        result = item.get("result") or {}
+        if result.get("status") != "ok":
+            continue
+        dates = result.get("unique_active_dates")
+        if not isinstance(dates, list) or not dates:
+            continue
+        user = result.get("user")
+        who = f" for user **{user}**" if user else ""
+        ts_filter = result.get("timestamp_filter")
+        last = (result.get("last_event") or {}).get("timestamp", "")
+        first = (result.get("first_event") or {}).get("timestamp", "")
+
+        if ts_filter:
+            # Date-filtered query: was computer on that day?
+            return (
+                f"Activity found on {ts_filter}{who}: {len(dates)} logon event(s).\n"
+                f"First: {first}  Last: {last}"
+            )
+
+        # All-dates query
+        date_lines = "\n".join(f"  {d}" for d in dates)
+        total = result.get("total_events", len(dates))
+        return (
+            f"The computer was used on **{len(dates)} day(s)**{who} "
+            f"({total} logon/logoff events total):\n{date_lines}\n\n"
+            f"First activity: {first}\nLast activity:  {last}"
+        )
 
     return None
 

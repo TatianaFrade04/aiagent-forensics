@@ -1643,6 +1643,14 @@ def _default_query_timeline(
     events_sorted = sorted(events, key=lambda e: str(e.get("timestamp", "")))
     last_event = events_sorted[-1]
     first_event = events_sorted[0]
+
+    # Extract unique active dates (YYYY-MM-DD) from all event timestamps
+    unique_dates: list = sorted({
+        str(e.get("timestamp", ""))[:10]
+        for e in events_sorted
+        if len(str(e.get("timestamp", ""))) >= 10
+    })
+
     return {
         "status": "ok",
         "user": user,
@@ -1650,6 +1658,7 @@ def _default_query_timeline(
         "last_event": last_event,
         "first_event": first_event,
         "total_events": len(events),
+        "unique_active_dates": unique_dates,
     }
 
 
