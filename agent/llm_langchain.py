@@ -46,6 +46,12 @@ ARTIFACT_INTENTS = [
     "file_search",
     "timeline_lookup",
     "artifact_lookup",
+    "file_hash_lookup",
+    "file_size_lookup",
+    "file_content_inspection",
+    "filesystem_stats",
+    "disk_metadata",
+    "registry_lookup",
     "insufficient_evidence",
     "unsafe_inference",
 ]
@@ -62,8 +68,9 @@ class DecisionEntities(BaseModel):
     path_scope: Optional[Literal["host_filesystem", "forensic_image", "user_profile", "unknown"]] = None
     artifact_type: Optional[str] = None
     timestamp_target: Optional[str] = None
-    operation: Optional[Literal["list", "find", "inspect", "inspect_partitions", "enumerate_users", "query_last_used", "query_timestamp"]] = None
+    operation: Optional[Literal["list", "find", "inspect", "inspect_partitions", "enumerate_users", "query_last_used", "query_timestamp", "compute"]] = None
     reference_source: Optional[str] = None
+    algorithm: Optional[str] = None
 
 
 class ConversationState(BaseModel):
@@ -89,6 +96,12 @@ class OrchestrationDecision(BaseModel):
         "file_search",
         "timeline_lookup",
         "artifact_lookup",
+        "file_hash_lookup",
+        "file_size_lookup",
+        "file_content_inspection",
+        "filesystem_stats",
+        "disk_metadata",
+        "registry_lookup",
         "insufficient_evidence",
         "unsafe_inference",
     ]
@@ -216,6 +229,12 @@ Allowed intents:
 - file_search
 - timeline_lookup
 - artifact_lookup
+- file_hash_lookup
+- file_size_lookup
+- file_content_inspection
+- filesystem_stats
+- disk_metadata
+- registry_lookup
 - insufficient_evidence
 - unsafe_inference
 
@@ -236,6 +255,13 @@ Critical classification rules:
 - For questions about files in the root of the primary partition ("ficheiros na raiz da particao principal", "files in the root of the primary partition"), use intent=partition_root_listing.
 - For user profile inventory questions ("quais os users que existem?", "which users exist?", "list users", "show user profiles"), use intent=user_enumeration and operation=enumerate_users.
 - If query asks when an app was last opened, use intent=timeline_lookup and operation=query_last_used.
+- Questions about a user's Desktop, Downloads, Documents, Pictures, or Music folder (e.g. 'what is in the desktop of user X', 'o que esta no desktop do user Y') MUST use domain=artifact and intent=directory_listing — NEVER domain=visual or intent=insufficient_evidence, regardless of the word 'desktop'.
+- Questions asking for MD5/SHA1/SHA256 hash of a file → domain=artifact, intent=file_hash_lookup, operation=compute; put the file path in target_path and the algorithm name (md5/sha1/sha256) in action.
+- Questions about logical file size, how big a file is, tamanho do ficheiro → domain=artifact, intent=file_size_lookup, operation=compute; put the file path in target_path.
+- Questions to read, show, or extract the content of a specific file → domain=artifact, intent=file_content_inspection, operation=inspect; put the file path in target_path.
+- Questions about cluster size, block size, sector size, or filesystem type → domain=artifact, intent=filesystem_stats, operation=inspect.
+- Questions about partition schema (GPT/MBR), disk GUID, partition GUID, disk serial number → domain=artifact, intent=disk_metadata, operation=inspect_partitions.
+- Questions about SAM registry, RID numbers, last login time, password hint, startup programs, installed encryption software, UserAssist, or any Windows registry key → domain=artifact, intent=registry_lookup, operation=inspect; put the hive name (sam/ntuser/software/system) in artifact_type and the specific key target in action.
 - Artifact queries must use needs_image=false.
 - Visual queries must use needs_image=true.
 - For artifact queries, tool_plan must include specific MCP tools and not only generic reasoning.
@@ -382,9 +408,14 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
             decision.entities.artifact_type = "filesystem_entry"
 
     # If a user is present and folder target is a known user profile folder, force forensic user-profile scope.
+    # Also check the last segment of a full fake path like /home/user/Desktop.
     normalized_target = (decision.entities.target_path or "").strip().lstrip("/").lower()
-    if decision.domain == "artifact" and decision.entities.user and normalized_target in special_folders:
-        canonical_folder = "Documents" if normalized_target == "documentos" else normalized_target.capitalize()
+    normalized_target_last = normalized_target.replace("\\", "/").split("/")[-1] if normalized_target else ""
+    folder_key = normalized_target if normalized_target in special_folders else (
+        normalized_target_last if normalized_target_last in special_folders else None
+    )
+    if decision.domain == "artifact" and decision.entities.user and folder_key:
+        canonical_folder = "Documents" if folder_key == "documentos" else folder_key.capitalize()
         decision.entities.target_path = canonical_folder
         decision.entities.path_scope = "user_profile"
         decision.entities.artifact_type = decision.entities.artifact_type or "folder"
@@ -407,6 +438,25 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
             if not decision.entities.path_scope:
                 decision.entities.path_scope = "forensic_image"
 
+    # Belt-and-suspenders guard: user + folder word must NEVER route to host filesystem.
+    # Covers both domain=visual misclassification and domain=artifact with host path.
+    if decision.entities.user and any(token in lowered_q for token in folder_tokens):
+        if decision.domain == "visual" or (
+            decision.domain == "artifact" and decision.entities.path_scope == "host_filesystem"
+        ):
+            canonical_folder = None
+            for token in folder_tokens:
+                if token in lowered_q:
+                    canonical_folder = "Documents" if token == "documentos" else token.capitalize()
+                    break
+            decision.domain = "artifact"
+            decision.intent = "directory_listing"
+            decision.needs_image = False
+            decision.entities.path_scope = "user_profile"
+            decision.entities.operation = "list"
+            if canonical_folder:
+                decision.entities.target_path = canonical_folder
+
     # For forensic-image artifact questions, keep target_path anchored to the current image by default.
     if decision.domain == "artifact" and decision.entities.path_scope == "forensic_image":
         existing_target = (decision.entities.target_path or "").strip()
@@ -423,18 +473,29 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
     if decision.domain == "artifact":
         decision.needs_image = False
 
+    # Filesystem stats guard: cluster/sector/block size questions must always route to filesystem_stats.
+    if decision.domain == "artifact" and _is_filesystem_stats_question(question):
+        decision.intent = "filesystem_stats"
+        if not decision.entities.operation:
+            decision.entities.operation = "inspect"
+
     # Intent refinements for artifact branch.
+    _protected_intents = {
+        "filesystem_stats", "disk_metadata", "file_hash_lookup", "file_size_lookup",
+        "file_content_inspection", "registry_lookup",
+    }
     if decision.domain == "artifact":
-        if decision.entities.path_scope == "host_filesystem":
+        if decision.entities.path_scope == "host_filesystem" and decision.intent not in _protected_intents:
             decision.intent = "directory_listing"
 
         if any(token in lowered_q for token in ["parti", "partition", "/evidence", "evidence"]):
-            if not decision.entities.user:
+            if not decision.entities.user and decision.intent not in _protected_intents | {"partition_root_listing"} \
+                    and not _is_filesystem_stats_question(question):
                 decision.intent = "artifact_lookup"
                 if not decision.entities.operation:
                     decision.entities.operation = "inspect"
 
-        if decision.entities.path_scope == "host_filesystem":
+        if decision.entities.path_scope == "host_filesystem" and decision.intent not in _protected_intents:
             decision.intent = "directory_listing"
             decision.entities.operation = "list"
 
@@ -446,12 +507,46 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
         if decision.entities.operation == "find" and decision.intent not in ("timeline_lookup", "directory_listing"):
             decision.intent = "file_search"
 
+    # File-type keyword guard: if the question is about a file type (email, pdf, exe...)
+    # it must never be classified as user_enumeration, even if the LLM made that mistake.
+    _FILE_SEARCH_TOKENS = [
+        "email", "e-mail", "emails", "eml", "mail", "mails", "correio", "mensagem", "mensagens",
+        "pdf", "pdfs", "documento", "documentos",
+        "photo", "foto", "fotos", "imagem", "image",
+        "video", "vídeo", "audio", "mp3", "mp4",
+        "executable", "exe", "programa", "programas",
+        "zip", "rar", "arquivo", "comprimido",
+    ]
+    _USER_ENUM_TOKENS = ["users", "user profiles", "utilizadores", "profiles", "usuarios", "usuários"]
+    if decision.intent == "user_enumeration" and any(kw in lowered_q for kw in _FILE_SEARCH_TOKENS):
+        if not any(t in lowered_q for t in _USER_ENUM_TOKENS):
+            decision.intent = "file_search"
+            decision.entities.artifact_type = "file"
+            decision.entities.user = None
+            decision.entities.operation = "find"
+            if not decision.entities.path_scope:
+                decision.entities.path_scope = "forensic_image"
+            # Restore original question so query_evidence receives the real text,
+            # not the stale LLM rewrite (e.g. "list users").
+            decision.rewritten_question = question
+
     return decision
 
 
 def _is_partition_question(question: str) -> bool:
     lowered = (question or "").lower()
     return any(token in lowered for token in ["partition", "parti", "parti\u00e7", "particao", "parti\u00e7\u00e3o", "volumes", "layout"])
+
+
+_FS_STAT_TOKENS = [
+    "cluster size", "block size", "sector size", "filesystem type", "file system type",
+    "tamanho do cluster", "tamanho de cluster", "tamanho do bloco", "cluster size in bytes",
+    "bytes per cluster", "bytes per sector",
+]
+
+def _is_filesystem_stats_question(question: str) -> bool:
+    lowered = (question or "").lower()
+    return any(token in lowered for token in _FS_STAT_TOKENS)
 
 
 def _is_partition_root_listing_question(question: str) -> bool:
@@ -529,7 +624,10 @@ def _apply_conversation_reference_rules(
                 f"List root directory entries from the primary partition in forensic image {resolved_target}."
             )
 
-    elif _is_partition_question(question):
+    elif _is_partition_question(question) and not _is_filesystem_stats_question(question) and decision.intent not in (
+        "filesystem_stats", "disk_metadata", "file_hash_lookup", "file_size_lookup",
+        "file_content_inspection", "registry_lookup",
+    ):
         resolved_target = decision.entities.target_path
         reference_source = None
 
@@ -642,6 +740,19 @@ def _derive_artifact_tool_plan(decision: OrchestrationDecision) -> List[str]:
         if entities.application:
             return ["resolve_user_profile", "get_last_app_execution"]
         return ["resolve_user_profile", "query_timeline"]
+    if decision.intent == "file_hash_lookup":
+        return ["get_file_hash"]
+    if decision.intent == "file_size_lookup":
+        return ["get_file_size"]
+    if decision.intent == "file_content_inspection":
+        return ["extract_file_content"]
+    if decision.intent == "filesystem_stats":
+        return ["get_filesystem_stats"]
+    if decision.intent == "disk_metadata":
+        return ["get_disk_metadata"]
+    if decision.intent == "registry_lookup":
+        return ["query_registry"]
+
     if not entities.user:
         return ["get_case_context", "query_evidence"]
     return ["resolve_user_profile", "query_timeline"]
@@ -649,7 +760,12 @@ def _derive_artifact_tool_plan(decision: OrchestrationDecision) -> List[str]:
 
 def _apply_tool_plan_rules(decision: OrchestrationDecision) -> OrchestrationDecision:
     if decision.domain == "artifact":
-        if decision.intent in {"image_partition_inspection", "partition_root_listing", "user_enumeration"}:
+        if decision.intent in {
+            "image_partition_inspection", "partition_root_listing", "user_enumeration",
+            "file_hash_lookup", "file_size_lookup", "file_content_inspection",
+            "filesystem_stats", "disk_metadata", "registry_lookup",
+            "file_search", "artifact_lookup",
+        }:
             decision.tool_plan = _derive_artifact_tool_plan(decision)
             return decision
 
@@ -678,6 +794,12 @@ def _apply_tool_plan_rules(decision: OrchestrationDecision) -> OrchestrationDeci
             "search_user_files",
             "get_last_app_execution",
             "query_timeline",
+            "get_file_hash",
+            "get_file_size",
+            "extract_file_content",
+            "get_filesystem_stats",
+            "get_disk_metadata",
+            "query_registry",
         }
         has_specific = any(tool in specific for tool in decision.tool_plan)
         if not has_specific:
@@ -846,6 +968,33 @@ def _execute_artifact_tool(
             "data": {"output": mcp_client.query_evidence(rewritten_question)},
         }
 
+    if tool_name == "get_file_hash":
+        algorithm = (entities.action or entities.algorithm or "md5").lower()
+        if algorithm not in ("md5", "sha1", "sha256"):
+            algorithm = "md5"
+        file_path = entities.target_path or ""
+        return mcp_client.get_file_hash(file_path=file_path, algorithm=algorithm)
+
+    if tool_name == "get_file_size":
+        return mcp_client.get_file_size(file_path=entities.target_path or "")
+
+    if tool_name == "extract_file_content":
+        return mcp_client.extract_file_content(file_path=entities.target_path or "")
+
+    if tool_name == "get_filesystem_stats":
+        image_path = entities.target_path if _is_forensic_image_path(entities.target_path or "") else None
+        return mcp_client.get_filesystem_stats(image_path=image_path)
+
+    if tool_name == "get_disk_metadata":
+        image_path = entities.target_path if _is_forensic_image_path(entities.target_path or "") else None
+        return mcp_client.get_disk_metadata(image_path=image_path)
+
+    if tool_name == "query_registry":
+        hive = (entities.artifact_type or "sam").lower()
+        key_path = entities.action or None
+        image_path = entities.target_path if _is_forensic_image_path(entities.target_path or "") else None
+        return mcp_client.query_registry(hive=hive, key_path=key_path, user=entities.user, image_path=image_path)
+
     return {
         "status": "tool_error",
         "message": f"Unknown artifact tool '{tool_name}'.",
@@ -873,6 +1022,7 @@ def _run_artifact_flow(
     mcp_client: LocalMCPClient,
     decision: OrchestrationDecision,
     conversation_state: Optional[ConversationState] = None,
+    original_question: str = "",
 ) -> tuple[OrchestrationDecision, str]:
     if decision.intent == "image_partition_inspection":
         return _run_image_partition_inspection_flow(mcp_client, decision, conversation_state)
@@ -917,7 +1067,12 @@ def _run_artifact_flow(
         "Task: answer only from MCP tool outputs.\n\n"
         f"Prompt template ({template_name}): {template_text}\n\n"
         f"Case context:\n{shorten_text(case_context, max_len=1400)}\n\n"
-        f"Rewritten question:\n{decision.rewritten_question}\n\n"
+        + (
+            f"Original user question (use this to determine answer format — "
+            f"if it asks for a count/number reply with a number, not a list): {original_question}\n\n"
+            if original_question else ""
+        )
+        + f"Rewritten question:\n{decision.rewritten_question}\n\n"
         "Tool results (JSON):\n"
         f"{json.dumps(tool_results, ensure_ascii=False, indent=2)}\n\n"
         "Response policy:\n"
@@ -1212,7 +1367,7 @@ def run_forensic_visual_flow(
 
     if decision.domain == "artifact":
         # Artifact policy: always execute planned MCP tools before final answer.
-        return _run_artifact_flow(llm, mcp_client, decision, conversation_state)
+        return _run_artifact_flow(llm, mcp_client, decision, conversation_state, original_question=question)
 
     case_context = mcp_client.get_case_context()
     image_path = mcp_client.get_current_image()

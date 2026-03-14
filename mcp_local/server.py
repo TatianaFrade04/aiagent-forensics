@@ -7,8 +7,24 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from tools.runner import run_cmd
 
+_EVIDENCE_CONTAINER = "/evidence"
 
 ToolHandler = Callable[..., Any]
+
+
+def _to_container_path(host_path: str, evidence_dir: str) -> str:
+    """Translate a Windows host evidence path to its equivalent container path.
+
+    The evidence directory is mounted at /evidence inside the container.
+    Using this before embedding paths in bash -c strings prevents run_cmd's
+    path-translation logic from corrupting the entire bash command string.
+    """
+    norm_host = os.path.normpath(host_path)
+    norm_ev = os.path.normpath(evidence_dir)
+    if norm_host.lower().startswith(norm_ev.lower()):
+        relative = norm_host[len(norm_ev):].replace("\\", "/").lstrip("/")
+        return f"{_EVIDENCE_CONTAINER}/{relative}" if relative else _EVIDENCE_CONTAINER
+    return f"{_EVIDENCE_CONTAINER}/{os.path.basename(host_path)}"
 
 
 def _resolve_host_path(evidence_dir: str, raw_path: str) -> str:
@@ -895,6 +911,58 @@ def _default_query_evidence(evidence_dir: str, question: str) -> str:
             + "\nNote: precise last shutdown time needs registry/event-log parsing."
         )
 
+    if any(term in lowered for term in ["last run", "ultima vez", "quando foi", "last used", "last opened", "last time", "last access", "ultimo acesso"]):
+        return (
+            "Timeline analysis (last run / last access times) requires registry or event-log parsing "
+            "which is not yet implemented. "
+            f"Available evidence image: {os.path.basename(image_path)}"
+        )
+
+    # Email / document type search: detect requests for files by type and search recursively.
+    _EXTENSION_QUERIES: List[tuple] = [
+        (["email", "e-mail", "eml", "mail", "correio", "mensagem", "inbox", "windows live mail"], [".eml", ".msg", ".pst", ".ost", ".mbox"]),
+        (["pdf"], [".pdf"]),
+        (["imagem", "photo", "foto", "image", "jpg", "jpeg", "png", "bmp"], [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"]),
+        (["video", "vídeo", "mp4", "avi", "mkv"], [".mp4", ".avi", ".mkv", ".mov", ".wmv"]),
+        (["audio", "mp3", "música", "musica"], [".mp3", ".wav", ".flac", ".aac", ".ogg"]),
+        (["documento", "document", "docx", "xlsx", "word", "excel"], [".doc", ".docx", ".xls", ".xlsx", ".odt", ".ods"]),
+        (["executavel", "executável", "executable", "exe", "binario", "binário", "programa", "program"], [".exe", ".dll", ".bat", ".cmd", ".ps1"]),
+        (["zip", "comprimido", "compressed", "archive", "rar", "7z"], [".zip", ".rar", ".7z", ".tar", ".gz"]),
+        (["encrypt", "encriptado", "encrypted", "bcrypt", "bitlocker"], [".bfe", ".pfx", ".p12", ".cer"]),
+    ]
+    matched_extensions: List[str] = []
+    for keywords, exts in _EXTENSION_QUERIES:
+        if any(kw in lowered for kw in keywords):
+            matched_extensions = exts
+            break
+
+    if matched_extensions:
+        result = run_cmd(
+            ["fls", "-r", "-p", "-i", "ewf", "-o", primary_offset, image_path],
+            timeout=300,
+        )
+        stdout = (result.get("stdout") or "").strip()
+        if result["returncode"] != 0 and not stdout:
+            stderr = (result.get("stderr") or "").strip() or "fls command failed"
+            return f"File search failed: {stderr}"
+
+        ext_lower = [e.lower() for e in matched_extensions]
+        matches = []
+        for line in stdout.splitlines():
+            ll = line.lower()
+            if any(ll.endswith(ext) or (ext + "\t") in ll or (ext + " ") in ll for ext in ext_lower):
+                matches.append(line)
+
+        if not matches:
+            return f"No files with extensions {matched_extensions} found in the forensic image."
+
+        preview = "\n".join(matches[:60])
+        suffix = f"\n... ({len(matches) - 60} more)" if len(matches) > 60 else ""
+        return (
+            f"Files matching {matched_extensions} found in forensic image ({len(matches)} total):\n"
+            + preview + suffix
+        )
+
     # Generic fallback for other inventory-style forensic questions.
     result = run_cmd(["fls", "-i", "ewf", "-o", primary_offset, image_path], timeout=120)
     if result["returncode"] != 0:
@@ -974,6 +1042,405 @@ def _default_get_prompt_template(intent: str) -> Dict[str, str]:
     }
 
     return templates.get(intent, default_template)
+
+
+# =========================
+# File hash / size / content
+# =========================
+
+def _find_inode_for_path(image_path: str, primary_offset: str, file_path: str) -> Optional[str]:
+    """Return the inode string (e.g. '12345-128-1') for a file path inside the forensic image."""
+    fls_result = run_cmd(
+        ["fls", "-r", "-p", "-i", "ewf", "-o", primary_offset, image_path],
+        timeout=300,
+    )
+    output = (fls_result.get("stdout") or "").strip()
+    if not output:
+        return None
+
+    target_lower = file_path.strip().lstrip("/").lower()
+    inode_regex = re.compile(r"^[drv]/[drv]\s+(\S+):\s*(.+)$", re.IGNORECASE)
+
+    for line in output.splitlines():
+        match = inode_regex.match(line.strip())
+        if not match:
+            continue
+        inode = match.group(1)
+        path_val = match.group(2).strip().lstrip("/").lower()
+        if path_val == target_lower or path_val.endswith("/" + target_lower) or path_val.endswith(target_lower):
+            return inode
+    return None
+
+
+def _default_get_file_hash(evidence_dir: str, file_path: str, algorithm: str = "md5") -> Dict[str, Any]:
+    if not file_path:
+        return {"status": "path_not_resolved", "file_path": file_path, "message": "File path was not provided."}
+
+    algorithm = algorithm.lower() if algorithm else "md5"
+    if algorithm not in ("md5", "sha1", "sha256"):
+        algorithm = "md5"
+    hash_cmd = {"md5": "md5sum", "sha1": "sha1sum", "sha256": "sha256sum"}[algorithm]
+
+    resolved_image, primary_offset, error = _resolve_primary_image_and_offset(evidence_dir)
+    if not resolved_image:
+        return {"status": "artifact_not_found", "file_path": file_path, "message": error or "No forensic image available."}
+    if not primary_offset:
+        return {"status": "insufficient_index_data", "file_path": file_path, "message": error or "Primary partition offset unavailable."}
+
+    inode = _find_inode_for_path(resolved_image, primary_offset, file_path)
+    if not inode:
+        return {"status": "path_not_resolved", "file_path": file_path, "message": f"File '{file_path}' not found in forensic image."}
+
+    container_image = _to_container_path(resolved_image, evidence_dir)
+    cmd = f"icat -i ewf -o {primary_offset} {container_image} {inode} | {hash_cmd}"
+    result = run_cmd(["bash", "-lc", cmd], timeout=300)
+    stdout = (result.get("stdout") or "").strip()
+    if result["returncode"] != 0 and not stdout:
+        stderr = (result.get("stderr") or "").strip() or "hash command failed"
+        return {"status": "tool_error", "file_path": file_path, "message": stderr}
+
+    hash_value = stdout.split()[0] if stdout else ""
+    if not hash_value:
+        return {"status": "tool_error", "file_path": file_path, "message": "Hash command produced no output."}
+
+    return {
+        "status": "ok",
+        "file_path": file_path,
+        "algorithm": algorithm,
+        "hash": hash_value.upper(),
+        "inode": inode,
+    }
+
+
+def _default_get_file_size(evidence_dir: str, file_path: str) -> Dict[str, Any]:
+    if not file_path:
+        return {"status": "path_not_resolved", "file_path": file_path, "message": "File path was not provided."}
+
+    resolved_image, primary_offset, error = _resolve_primary_image_and_offset(evidence_dir)
+    if not resolved_image:
+        return {"status": "artifact_not_found", "file_path": file_path, "message": error or "No forensic image available."}
+    if not primary_offset:
+        return {"status": "insufficient_index_data", "file_path": file_path, "message": error or "Primary partition offset unavailable."}
+
+    result = run_cmd(
+        ["fls", "-r", "-l", "-p", "-i", "ewf", "-o", primary_offset, resolved_image],
+        timeout=300,
+    )
+    output = (result.get("stdout") or "").strip()
+    if result["returncode"] != 0 and not output:
+        stderr = (result.get("stderr") or "").strip() or "fls command failed"
+        return {"status": "tool_error", "file_path": file_path, "message": stderr}
+
+    target_lower = file_path.strip().lstrip("/").lower()
+    for line in output.splitlines():
+        if target_lower not in line.lower():
+            continue
+        # fls -l output is tab-separated:
+        # r/r <inode>:\t<path>\t<mtime>\t<atime>\t<ctime>\t<crtime>\t<size>\t<uid>\t<gid>
+        tab_parts = line.split("\t")
+        if len(tab_parts) >= 7:
+            size_field = tab_parts[6].strip()
+            if size_field.isdigit():
+                return {
+                    "status": "ok",
+                    "file_path": file_path,
+                    "size_bytes": int(size_field),
+                    "raw_line": line.strip(),
+                }
+        # Fallback: last purely-numeric token (guards against timestamps like "2015-05-26")
+        tokens = line.split()
+        numeric = [p for p in tokens if p.isdigit() and len(p) <= 12]
+        if numeric:
+            return {
+                "status": "ok",
+                "file_path": file_path,
+                "size_bytes": int(numeric[-1]),
+                "raw_line": line.strip(),
+            }
+
+    return {"status": "path_not_resolved", "file_path": file_path, "message": f"File '{file_path}' not found in forensic image listing."}
+
+
+def _default_extract_file_content(evidence_dir: str, file_path: str, max_bytes: int = 8192) -> Dict[str, Any]:
+    if not file_path:
+        return {"status": "path_not_resolved", "file_path": file_path, "message": "File path was not provided."}
+
+    resolved_image, primary_offset, error = _resolve_primary_image_and_offset(evidence_dir)
+    if not resolved_image:
+        return {"status": "artifact_not_found", "file_path": file_path, "message": error or "No forensic image available."}
+    if not primary_offset:
+        return {"status": "insufficient_index_data", "file_path": file_path, "message": error or "Primary partition offset unavailable."}
+
+    inode = _find_inode_for_path(resolved_image, primary_offset, file_path)
+    if not inode:
+        return {"status": "path_not_resolved", "file_path": file_path, "message": f"File '{file_path}' not found in forensic image."}
+
+    result = run_cmd(
+        ["icat", "-i", "ewf", "-o", primary_offset, resolved_image, inode],
+        timeout=120,
+    )
+    raw = result.get("stdout") or ""
+    if result["returncode"] != 0 and not raw:
+        stderr = (result.get("stderr") or "").strip() or "icat command failed"
+        return {"status": "tool_error", "file_path": file_path, "message": stderr}
+
+    if isinstance(raw, bytes):
+        content = raw.decode("utf-8", errors="replace")
+    else:
+        content = raw
+
+    truncated = len(content) > max_bytes
+    return {
+        "status": "ok",
+        "file_path": file_path,
+        "inode": inode,
+        "content": content[:max_bytes],
+        "truncated": truncated,
+    }
+
+
+# =========================
+# Filesystem stats
+# =========================
+
+def _default_get_filesystem_stats(evidence_dir: str, image_path: Optional[str] = None) -> Dict[str, Any]:
+    resolved_image, primary_offset, error = _resolve_image_and_offset(evidence_dir, image_path)
+    if not resolved_image:
+        return {"status": "artifact_not_found", "image_path": image_path, "message": error or "No forensic image available."}
+    if not primary_offset:
+        return {"status": "insufficient_index_data", "image_path": image_path, "message": error or "Primary partition offset unavailable."}
+
+    result = run_cmd(["fsstat", "-i", "ewf", "-o", primary_offset, resolved_image], timeout=120)
+    output = (result.get("stdout") or "").strip()
+    if result["returncode"] != 0 and not output:
+        stderr = (result.get("stderr") or "").strip() or "fsstat command failed"
+        return {"status": "tool_error", "image_path": image_path, "message": stderr}
+
+    def _parse_fsstat_field(text: str, *keys: str) -> Optional[str]:
+        for key in keys:
+            for line in text.splitlines():
+                if key.lower() in line.lower() and ":" in line:
+                    val = line.split(":", 1)[1].strip()
+                    if val:
+                        return val
+        return None
+
+    cluster_size = _parse_fsstat_field(output, "Cluster Size", "Block Size", "bytes per cluster")
+    sector_size = _parse_fsstat_field(output, "Sector Size", "bytes per sector")
+    fs_type = _parse_fsstat_field(output, "File System Type", "File system type")
+
+    return {
+        "status": "ok",
+        "image_path": image_path,
+        "resolved_path": resolved_image,
+        "primary_offset": primary_offset,
+        "filesystem_type": fs_type,
+        "cluster_size": cluster_size,
+        "sector_size": sector_size,
+        "raw_fsstat": output,
+    }
+
+
+# =========================
+# Disk metadata (GPT/MBR, GUIDs)
+# =========================
+
+def _default_get_disk_metadata(evidence_dir: str, image_path: Optional[str] = None) -> Dict[str, Any]:
+    resolved_image = _resolve_host_path(evidence_dir, image_path) if image_path else None
+    if not resolved_image:
+        # Auto-detect first E01
+        e01_result = _resolve_primary_image_and_offset(evidence_dir)
+        resolved_image = e01_result[0]
+        if not resolved_image:
+            return {"status": "artifact_not_found", "image_path": image_path, "message": "No forensic image available."}
+
+    result = run_cmd(["mmls", "-i", "ewf", resolved_image], timeout=120)
+    output = (result.get("stdout") or "").strip()
+    if result["returncode"] != 0 and not output:
+        stderr = (result.get("stderr") or "").strip() or "mmls command failed"
+        return {"status": "tool_error", "image_path": image_path, "message": stderr}
+
+    # Determine partition scheme from header
+    scheme = "unknown"
+    disk_guid: Optional[str] = None
+    gpt_header_slot: Optional[str] = None
+    header_lines = output.splitlines()[:10]
+    for line in header_lines:
+        ll = line.lower()
+        if "guid partition table" in ll or "gpt" in ll:
+            scheme = "GPT"
+        elif "dos partition table" in ll or "mbr" in ll:
+            scheme = "MBR"
+
+    # Find the GPT Header slot number from the mmls table (for GUID extraction)
+    if scheme == "GPT":
+        for line in output.splitlines():
+            if "GPT Header" in line and ":" in line:
+                slot_part = line.split(":")[0].strip()
+                if slot_part.isdigit():
+                    gpt_header_slot = slot_part
+                    break
+
+    # Extract disk GUID by reading the raw GPT header sector via mmcat | python3
+    if scheme == "GPT" and gpt_header_slot:
+        container_image = _to_container_path(resolved_image, evidence_dir)
+        py_script = (
+            "import sys,struct;"
+            "data=sys.stdin.buffer.read();"
+            "r=data[56:72] if data[:8]==b'EFI PART' else b'';"
+            "p1,p2,p3=struct.unpack_from('<IHH',r) if len(r)==16 else (0,0,0);"
+            "p4=r[8:10].hex().upper() if len(r)==16 else '';"
+            "p5=r[10:16].hex().upper() if len(r)==16 else '';"
+            "print('%08X-%04X-%04X-%s-%s'%(p1,p2,p3,p4,p5)) if len(r)==16 else None"
+        )
+        bash_cmd = f"mmcat -i ewf {container_image} {gpt_header_slot} | python3 -c \"{py_script}\""
+        guid_result = run_cmd(["bash", "-c", bash_cmd], timeout=30)
+        raw_guid = (guid_result.get("stdout") or "").strip()
+        if guid_result["returncode"] == 0 and re.match(
+            r"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}", raw_guid
+        ):
+            disk_guid = raw_guid
+
+    # Parse partitions (reuse existing logic) and capture per-partition GUIDs
+    partitions = []
+    entry_regex = re.compile(r"^\d+:\s*(.+)$")
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped or ":" not in stripped:
+            continue
+        right_side = stripped.split(":", 1)[1].strip()
+        parts = right_side.split()
+        if len(parts) < 5:
+            continue
+        slot, start_sector, end_sector, length_sector = parts[0], parts[1], parts[2], parts[3]
+        description = " ".join(parts[4:])
+        if not start_sector.isdigit() or not end_sector.isdigit() or not length_sector.isdigit():
+            continue
+        part_guid_match = re.search(r"\{?([0-9A-Fa-f]{8}[0-9A-Fa-f\-]{23,})\}?", description)
+        part_guid = part_guid_match.group(1).upper().replace("-", "") if part_guid_match else None
+        partitions.append({
+            "slot": slot,
+            "start_sector": int(start_sector),
+            "end_sector": int(end_sector),
+            "length_sectors": int(length_sector),
+            "description": description,
+            "guid": part_guid,
+        })
+
+    return {
+        "status": "ok",
+        "image_path": image_path,
+        "resolved_path": resolved_image,
+        "scheme": scheme,
+        "disk_guid": disk_guid,
+        "partition_count": len(partitions),
+        "partitions": partitions,
+        "raw_mmls": output,
+    }
+
+
+# =========================
+# Registry query
+# =========================
+
+_HIVE_PATHS = {
+    "sam": "Windows/System32/config/SAM",
+    "system": "Windows/System32/config/SYSTEM",
+    "software": "Windows/System32/config/SOFTWARE",
+    "security": "Windows/System32/config/SECURITY",
+}
+
+_REGISTRY_QUERY_SCRIPT = r"""
+import sys, json
+from Registry import Registry
+
+hive_path = sys.argv[1]
+key_path = sys.argv[2] if len(sys.argv) > 2 else None
+
+try:
+    reg = Registry.Registry(hive_path)
+    if key_path:
+        key = reg.open(key_path)
+        result = {"key": key_path, "values": {}}
+        for v in key.values():
+            try:
+                result["values"][v.name()] = str(v.value())
+            except Exception:
+                result["values"][v.name()] = "<unreadable>"
+        subkeys = [sk.name() for sk in key.subkeys()]
+        result["subkeys"] = subkeys
+    else:
+        root = reg.root()
+        result = {"root": root.name(), "subkeys": [sk.name() for sk in root.subkeys()]}
+    print(json.dumps(result, ensure_ascii=False))
+except Exception as e:
+    print(json.dumps({"error": str(e)}))
+"""
+
+
+def _default_query_registry(
+    evidence_dir: str,
+    hive: str,
+    key_path: Optional[str] = None,
+    user: Optional[str] = None,
+    image_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    hive = (hive or "sam").lower()
+
+    resolved_image, primary_offset, error = _resolve_image_and_offset(evidence_dir, image_path)
+    if not resolved_image:
+        return {"status": "artifact_not_found", "hive": hive, "message": error or "No forensic image available."}
+    if not primary_offset:
+        return {"status": "insufficient_index_data", "hive": hive, "message": error or "Primary partition offset unavailable."}
+
+    # Determine hive path inside the image
+    if hive == "ntuser":
+        if not user:
+            return {"status": "user_not_found", "hive": hive, "message": "User must be specified for NTUSER.DAT queries."}
+        hive_image_path = f"Users/{user}/NTUSER.DAT"
+    else:
+        hive_image_path = _HIVE_PATHS.get(hive)
+        if not hive_image_path:
+            return {"status": "tool_error", "hive": hive, "message": f"Unknown hive '{hive}'. Supported: sam, system, software, security, ntuser."}
+
+    inode = _find_inode_for_path(resolved_image, primary_offset, hive_image_path)
+    if not inode:
+        return {"status": "path_not_resolved", "hive": hive, "message": f"Hive '{hive_image_path}' not found in forensic image."}
+
+    import time
+    container_image = _to_container_path(resolved_image, evidence_dir)
+    tmp_path = f"/tmp/hive_{hive}_{int(time.time())}"
+    extract_cmd = f"icat -i ewf -o {primary_offset} {container_image} {inode} > {tmp_path}"
+    extract_result = run_cmd(["bash", "-lc", extract_cmd], timeout=120)
+    if extract_result["returncode"] != 0:
+        stderr = (extract_result.get("stderr") or "").strip() or "icat extraction failed"
+        return {"status": "tool_error", "hive": hive, "message": stderr}
+
+    # Write the Python query script to a temp file and run it
+    script_path = f"/tmp/regquery_{int(time.time())}.py"
+    write_script_cmd = f"cat > {script_path} << 'PYEOF'\n{_REGISTRY_QUERY_SCRIPT.strip()}\nPYEOF"
+    run_cmd(["bash", "-lc", write_script_cmd], timeout=30)
+
+    key_arg = key_path or ""
+    parse_cmd = f"python3 {script_path} {tmp_path} {key_arg}" if key_arg else f"python3 {script_path} {tmp_path}"
+    parse_result = run_cmd(["bash", "-lc", parse_cmd], timeout=60)
+    stdout = (parse_result.get("stdout") or "").strip()
+    stderr = (parse_result.get("stderr") or "").strip()
+
+    # Cleanup temp files
+    run_cmd(["bash", "-lc", f"rm -f {tmp_path} {script_path}"], timeout=10)
+
+    if not stdout:
+        return {"status": "tool_error", "hive": hive, "message": stderr or "Registry parsing produced no output."}
+
+    try:
+        import json as _json
+        parsed = _json.loads(stdout)
+        if "error" in parsed:
+            return {"status": "tool_error", "hive": hive, "key_path": key_path, "message": parsed["error"]}
+        return {"status": "ok", "hive": hive, "key_path": key_path, "output": parsed}
+    except Exception:
+        return {"status": "ok", "hive": hive, "key_path": key_path, "output": stdout}
 
 
 def create_default_server(
@@ -1057,6 +1524,32 @@ def create_default_server(
                 bool(recursive),
                 image_path,
             )
+        ),
+    )
+    server.register_tool(
+        "get_file_hash",
+        lambda file_path, algorithm="md5": _default_get_file_hash(evidence_dir, file_path, algorithm),
+    )
+    server.register_tool(
+        "get_file_size",
+        lambda file_path: _default_get_file_size(evidence_dir, file_path),
+    )
+    server.register_tool(
+        "extract_file_content",
+        lambda file_path, max_bytes=8192: _default_extract_file_content(evidence_dir, file_path, max_bytes),
+    )
+    server.register_tool(
+        "get_filesystem_stats",
+        lambda image_path=None: _default_get_filesystem_stats(evidence_dir, image_path),
+    )
+    server.register_tool(
+        "get_disk_metadata",
+        lambda image_path=None: _default_get_disk_metadata(evidence_dir, image_path),
+    )
+    server.register_tool(
+        "query_registry",
+        lambda hive, key_path=None, user=None, image_path=None: _default_query_registry(
+            evidence_dir, hive, key_path, user, image_path
         ),
     )
     return server

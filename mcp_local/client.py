@@ -79,3 +79,33 @@ class LocalMCPClient:
             recursive=recursive,
             image_path=image_path,
         )
+
+    def get_file_hash(self, file_path: str, algorithm: str = "md5") -> Any:
+        return self._server.call_tool("get_file_hash", file_path=file_path, algorithm=algorithm)
+
+    def get_file_size(self, file_path: str) -> Any:
+        return self._server.call_tool("get_file_size", file_path=file_path)
+
+    def extract_file_content(self, file_path: str, max_bytes: int = 8192) -> Any:
+        return self._server.call_tool("extract_file_content", file_path=file_path, max_bytes=max_bytes)
+
+    def get_filesystem_stats(self, image_path: Optional[str] = None) -> Any:
+        return self._server.call_tool("get_filesystem_stats", image_path=image_path)
+
+    def get_disk_metadata(self, image_path: Optional[str] = None) -> Any:
+        return self._server.call_tool("get_disk_metadata", image_path=image_path)
+
+    def query_registry(
+        self,
+        hive: str,
+        key_path: Optional[str] = None,
+        user: Optional[str] = None,
+        image_path: Optional[str] = None,
+    ) -> Any:
+        return self._server.call_tool(
+            "query_registry",
+            hive=hive,
+            key_path=key_path,
+            user=user,
+            image_path=image_path,
+        )

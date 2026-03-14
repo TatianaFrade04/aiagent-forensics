@@ -30,6 +30,12 @@
   - `image_partition_inspection`
   - `partition_root_listing`
   - `user_enumeration`
+  - `file_hash_lookup`
+  - `file_size_lookup`
+  - `file_content_inspection`
+  - `filesystem_stats`
+  - `disk_metadata`
+  - `registry_lookup`
   - `insufficient_evidence`
   - `unsafe_inference`
 - Classifier output must include:
@@ -50,11 +56,18 @@
   - `timestamp_target`
   - `operation`
   - `reference_source`
+  - `algorithm`
 - Classification guardrails:
   - User-profile folder queries (for example Desktop of a user) must route to forensic user-profile navigation, not host `list_directory`.
   - Partition table questions map to `image_partition_inspection`.
   - Primary partition root entry questions map to `partition_root_listing`.
   - User inventory questions (for example "which users exist") map to `user_enumeration`.
+  - File hash questions map to `file_hash_lookup`; algorithm goes in `action`.
+  - File size questions map to `file_size_lookup`.
+  - File content/extraction questions map to `file_content_inspection`.
+  - Cluster size / filesystem type questions map to `filesystem_stats`.
+  - Partition schema (GPT/MBR) / disk GUID questions map to `disk_metadata`.
+  - Registry / SAM / RID / last login / password hint / startup program questions map to `registry_lookup`; hive name goes in `artifact_type`.
 
 ## Template Policy
 - Always fetch prompt template via MCP (`get_prompt_template`).
@@ -70,6 +83,9 @@
   - `list_primary_partition_root`
   - `list_users`
   - `resolve_user_profile`, `get_special_folder`, `list_user_directory`
+  - `get_file_hash`, `get_file_size`, `extract_file_content`
+  - `get_filesystem_stats`, `get_disk_metadata`
+  - `query_registry`
   - `query_evidence` (fallback for broader artifact lookups)
 - Routing requirements:
   - `image_partition_inspection` -> `inspect_image_partitions` only.
@@ -77,3 +93,9 @@
   - `user_enumeration` -> `list_users` only.
   - User Desktop/Documents/Downloads listing -> `resolve_user_profile`, `get_special_folder`, `list_user_directory`.
   - Literal host path listing -> `list_directory`/`stat_path` only.
+  - `file_hash_lookup` -> `get_file_hash` only.
+  - `file_size_lookup` -> `get_file_size` only.
+  - `file_content_inspection` -> `extract_file_content` only.
+  - `filesystem_stats` -> `get_filesystem_stats` only.
+  - `disk_metadata` -> `get_disk_metadata` only.
+  - `registry_lookup` -> `query_registry` only.
