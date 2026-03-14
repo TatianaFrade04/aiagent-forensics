@@ -1443,6 +1443,147 @@ def _default_query_registry(
         return {"status": "ok", "hive": hive, "key_path": key_path, "output": stdout}
 
 
+# =========================
+# Event log query (evtx)
+# =========================
+
+_EVTX_PATHS = {
+    "system": "Windows/System32/winevt/Logs/System.evtx",
+    "application": "Windows/System32/winevt/Logs/Application.evtx",
+    "security": "Windows/System32/winevt/Logs/Security.evtx",
+}
+
+_EVTX_PARSE_SCRIPT = """
+import sys, json
+from xml.etree import ElementTree as ET
+from datetime import datetime, timezone
+
+try:
+    import Evtx.Evtx as evtx
+except ImportError:
+    print(json.dumps({"error": "python-evtx not installed"}))
+    sys.exit(0)
+
+log_path = sys.argv[1]
+target_event_ids = [int(x) for x in sys.argv[2].split(",")] if sys.argv[2] else []
+target_ts_str = sys.argv[3] if len(sys.argv) > 3 else ""
+
+results = []
+try:
+    with evtx.Evtx(log_path) as log:
+        for record in log.records():
+            try:
+                xml_str = record.xml()
+                root = ET.fromstring(xml_str)
+                ns = {"w": "http://schemas.microsoft.com/win/2004/08/events/event"}
+                system = root.find("w:System", ns)
+                if system is None:
+                    continue
+                eid_el = system.find("w:EventID", ns)
+                if eid_el is None:
+                    continue
+                eid = int(eid_el.text)
+                if target_event_ids and eid not in target_event_ids:
+                    continue
+                time_el = system.find("w:TimeCreated", ns)
+                ts_str = time_el.get("SystemTime", "") if time_el is not None else ""
+                # Filter by timestamp prefix if requested
+                if target_ts_str and target_ts_str not in ts_str:
+                    continue
+                # Extract EventData strings
+                evt_data = root.find("w:EventData", ns)
+                data_values = []
+                if evt_data is not None:
+                    import re as _re
+                    for data_el in evt_data:
+                        raw = (data_el.text or "").strip()
+                        if not raw:
+                            continue
+                        # python-evtx returns inner XML fragments like <string>9634</string>
+                        # Try to parse them; fall back to stripping tags with regex
+                        try:
+                            inner = ET.fromstring(f"<root>{raw}</root>")
+                            parts = [child.text.strip() for child in inner if child.text and child.text.strip()]
+                            if parts:
+                                data_values.extend(parts)
+                                continue
+                        except Exception:
+                            pass
+                        # Fallback: strip any XML tags with regex
+                        cleaned = _re.sub(r"<[^>]+>", " ", raw).strip()
+                        if cleaned:
+                            data_values.append(cleaned)
+                computer_el = system.find("w:Computer", ns)
+                computer = computer_el.text if computer_el is not None else ""
+                results.append({
+                    "event_id": eid,
+                    "timestamp": ts_str,
+                    "computer": computer,
+                    "data": data_values,
+                })
+            except Exception:
+                pass
+    print(json.dumps(results, ensure_ascii=False))
+except Exception as e:
+    print(json.dumps({"error": str(e)}))
+"""
+
+
+def _default_query_event_log(
+    evidence_dir: str,
+    log_name: str = "system",
+    event_ids: Optional[List[int]] = None,
+    timestamp: Optional[str] = None,
+    image_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    resolved_image, primary_offset, error = _resolve_image_and_offset(evidence_dir, image_path)
+    if not resolved_image:
+        return {"status": "artifact_not_found", "log": log_name, "message": error or "No forensic image available."}
+    if not primary_offset:
+        return {"status": "insufficient_index_data", "log": log_name, "message": error or "Primary partition offset unavailable."}
+
+    evtx_path = _EVTX_PATHS.get((log_name or "system").lower())
+    if not evtx_path:
+        return {"status": "tool_error", "log": log_name, "message": f"Unknown log '{log_name}'. Supported: system, application, security."}
+
+    inode = _find_inode_for_path(resolved_image, primary_offset, evtx_path)
+    if not inode:
+        return {"status": "path_not_resolved", "log": log_name, "message": f"Event log '{evtx_path}' not found in forensic image."}
+
+    import time
+    container_image = _to_container_path(resolved_image, evidence_dir)
+    tmp_evtx = f"/tmp/evtx_{log_name}_{int(time.time())}.evtx"
+    script_path = f"/tmp/evtx_parse_{int(time.time())}.py"
+
+    extract_cmd = f"icat -i ewf -o {primary_offset} {container_image} {inode} > {tmp_evtx}"
+    extract_result = run_cmd(["bash", "-lc", extract_cmd], timeout=120)
+    if extract_result["returncode"] != 0:
+        return {"status": "tool_error", "log": log_name, "message": (extract_result.get("stderr") or "").strip() or "icat failed"}
+
+    write_script_cmd = f"cat > {script_path} << 'PYEOF'\n{_EVTX_PARSE_SCRIPT.strip()}\nPYEOF"
+    run_cmd(["bash", "-lc", write_script_cmd], timeout=30)
+
+    event_ids_arg = ",".join(str(e) for e in (event_ids or []))
+    ts_arg = (timestamp or "").strip()
+    parse_cmd = f"python3 {script_path} {tmp_evtx} '{event_ids_arg}' '{ts_arg}'"
+    parse_result = run_cmd(["bash", "-lc", parse_cmd], timeout=120)
+    stdout = (parse_result.get("stdout") or "").strip()
+
+    run_cmd(["bash", "-lc", f"rm -f {tmp_evtx} {script_path}"], timeout=10)
+
+    if not stdout:
+        return {"status": "tool_error", "log": log_name, "message": (parse_result.get("stderr") or "").strip() or "No output from parser"}
+
+    try:
+        import json as _json
+        parsed = _json.loads(stdout)
+        if isinstance(parsed, dict) and "error" in parsed:
+            return {"status": "tool_error", "log": log_name, "message": parsed["error"]}
+        return {"status": "ok", "log": log_name, "event_ids": event_ids, "timestamp_filter": timestamp, "events": parsed}
+    except Exception:
+        return {"status": "ok", "log": log_name, "raw_output": stdout}
+
+
 def create_default_server(
     *,
     evidence_dir: str,
@@ -1550,6 +1691,12 @@ def create_default_server(
         "query_registry",
         lambda hive, key_path=None, user=None, image_path=None: _default_query_registry(
             evidence_dir, hive, key_path, user, image_path
+        ),
+    )
+    server.register_tool(
+        "query_event_log",
+        lambda log_name="system", event_ids=None, timestamp=None, image_path=None: _default_query_event_log(
+            evidence_dir, log_name, event_ids, timestamp, image_path
         ),
     )
     return server

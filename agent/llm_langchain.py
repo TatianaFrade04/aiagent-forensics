@@ -52,6 +52,7 @@ ARTIFACT_INTENTS = [
     "filesystem_stats",
     "disk_metadata",
     "registry_lookup",
+    "event_log_lookup",
     "insufficient_evidence",
     "unsafe_inference",
 ]
@@ -102,6 +103,7 @@ class OrchestrationDecision(BaseModel):
         "filesystem_stats",
         "disk_metadata",
         "registry_lookup",
+        "event_log_lookup",
         "insufficient_evidence",
         "unsafe_inference",
     ]
@@ -262,6 +264,7 @@ Critical classification rules:
 - Questions about cluster size, block size, sector size, or filesystem type → domain=artifact, intent=filesystem_stats, operation=inspect.
 - Questions about partition schema (GPT/MBR), disk GUID, partition GUID, disk serial number → domain=artifact, intent=disk_metadata, operation=inspect_partitions.
 - Questions about SAM registry, RID numbers, last login time, password hint, startup programs, installed encryption software, UserAssist, or any Windows registry key → domain=artifact, intent=registry_lookup, operation=inspect; put the hive name (sam/ntuser/software/system) in artifact_type and the specific key target in action.
+- Questions about system uptime, system boot time, shutdown time, Windows event log, Event ID, evtx, or "what was the uptime at [timestamp]" → domain=artifact, intent=event_log_lookup, operation=inspect; put the log name (system/application/security) in artifact_type and the specific timestamp or event_id in action.
 - Artifact queries must use needs_image=false.
 - Visual queries must use needs_image=true.
 - For artifact queries, tool_plan must include specific MCP tools and not only generic reasoning.
@@ -479,10 +482,25 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
         if not decision.entities.operation:
             decision.entities.operation = "inspect"
 
+    # Event log guard: uptime/boot time/event log questions must always route to event_log_lookup.
+    if _is_event_log_question(question):
+        decision.domain = "artifact"
+        decision.intent = "event_log_lookup"
+        decision.needs_image = False
+        if not decision.entities.artifact_type:
+            decision.entities.artifact_type = "system"
+        if not decision.entities.operation:
+            decision.entities.operation = "inspect"
+        # Extract timestamp from the question if not already set
+        if not decision.entities.timestamp_target:
+            extracted_ts = _extract_timestamp_from_question(question)
+            if extracted_ts:
+                decision.entities.timestamp_target = extracted_ts
+
     # Intent refinements for artifact branch.
     _protected_intents = {
         "filesystem_stats", "disk_metadata", "file_hash_lookup", "file_size_lookup",
-        "file_content_inspection", "registry_lookup",
+        "file_content_inspection", "registry_lookup", "event_log_lookup",
     }
     if decision.domain == "artifact":
         if decision.entities.path_scope == "host_filesystem" and decision.intent not in _protected_intents:
@@ -518,17 +536,24 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
         "zip", "rar", "arquivo", "comprimido",
     ]
     _USER_ENUM_TOKENS = ["users", "user profiles", "utilizadores", "profiles", "usuarios", "usuários"]
+
+    def _flip_to_file_search() -> None:
+        decision.intent = "file_search"
+        decision.entities.artifact_type = "file"
+        decision.entities.user = None
+        decision.entities.operation = "find"
+        decision.entities.path_scope = "forensic_image"
+        decision.rewritten_question = question
+
     if decision.intent == "user_enumeration" and any(kw in lowered_q for kw in _FILE_SEARCH_TOKENS):
         if not any(t in lowered_q for t in _USER_ENUM_TOKENS):
-            decision.intent = "file_search"
-            decision.entities.artifact_type = "file"
-            decision.entities.user = None
-            decision.entities.operation = "find"
-            if not decision.entities.path_scope:
-                decision.entities.path_scope = "forensic_image"
-            # Restore original question so query_evidence receives the real text,
-            # not the stale LLM rewrite (e.g. "list users").
-            decision.rewritten_question = question
+            _flip_to_file_search()
+
+    # Also fix directory_listing with no user when the question is really a file-type search.
+    # e.g. "list the .pdf files" or "diz os .pdf da pasta Documents" (no user specified)
+    if decision.intent == "directory_listing" and not decision.entities.user:
+        if any(kw in lowered_q for kw in _FILE_SEARCH_TOKENS):
+            _flip_to_file_search()
 
     return decision
 
@@ -547,6 +572,70 @@ _FS_STAT_TOKENS = [
 def _is_filesystem_stats_question(question: str) -> bool:
     lowered = (question or "").lower()
     return any(token in lowered for token in _FS_STAT_TOKENS)
+
+
+_EVENT_LOG_TOKENS = [
+    "uptime", "up time", "system up time", "system uptime",
+    "boot time", "shutdown time", "event log", "event id",
+    "evtx", "windows log", "system log",
+    "tempo de actividade", "tempo de atividade",
+]
+
+def _is_event_log_question(question: str) -> bool:
+    lowered = (question or "").lower()
+    return any(token in lowered for token in _EVENT_LOG_TOKENS)
+
+
+def _extract_timestamp_from_question(question: str) -> Optional[str]:
+    """Try to extract and normalize a date/datetime string from a natural language question.
+    Returns a string compatible with python-evtx timestamp format (YYYY-MM-DD HH:MM:SS or YYYY-MM-DD).
+    """
+    import re
+    from datetime import datetime
+
+    # Pattern 1: ISO datetime already formatted
+    m = re.search(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})", question)
+    if m:
+        return f"{m.group(1)} {m.group(2)}"
+
+    # Pattern 2: ISO date only
+    m = re.search(r"\d{4}-\d{2}-\d{2}", question)
+    if m:
+        return m.group(0)
+
+    # Pattern 3: "February 20, 2014 @ 17:02:35" / "February 20, 2014 17:02:35"
+    month_names = (
+        "january february march april may june "
+        "july august september october november december"
+    ).split()
+    month_map = {name: i + 1 for i, name in enumerate(month_names)}
+    pat3 = re.search(
+        r"(january|february|march|april|may|june|july|august|september|october|november|december)"
+        r"\s+(\d{1,2}),?\s+(\d{4})[^0-9]*(\d{2}):(\d{2}):(\d{2})",
+        question,
+        re.IGNORECASE,
+    )
+    if pat3:
+        month = month_map[pat3.group(1).lower()]
+        day = int(pat3.group(2))
+        year = int(pat3.group(3))
+        hh, mm, ss = pat3.group(4), pat3.group(5), pat3.group(6)
+        return f"{year:04d}-{month:02d}-{day:02d} {hh}:{mm}:{ss}"
+
+    # Pattern 4: "February 20, 2014" without time
+    pat4 = re.search(
+        r"(january|february|march|april|may|june|july|august|september|october|november|december)"
+        r"\s+(\d{1,2}),?\s+(\d{4})",
+        question,
+        re.IGNORECASE,
+    )
+    if pat4:
+        month = month_map[pat4.group(1).lower()]
+        day = int(pat4.group(2))
+        year = int(pat4.group(3))
+        return f"{year:04d}-{month:02d}-{day:02d}"
+
+    return None
 
 
 def _is_partition_root_listing_question(question: str) -> bool:
@@ -752,6 +841,8 @@ def _derive_artifact_tool_plan(decision: OrchestrationDecision) -> List[str]:
         return ["get_disk_metadata"]
     if decision.intent == "registry_lookup":
         return ["query_registry"]
+    if decision.intent == "event_log_lookup":
+        return ["query_event_log"]
 
     if not entities.user:
         return ["get_case_context", "query_evidence"]
@@ -763,7 +854,7 @@ def _apply_tool_plan_rules(decision: OrchestrationDecision) -> OrchestrationDeci
         if decision.intent in {
             "image_partition_inspection", "partition_root_listing", "user_enumeration",
             "file_hash_lookup", "file_size_lookup", "file_content_inspection",
-            "filesystem_stats", "disk_metadata", "registry_lookup",
+            "filesystem_stats", "disk_metadata", "registry_lookup", "event_log_lookup",
             "file_search", "artifact_lookup",
         }:
             decision.tool_plan = _derive_artifact_tool_plan(decision)
@@ -995,6 +1086,26 @@ def _execute_artifact_tool(
         image_path = entities.target_path if _is_forensic_image_path(entities.target_path or "") else None
         return mcp_client.query_registry(hive=hive, key_path=key_path, user=entities.user, image_path=image_path)
 
+    if tool_name == "query_event_log":
+        log_name = (entities.artifact_type or "system").lower()
+        if log_name not in ("system", "application", "security"):
+            log_name = "system"
+        # action may contain event IDs (e.g. "6013") or timestamp filter
+        action = (entities.action or "").strip()
+        event_ids = None
+        timestamp_filter = None
+        if action.isdigit():
+            event_ids = [int(action)]
+        elif action:
+            timestamp_filter = action
+        # Also parse timestamp_target if set
+        if entities.timestamp_target:
+            timestamp_filter = entities.timestamp_target
+        image_path = entities.target_path if _is_forensic_image_path(entities.target_path or "") else None
+        return mcp_client.query_event_log(
+            log_name=log_name, event_ids=event_ids, timestamp=timestamp_filter, image_path=image_path
+        )
+
     return {
         "status": "tool_error",
         "message": f"Unknown artifact tool '{tool_name}'.",
@@ -1069,7 +1180,8 @@ def _run_artifact_flow(
         f"Case context:\n{shorten_text(case_context, max_len=1400)}\n\n"
         + (
             f"Original user question (use this to determine answer format — "
-            f"if it asks for a count/number reply with a number, not a list): {original_question}\n\n"
+            f"if it asks for a count/quantity reply with a number; "
+            f"if it asks for names/list/what files reply with the actual file names): {original_question}\n\n"
             if original_question else ""
         )
         + f"Rewritten question:\n{decision.rewritten_question}\n\n"

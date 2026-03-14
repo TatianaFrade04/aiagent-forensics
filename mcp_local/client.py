@@ -109,3 +109,18 @@ class LocalMCPClient:
             user=user,
             image_path=image_path,
         )
+
+    def query_event_log(
+        self,
+        log_name: str = "system",
+        event_ids: Optional[list] = None,
+        timestamp: Optional[str] = None,
+        image_path: Optional[str] = None,
+    ) -> Any:
+        return self._server.call_tool(
+            "query_event_log",
+            log_name=log_name,
+            event_ids=event_ids,
+            timestamp=timestamp,
+            image_path=image_path,
+        )
