@@ -116,6 +116,7 @@ class LocalMCPClient:
         event_ids: Optional[list] = None,
         timestamp: Optional[str] = None,
         image_path: Optional[str] = None,
+        username: Optional[str] = None,
     ) -> Any:
         return self._server.call_tool(
             "query_event_log",
@@ -123,4 +124,8 @@ class LocalMCPClient:
             event_ids=event_ids,
             timestamp=timestamp,
             image_path=image_path,
+            username=username,
         )
+
+    def query_timeline(self, user: Optional[str] = None, image_path: Optional[str] = None) -> Any:
+        return self._server.call_tool("query_timeline", user=user, image_path=image_path)

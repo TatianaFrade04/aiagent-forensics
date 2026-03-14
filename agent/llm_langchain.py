@@ -1038,17 +1038,7 @@ def _execute_artifact_tool(
             "data": {"output": mcp_client.query_evidence(rewritten_question)},
         }
     if tool_name == "query_timeline":
-        if hasattr(mcp_client, "query_timeline"):
-            return mcp_client.query_timeline(
-                user=entities.user,
-                application=entities.application,
-                action=entities.action,
-            )
-        return {
-            "status": "ok",
-            "message": "Fallback artifact query executed for timeline lookup.",
-            "data": {"output": mcp_client.query_evidence(rewritten_question)},
-        }
+        return mcp_client.query_timeline(user=entities.user)
     if tool_name == "get_case_context":
         return {
             "status": "ok",

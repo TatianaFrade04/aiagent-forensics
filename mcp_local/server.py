@@ -1465,9 +1465,8 @@ _EVTX_PATHS = {
 }
 
 _EVTX_PARSE_SCRIPT = """
-import sys, json
+import sys, json, re as _re
 from xml.etree import ElementTree as ET
-from datetime import datetime, timezone
 
 try:
     import Evtx.Evtx as evtx
@@ -1478,6 +1477,22 @@ except ImportError:
 log_path = sys.argv[1]
 target_event_ids = [int(x) for x in sys.argv[2].split(",")] if sys.argv[2] else []
 target_ts_str = sys.argv[3] if len(sys.argv) > 3 else ""
+target_user = sys.argv[4].lower().strip() if len(sys.argv) > 4 and sys.argv[4].strip() else ""
+
+
+def _parse_data_text(raw):
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    try:
+        inner = ET.fromstring("<root>" + raw + "</root>")
+        parts = [c.text.strip() for c in inner if c.text and c.text.strip()]
+        if parts:
+            return " ".join(parts)
+    except Exception:
+        pass
+    return _re.sub(r"<[^>]+>", " ", raw).strip()
+
 
 results = []
 try:
@@ -1498,32 +1513,23 @@ try:
                     continue
                 time_el = system.find("w:TimeCreated", ns)
                 ts_str = time_el.get("SystemTime", "") if time_el is not None else ""
-                # Filter by timestamp prefix if requested
                 if target_ts_str and target_ts_str not in ts_str:
                     continue
-                # Extract EventData strings
                 evt_data = root.find("w:EventData", ns)
                 data_values = []
+                data_named = {}
                 if evt_data is not None:
-                    import re as _re
                     for data_el in evt_data:
-                        raw = (data_el.text or "").strip()
-                        if not raw:
-                            continue
-                        # python-evtx returns inner XML fragments like <string>9634</string>
-                        # Try to parse them; fall back to stripping tags with regex
-                        try:
-                            inner = ET.fromstring(f"<root>{raw}</root>")
-                            parts = [child.text.strip() for child in inner if child.text and child.text.strip()]
-                            if parts:
-                                data_values.extend(parts)
-                                continue
-                        except Exception:
-                            pass
-                        # Fallback: strip any XML tags with regex
-                        cleaned = _re.sub(r"<[^>]+>", " ", raw).strip()
-                        if cleaned:
-                            data_values.append(cleaned)
+                        val = _parse_data_text(data_el.text)
+                        name = data_el.get("Name")
+                        if name:
+                            data_named[name] = val
+                        elif val:
+                            data_values.append(val)
+                if target_user:
+                    all_vals = list(data_named.values()) + data_values
+                    if not any(target_user in v.lower() for v in all_vals):
+                        continue
                 computer_el = system.find("w:Computer", ns)
                 computer = computer_el.text if computer_el is not None else ""
                 results.append({
@@ -1531,6 +1537,7 @@ try:
                     "timestamp": ts_str,
                     "computer": computer,
                     "data": data_values,
+                    "data_named": data_named,
                 })
             except Exception:
                 pass
@@ -1546,6 +1553,7 @@ def _default_query_event_log(
     event_ids: Optional[List[int]] = None,
     timestamp: Optional[str] = None,
     image_path: Optional[str] = None,
+    username: Optional[str] = None,
 ) -> Dict[str, Any]:
     resolved_image, primary_offset, error = _resolve_image_and_offset(evidence_dir, image_path)
     if not resolved_image:
@@ -1576,7 +1584,8 @@ def _default_query_event_log(
 
     event_ids_arg = ",".join(str(e) for e in (event_ids or []))
     ts_arg = (timestamp or "").strip()
-    parse_cmd = f"python3 {script_path} {tmp_evtx} '{event_ids_arg}' '{ts_arg}'"
+    user_arg = (username or "").strip().replace("'", "")
+    parse_cmd = f"python3 {script_path} {tmp_evtx} '{event_ids_arg}' '{ts_arg}' '{user_arg}'"
     parse_result = run_cmd(["bash", "-lc", parse_cmd], timeout=120)
     stdout = (parse_result.get("stdout") or "").strip()
 
@@ -1593,6 +1602,49 @@ def _default_query_event_log(
         return {"status": "ok", "log": log_name, "event_ids": event_ids, "timestamp_filter": timestamp, "events": parsed}
     except Exception:
         return {"status": "ok", "log": log_name, "raw_output": stdout}
+
+
+_LOGON_EVENT_IDS = [4624, 4647, 4634, 4648]
+
+
+def _default_query_timeline(
+    evidence_dir: str,
+    user: Optional[str] = None,
+    image_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Find logon/logoff events for a user to determine last computer use."""
+    if not user:
+        return {"status": "tool_error", "message": "User name required for timeline lookup."}
+
+    result = _default_query_event_log(
+        evidence_dir,
+        log_name="security",
+        event_ids=_LOGON_EVENT_IDS,
+        username=user,
+        image_path=image_path,
+    )
+    if result.get("status") != "ok":
+        return result
+
+    events = result.get("events", [])
+    if not events:
+        return {
+            "status": "artifact_not_found",
+            "user": user,
+            "message": f"No logon/logoff events found for user '{user}' in Security event log.",
+        }
+
+    # Sort by timestamp and return last event plus summary
+    events_sorted = sorted(events, key=lambda e: str(e.get("timestamp", "")))
+    last_event = events_sorted[-1]
+    first_event = events_sorted[0]
+    return {
+        "status": "ok",
+        "user": user,
+        "last_event": last_event,
+        "first_event": first_event,
+        "total_events": len(events),
+    }
 
 
 def create_default_server(
@@ -1706,8 +1758,12 @@ def create_default_server(
     )
     server.register_tool(
         "query_event_log",
-        lambda log_name="system", event_ids=None, timestamp=None, image_path=None: _default_query_event_log(
-            evidence_dir, log_name, event_ids, timestamp, image_path
+        lambda log_name="system", event_ids=None, timestamp=None, image_path=None, username=None: _default_query_event_log(
+            evidence_dir, log_name, event_ids, timestamp, image_path, username
         ),
+    )
+    server.register_tool(
+        "query_timeline",
+        lambda user=None, image_path=None: _default_query_timeline(evidence_dir, user, image_path),
     )
     return server
