@@ -1729,6 +1729,66 @@ def _default_get_email_accounts(
     return {"status": "ok", "accounts": accounts, "count": len(accounts)}
 
 
+def _default_find_flag(
+    evidence_dir: str,
+    image_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Search the forensic image for CTF-style flag files and flag patterns."""
+    img, offset, _pt = _resolve_image_and_offset(evidence_dir, image_path)
+    container_image = _to_container_path(img, evidence_dir)
+
+    # 1. Find candidate files by name
+    _FLAG_FILENAMES = {"user.txt", "root.txt", "flag.txt", "flag", "proof.txt", "local.txt", "secret.txt"}
+    fls_result = run_cmd(["fls", "-r", "-l", "-i", "ewf", "-o", str(offset), container_image])
+    fls_out = (fls_result.get("stdout") or "").strip()
+    if not fls_out:
+        return {"status": "tool_error", "message": "fls returned no output"}
+
+    candidate_inodes: List[Tuple[str, str]] = []  # (name, inode)
+    for line in fls_out.splitlines():
+        m = re.search(r"r/r\s+(\d+)-\d+-\d+:\s*(.+?)\s+\d{4}-", line)
+        if not m:
+            continue
+        inode, name = m.group(1), m.group(2).strip()
+        if name.lower() in _FLAG_FILENAMES:
+            candidate_inodes.append((name, inode))
+
+    # 2. Read each candidate and check for flag pattern
+    _FLAG_RE = re.compile(r"[A-Za-z0-9_\-]{2,20}\{[^\}]{4,64}\}", re.IGNORECASE)
+    found_flags: List[Dict[str, str]] = []
+    import json as _json
+
+    for name, inode in candidate_inodes:
+        read_result = run_cmd(["icat", "-o", str(offset), "-i", "ewf", container_image, inode])
+        content = (read_result.get("stdout") or "").strip()
+        if not content:
+            continue
+        matches = _FLAG_RE.findall(content)
+        found_flags.append({
+            "filename": name,
+            "inode": inode,
+            "content": content[:512],
+            "flags_found": matches,
+        })
+
+    # 3. Also search fls output for files that look like flag patterns in their name
+    for line in fls_out.splitlines():
+        m_file = re.search(r"r/r\s+(\d+)-\d+-\d+:\s*(.+?)\s+\d{4}-", line)
+        if not m_file:
+            continue
+        inode2, name2 = m_file.group(1), m_file.group(2).strip()
+        if _FLAG_RE.search(name2) and (name2, inode2) not in [(f["filename"], f["inode"]) for f in found_flags]:
+            found_flags.append({"filename": name2, "inode": inode2, "content": name2, "flags_found": [name2]})
+
+    if not found_flags:
+        return {
+            "status": "artifact_not_found",
+            "message": "No flag files (user.txt, flag.txt, root.txt, proof.txt) found in the forensic image.",
+        }
+
+    return {"status": "ok", "flags": found_flags, "count": len(found_flags)}
+
+
 def create_default_server(
     *,
     evidence_dir: str,
@@ -1853,5 +1913,9 @@ def create_default_server(
     server.register_tool(
         "get_email_accounts",
         lambda user=None, image_path=None: _default_get_email_accounts(evidence_dir, user, image_path),
+    )
+    server.register_tool(
+        "find_flag",
+        lambda image_path=None: _default_find_flag(evidence_dir, image_path),
     )
     return server

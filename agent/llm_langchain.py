@@ -54,6 +54,7 @@ ARTIFACT_INTENTS = [
     "registry_lookup",
     "event_log_lookup",
     "email_account_lookup",
+    "flag_search",
     "insufficient_evidence",
     "unsafe_inference",
 ]
@@ -106,6 +107,7 @@ class OrchestrationDecision(BaseModel):
         "registry_lookup",
         "event_log_lookup",
         "email_account_lookup",
+        "flag_search",
         "insufficient_evidence",
         "unsafe_inference",
     ]
@@ -268,6 +270,7 @@ Critical classification rules:
 - Questions about SAM registry, RID numbers, last login time, password hint, startup programs, installed encryption software, UserAssist, or any Windows registry key → domain=artifact, intent=registry_lookup, operation=inspect; put the hive name (sam/ntuser/software/system) in artifact_type and the specific key target in action.
 - Questions about system uptime, system boot time, shutdown time, Windows event log, Event ID, evtx, or "what was the uptime at [timestamp]" → domain=artifact, intent=event_log_lookup, operation=inspect; put the log name (system/application/security) in artifact_type and the specific timestamp or event_id in action.
 - Questions asking for a user's email address, Gmail account, or email account details → domain=artifact, intent=email_account_lookup, operation=inspect; put the user name in user.
+- CTF flag questions ("find the flag", "user flag", "what is the flag", "captura a flag", "encontra a flag") → domain=artifact, intent=flag_search.
 - Artifact queries must use needs_image=false.
 - Visual queries must use needs_image=true.
 - For artifact queries, tool_plan must include specific MCP tools and not only generic reasoning.
@@ -386,6 +389,16 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
     if decision.entities.user and decision.entities.user.strip().lower() in {"unknown", "none", "null", "n/a"}:
         decision.entities.user = None
 
+    # Detect and clear hallucinated paths (LLM often invents /home/user/... or /path/to/... paths).
+    _HALLUCINATED_PATH_PREFIXES = ("/home/user/", "/home/USER/", "/path/to/", "/user/", "/users/default/")
+    if decision.entities.target_path:
+        tp_lower = decision.entities.target_path.lower().replace("\\", "/")
+        if any(tp_lower.startswith(pfx) for pfx in _HALLUCINATED_PATH_PREFIXES):
+            # Keep only the last path segment (e.g. "Desktop" from "/home/user/Desktop")
+            last_seg = decision.entities.target_path.rstrip("/").split("/")[-1]
+            decision.entities.target_path = last_seg if last_seg else None
+            decision.entities.path_scope = None
+
     # Never treat folder names as application entities.
     if decision.entities.application and decision.entities.application.lower() in folder_tokens:
         if not decision.entities.target_path:
@@ -500,6 +513,17 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
             if extracted_ts:
                 decision.entities.timestamp_target = extracted_ts
 
+    # CTF flag guard
+    _FLAG_TOKENS = [
+        "user flag", "root flag", "flag.txt", "user.txt", "root.txt", "proof.txt",
+        "find the flag", "captura a flag", "encontra a flag", "what is the flag",
+        "capture the flag", "get the flag", "ctf flag", "qual é a flag", "qual a flag",
+    ]
+    if any(tok in lowered_q for tok in _FLAG_TOKENS):
+        decision.domain = "artifact"
+        decision.intent = "flag_search"
+        decision.needs_image = False
+
     # Email account address guard: "what is X's email address?" → email_account_lookup
     _EMAIL_ADDR_TOKENS = [
         "qual é o email", "qual o email", "what is.*email", "email address",
@@ -515,7 +539,7 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
     _protected_intents = {
         "filesystem_stats", "disk_metadata", "file_hash_lookup", "file_size_lookup",
         "file_content_inspection", "registry_lookup", "event_log_lookup",
-        "email_account_lookup",
+        "email_account_lookup", "flag_search",
     }
     if decision.domain == "artifact":
         if decision.entities.path_scope == "host_filesystem" and decision.intent not in _protected_intents:
@@ -894,6 +918,8 @@ def _derive_artifact_tool_plan(decision: OrchestrationDecision) -> List[str]:
         return ["query_event_log"]
     if decision.intent == "email_account_lookup":
         return ["get_email_accounts"]
+    if decision.intent == "flag_search":
+        return ["find_flag"]
 
     if not entities.user:
         return ["get_case_context", "query_evidence"]
@@ -906,7 +932,8 @@ def _apply_tool_plan_rules(decision: OrchestrationDecision) -> OrchestrationDeci
             "image_partition_inspection", "partition_root_listing", "user_enumeration",
             "file_hash_lookup", "file_size_lookup", "file_content_inspection",
             "filesystem_stats", "disk_metadata", "registry_lookup", "event_log_lookup",
-            "file_search", "artifact_lookup", "email_account_lookup",
+            "file_search", "artifact_lookup", "email_account_lookup", "flag_search",
+            "directory_listing", "path_lookup",
         }:
             decision.tool_plan = _derive_artifact_tool_plan(decision)
             return decision
@@ -1150,6 +1177,9 @@ def _execute_artifact_tool(
     if tool_name == "get_email_accounts":
         return mcp_client.get_email_accounts(user=entities.user)
 
+    if tool_name == "find_flag":
+        return mcp_client.find_flag()
+
     return {
         "status": "tool_error",
         "message": f"Unknown artifact tool '{tool_name}'.",
@@ -1217,12 +1247,17 @@ def _run_artifact_flow(
         return decision, _artifact_failure_message(first.get("status", "artifact_not_found"), first.get("message", ""))
 
     if decision.intent == "directory_listing":
-        direct_answer = _build_directory_listing_answer(tool_results, decision)
+        direct_answer = _build_directory_listing_answer(tool_results, decision, original_question=original_question)
         if direct_answer:
             return decision, direct_answer
 
     if decision.intent == "timeline_lookup":
         direct_answer = _build_timeline_answer(tool_results, decision)
+        if direct_answer:
+            return decision, direct_answer
+
+    if decision.intent == "flag_search":
+        direct_answer = _build_flag_answer(tool_results)
         if direct_answer:
             return decision, direct_answer
 
@@ -1251,7 +1286,7 @@ def _run_artifact_flow(
     return decision, answer
 
 
-def _build_directory_listing_answer(tool_results: List[dict], decision: OrchestrationDecision) -> Optional[str]:
+def _build_directory_listing_answer(tool_results: List[dict], decision: OrchestrationDecision, original_question: str = "") -> Optional[str]:
     for item in reversed(tool_results):
         result = item.get("result") or {}
         if result.get("status") != "ok":
@@ -1277,6 +1312,11 @@ def _build_directory_listing_answer(tool_results: List[dict], decision: Orchestr
         if not filtered:
             kind = "files" if decision.entities.artifact_type == "file" else "directories"
             return f"No {kind} were found in the requested location."
+
+        _count_tokens = ["quantos", "how many", "conta", "count", "número de", "numero de", "total de"]
+        if any(tok in (original_question or "").lower() for tok in _count_tokens):
+            kind = "ficheiros" if decision.entities.artifact_type == "file" else "entradas"
+            return str(len(filtered))
 
         lines = [f"- {entry.get('name')} ({entry.get('type')})" for entry in filtered]
         return "\n".join(lines)
@@ -1317,6 +1357,30 @@ def _build_timeline_answer(
             f"First activity: {first}\nLast activity:  {last}"
         )
 
+    return None
+
+
+def _build_flag_answer(tool_results: List[dict]) -> Optional[str]:
+    """Build a direct answer for flag_search results."""
+    for item in tool_results:
+        result = item.get("result") or {}
+        if result.get("status") == "artifact_not_found":
+            return result.get("message", "No flag files found in the forensic image.")
+        if result.get("status") != "ok":
+            continue
+        flags = result.get("flags", [])
+        if not flags:
+            return "No flag files found in the forensic image."
+        lines = []
+        for f in flags:
+            found = f.get("flags_found") or []
+            content = f.get("content", "").strip()
+            if found:
+                lines.append(f"**{f['filename']}** → `{'`, `'.join(found)}`")
+            elif content:
+                lines.append(f"**{f['filename']}** → `{content[:120]}`")
+        if lines:
+            return "Flags found in forensic image:\n" + "\n".join(lines)
     return None
 
 

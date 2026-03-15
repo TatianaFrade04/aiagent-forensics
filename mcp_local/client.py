@@ -141,3 +141,6 @@ class LocalMCPClient:
         image_path: Optional[str] = None,
     ) -> Any:
         return self._server.call_tool("get_email_accounts", user=user, image_path=image_path)
+
+    def find_flag(self, image_path: Optional[str] = None) -> Any:
+        return self._server.call_tool("find_flag", image_path=image_path)
