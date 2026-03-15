@@ -1184,7 +1184,7 @@ def _run_artifact_flow(
     if decision.intent == "partition_root_listing":
         return _run_partition_root_listing_flow(mcp_client, decision, conversation_state)
     if decision.intent == "user_enumeration":
-        return _run_user_enumeration_flow(mcp_client, decision, conversation_state)
+        return _run_user_enumeration_flow(mcp_client, decision, conversation_state, original_question=original_question)
 
     _flow_protected_intents = {
         "file_content_inspection", "file_hash_lookup", "file_size_lookup",
@@ -1409,6 +1409,7 @@ def _run_user_enumeration_flow(
     mcp_client: LocalMCPClient,
     decision: OrchestrationDecision,
     conversation_state: Optional[ConversationState] = None,
+    original_question: str = "",
 ) -> tuple[OrchestrationDecision, str]:
     results = []
     for tool_name in decision.tool_plan:
@@ -1433,6 +1434,11 @@ def _run_user_enumeration_flow(
     users = final.get("users", [])
     if not users:
         return decision, "No user profiles were identified in the selected evidence source."
+
+    lowered_q = (original_question or "").lower()
+    _count_tokens = ["quantos", "how many", "conta", "count", "número de", "numero de", "total de"]
+    if any(tok in lowered_q for tok in _count_tokens):
+        return decision, str(len(users))
 
     lines = [f"- {name}" for name in users]
     return decision, "\n".join(lines)
