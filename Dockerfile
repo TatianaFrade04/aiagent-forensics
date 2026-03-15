@@ -3,11 +3,15 @@
 
 FROM ubuntu:22.04
 
-RUN apt update && apt install -y \
+RUN apt-get update && apt-get install -y \
     sleuthkit \
     grep \
     findutils \
     coreutils \
+    libhivex-bin \
+    python3 \
+    python3-pip \
+ && pip3 install --no-cache-dir python-registry python-evtx \
  && rm -rf /var/lib/apt/lists/*
 
 # Pasta onde o ficheiro .E01 será montado via volume
