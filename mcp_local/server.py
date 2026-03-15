@@ -1729,6 +1729,43 @@ def _default_get_email_accounts(
     return {"status": "ok", "accounts": accounts, "count": len(accounts)}
 
 
+def _default_find_deleted_files(
+    evidence_dir: str,
+    path_filter: Optional[str] = None,
+    image_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """List deleted files in the forensic image using fls -d (deleted entries only)."""
+    img, offset, _pt = _resolve_image_and_offset(evidence_dir, image_path)
+    container_image = _to_container_path(img, evidence_dir)
+
+    fls_result = run_cmd(["fls", "-r", "-d", "-l", "-i", "ewf", "-o", str(offset), container_image])
+    fls_out = (fls_result.get("stdout") or "").strip()
+    if not fls_out:
+        return {"status": "ok", "deleted_files": [], "count": 0, "message": "No deleted files found."}
+
+    deleted: List[Dict[str, str]] = []
+    for line in fls_out.splitlines():
+        # fls -d -l output (tab-separated):
+        # "r/- * INODE:\tFULL_PATH\tMTIME\tATIME\tCTIME\tBTIME\tSIZE\t..."
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        name = parts[1].strip()  # full path is always in parts[1]
+        if not name:
+            continue
+        if path_filter and path_filter.lower() not in name.lower():
+            continue
+        size = parts[6].strip() if len(parts) > 6 and parts[6].strip().isdigit() else ""
+        mtime = parts[2].strip() if len(parts) > 2 else ""
+        deleted.append({"name": name, "size_bytes": size, "modified": mtime})
+
+    return {
+        "status": "ok",
+        "deleted_files": deleted[:200],
+        "count": len(deleted),
+    }
+
+
 def _default_find_flag(
     evidence_dir: str,
     image_path: Optional[str] = None,
@@ -1917,5 +1954,9 @@ def create_default_server(
     server.register_tool(
         "find_flag",
         lambda image_path=None: _default_find_flag(evidence_dir, image_path),
+    )
+    server.register_tool(
+        "find_deleted_files",
+        lambda path_filter=None, image_path=None: _default_find_deleted_files(evidence_dir, path_filter, image_path),
     )
     return server

@@ -144,3 +144,6 @@ class LocalMCPClient:
 
     def find_flag(self, image_path: Optional[str] = None) -> Any:
         return self._server.call_tool("find_flag", image_path=image_path)
+
+    def find_deleted_files(self, path_filter: Optional[str] = None, image_path: Optional[str] = None) -> Any:
+        return self._server.call_tool("find_deleted_files", path_filter=path_filter, image_path=image_path)

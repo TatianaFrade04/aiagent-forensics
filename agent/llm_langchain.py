@@ -55,6 +55,7 @@ ARTIFACT_INTENTS = [
     "event_log_lookup",
     "email_account_lookup",
     "flag_search",
+    "deleted_files_lookup",
     "insufficient_evidence",
     "unsafe_inference",
 ]
@@ -108,6 +109,7 @@ class OrchestrationDecision(BaseModel):
         "event_log_lookup",
         "email_account_lookup",
         "flag_search",
+        "deleted_files_lookup",
         "insufficient_evidence",
         "unsafe_inference",
     ]
@@ -271,6 +273,7 @@ Critical classification rules:
 - Questions about system uptime, system boot time, shutdown time, Windows event log, Event ID, evtx, or "what was the uptime at [timestamp]" → domain=artifact, intent=event_log_lookup, operation=inspect; put the log name (system/application/security) in artifact_type and the specific timestamp or event_id in action.
 - Questions asking for a user's email address, Gmail account, or email account details → domain=artifact, intent=email_account_lookup, operation=inspect; put the user name in user.
 - CTF flag questions ("find the flag", "user flag", "what is the flag", "captura a flag", "encontra a flag") → domain=artifact, intent=flag_search.
+- Questions about deleted/erased files ("o que foi apagado", "what was deleted", "ficheiros apagados", "recover deleted") → domain=artifact, intent=deleted_files_lookup.
 - Artifact queries must use needs_image=false.
 - Visual queries must use needs_image=true.
 - For artifact queries, tool_plan must include specific MCP tools and not only generic reasoning.
@@ -513,6 +516,18 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
             if extracted_ts:
                 decision.entities.timestamp_target = extracted_ts
 
+    # Deleted files guard
+    _DELETED_TOKENS = [
+        "foi apagado", "foram apagados", "foi eliminado", "foram eliminados",
+        "deleted files", "what was deleted", "o que foi apagado", "ficheiros apagados",
+        "ficheiros eliminados", "deleted", "apagados", "eliminados", "recuperar",
+        "unallocated", "carve", "recover deleted",
+    ]
+    if any(tok in lowered_q for tok in _DELETED_TOKENS):
+        decision.domain = "artifact"
+        decision.intent = "deleted_files_lookup"
+        decision.needs_image = False
+
     # CTF flag guard
     _FLAG_TOKENS = [
         "user flag", "root flag", "flag.txt", "user.txt", "root.txt", "proof.txt",
@@ -539,7 +554,7 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
     _protected_intents = {
         "filesystem_stats", "disk_metadata", "file_hash_lookup", "file_size_lookup",
         "file_content_inspection", "registry_lookup", "event_log_lookup",
-        "email_account_lookup", "flag_search",
+        "email_account_lookup", "flag_search", "deleted_files_lookup",
     }
     if decision.domain == "artifact":
         if decision.entities.path_scope == "host_filesystem" and decision.intent not in _protected_intents:
@@ -920,6 +935,8 @@ def _derive_artifact_tool_plan(decision: OrchestrationDecision) -> List[str]:
         return ["get_email_accounts"]
     if decision.intent == "flag_search":
         return ["find_flag"]
+    if decision.intent == "deleted_files_lookup":
+        return ["find_deleted_files"]
 
     if not entities.user:
         return ["get_case_context", "query_evidence"]
@@ -933,7 +950,7 @@ def _apply_tool_plan_rules(decision: OrchestrationDecision) -> OrchestrationDeci
             "file_hash_lookup", "file_size_lookup", "file_content_inspection",
             "filesystem_stats", "disk_metadata", "registry_lookup", "event_log_lookup",
             "file_search", "artifact_lookup", "email_account_lookup", "flag_search",
-            "directory_listing", "path_lookup",
+            "deleted_files_lookup", "directory_listing", "path_lookup",
         }:
             decision.tool_plan = _derive_artifact_tool_plan(decision)
             return decision
@@ -1180,6 +1197,10 @@ def _execute_artifact_tool(
     if tool_name == "find_flag":
         return mcp_client.find_flag()
 
+    if tool_name == "find_deleted_files":
+        path_filter = entities.target_path or None
+        return mcp_client.find_deleted_files(path_filter=path_filter)
+
     return {
         "status": "tool_error",
         "message": f"Unknown artifact tool '{tool_name}'.",
@@ -1258,6 +1279,11 @@ def _run_artifact_flow(
 
     if decision.intent == "flag_search":
         direct_answer = _build_flag_answer(tool_results)
+        if direct_answer:
+            return decision, direct_answer
+
+    if decision.intent == "deleted_files_lookup":
+        direct_answer = _build_deleted_files_answer(tool_results, original_question)
         if direct_answer:
             return decision, direct_answer
 
@@ -1357,6 +1383,48 @@ def _build_timeline_answer(
             f"First activity: {first}\nLast activity:  {last}"
         )
 
+    return None
+
+
+def _build_deleted_files_answer(tool_results: List[dict], original_question: str = "") -> Optional[str]:
+    """Build a direct answer for deleted_files_lookup results."""
+    import os as _os
+    for item in tool_results:
+        result = item.get("result") or {}
+        if result.get("status") != "ok":
+            continue
+        deleted = result.get("deleted_files", [])
+        count = result.get("count", len(deleted))
+        if count == 0:
+            return "No deleted file entries found in the forensic image."
+        _count_tokens = ["quantos", "how many", "conta", "count", "número", "numero", "total"]
+        if any(tok in (original_question or "").lower() for tok in _count_tokens):
+            return str(count)
+        # Group by extension for a useful summary
+        from collections import Counter as _Counter
+        ext_counts: dict = _Counter()
+        for f in deleted:
+            ext = _os.path.splitext(f["name"])[1].lower() or "(no ext)"
+            ext_counts[ext] += 1
+        top_exts = ext_counts.most_common(10)
+        ext_lines = "\n".join(f"  {ext}: {n}" for ext, n in top_exts)
+        # Also list non-temp files (not in Temporary Internet Files / cache)
+        interesting = [
+            f["name"] for f in deleted
+            if "temporary internet" not in f["name"].lower()
+            and "cache" not in f["name"].lower()
+            and "content.ie5" not in f["name"].lower()
+        ]
+        detail = ""
+        if interesting:
+            detail = "\n\nNon-cache deleted files:\n" + "\n".join(f"- {n}" for n in interesting[:30])
+            if len(interesting) > 30:
+                detail += f"\n  ... and {len(interesting) - 30} more"
+        return (
+            f"**{count} deleted file entries** found in the forensic image.\n\n"
+            f"By file type (top 10):\n{ext_lines}"
+            + detail
+        )
     return None
 
 
