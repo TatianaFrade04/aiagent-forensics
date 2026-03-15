@@ -376,8 +376,8 @@ def _normalize_decision(raw_plan: dict) -> OrchestrationDecision:
 
 def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str) -> OrchestrationDecision:
     lowered_q = (question or "").lower()
-    folder_tokens = ["desktop", "downloads", "documents", "documentos", "music", "pictures", "videos"]
-    special_folders = {"desktop", "downloads", "documents", "documentos", "music", "pictures", "videos"}
+    folder_tokens = ["desktop", "downloads", "documents", "documentos", "music", "pictures", "videos", "appdata"]
+    special_folders = {"desktop", "downloads", "documents", "documentos", "music", "pictures", "videos", "appdata"}
     file_words = ["ficheiro", "ficheiros", "file", "files"]
     folder_words = ["pasta", "pastas", "folder", "folders", "diretoria", "diretório", "directory"]
 
@@ -413,6 +413,13 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
         if decision.entities.artifact_type is None:
             decision.entities.artifact_type = "filesystem_entry"
 
+    # Internal forensic paths like "$Extend" should not be treated as host filesystem paths.
+    if decision.domain == "artifact" and _is_forensic_internal_path(decision.entities.target_path):
+        decision.entities.path_scope = "forensic_image"
+        decision.entities.artifact_type = decision.entities.artifact_type or "folder"
+        if not decision.entities.operation:
+            decision.entities.operation = "inspect"
+
     # If a user is present and folder target is a known user profile folder, force forensic user-profile scope.
     # Also check the last segment of a full fake path like /home/user/Desktop.
     normalized_target = (decision.entities.target_path or "").strip().lstrip("/").lower()
@@ -421,7 +428,12 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
         normalized_target_last if normalized_target_last in special_folders else None
     )
     if decision.domain == "artifact" and decision.entities.user and folder_key:
-        canonical_folder = "Documents" if folder_key == "documentos" else folder_key.capitalize()
+        if folder_key == "documentos":
+            canonical_folder = "Documents"
+        elif folder_key == "appdata":
+            canonical_folder = "AppData"
+        else:
+            canonical_folder = folder_key.capitalize()
         decision.entities.target_path = canonical_folder
         decision.entities.path_scope = "user_profile"
         decision.entities.artifact_type = decision.entities.artifact_type or "folder"
@@ -453,7 +465,12 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
             canonical_folder = None
             for token in folder_tokens:
                 if token in lowered_q:
-                    canonical_folder = "Documents" if token == "documentos" else token.capitalize()
+                    if token == "documentos":
+                        canonical_folder = "Documents"
+                    elif token == "appdata":
+                        canonical_folder = "AppData"
+                    else:
+                        canonical_folder = token.capitalize()
                     break
             decision.domain = "artifact"
             decision.intent = "directory_listing"
@@ -712,6 +729,25 @@ def _is_forensic_image_path(path: Optional[str]) -> bool:
         return False
     lowered = path.lower()
     return lowered.endswith((".e01", ".dd", ".img", ".raw", ".001"))
+
+
+def _is_forensic_internal_path(path: Optional[str]) -> bool:
+    """Heuristic for filesystem entries inside a forensic image (e.g. $Extend)."""
+    if not path:
+        return False
+
+    token = path.strip().replace("\\", "/")
+    if not token:
+        return False
+
+    lowered = token.lower()
+    if lowered.startswith(("/evidence", "./", "../")):
+        return False
+    if re.match(r"^[a-z]:[\\/]", token, flags=re.IGNORECASE):
+        return False
+
+    # NTFS metadata entries usually start with '$'.
+    return token.startswith("$")
 
 
 def _apply_conversation_reference_rules(

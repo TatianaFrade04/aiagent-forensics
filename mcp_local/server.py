@@ -431,6 +431,7 @@ def _normalize_folder_name(folder_name: str) -> str:
         "pictures": "Pictures",
         "music": "Music",
         "videos": "Videos",
+        "appdata": "AppData",
     }
     return mapping.get(normalized.lower(), normalized or "Desktop")
 
@@ -832,6 +833,26 @@ def _extract_query_filename(question: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
+def _extract_query_folder_name(question: str) -> Optional[str]:
+    text = question or ""
+
+    # Prefer explicit NTFS metadata references (e.g. $Extend, $MFT, $LogFile).
+    m = re.search(r"(\$[A-Za-z0-9_\-.$]+)", text)
+    if m:
+        return m.group(1)
+
+    # Generic "folder X" / "pasta X" extraction.
+    m = re.search(
+        r"(?:folder|directory|pasta|diret[óo]rio)\s+([A-Za-z0-9_\-./$\\]+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip().strip("?.!,;:")
+
+    return None
+
+
 def _default_query_evidence(evidence_dir: str, question: str) -> str:
     lowered = (question or "").lower()
     image_path, primary_offset, error = _resolve_primary_image_and_offset(evidence_dir)
@@ -846,6 +867,64 @@ def _default_query_evidence(evidence_dir: str, question: str) -> str:
             stderr = (result.get("stderr") or "").strip() or "mmls command failed"
             return f"Partition query failed: {stderr}"
         return "Partition table (mmls):\n" + ((result.get("stdout") or "").strip() or "(empty output)")
+
+    folder_name = _extract_query_folder_name(question)
+    if folder_name:
+        result = run_cmd(
+            ["fls", "-r", "-p", "-i", "ewf", "-o", primary_offset, image_path],
+            timeout=300,
+        )
+        stdout = (result.get("stdout") or "").strip()
+        if result["returncode"] != 0 and not stdout:
+            stderr = (result.get("stderr") or "").strip() or "fls command failed"
+            return f"Directory query failed: {stderr}"
+
+        target = folder_name.strip().replace("\\", "/").strip("/").lower()
+        entry_regex = re.compile(r"^([drv])/([drv])\s+\d+-\d+-\d+:\s*(.+)$", re.IGNORECASE)
+        entries: List[Dict[str, str]] = []
+        seen = set()
+        saw_target = False
+
+        for line in stdout.splitlines():
+            match = entry_regex.match(line.strip())
+            if not match:
+                continue
+
+            entry_type = match.group(1).lower()
+            path_value = match.group(3).strip().lstrip("/")
+            path_lower = path_value.lower()
+
+            if path_lower == target:
+                saw_target = True
+                continue
+            if not path_lower.startswith(target + "/"):
+                continue
+
+            saw_target = True
+            relative = path_value[len(target):].lstrip("/")
+            if not relative or "/" in relative:
+                continue
+
+            key = (relative.lower(), entry_type)
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append(
+                {
+                    "type": "dir" if entry_type == "d" else "file",
+                    "name": relative,
+                    "path": path_value,
+                }
+            )
+
+        if not saw_target:
+            return f"Directory '{folder_name}' was not found in the forensic image."
+        if not entries:
+            return f"Directory '{folder_name}' exists but has no direct entries."
+
+        entries.sort(key=lambda item: (item["type"], item["name"].lower()))
+        lines = [f"- {item['name']} ({item['type']})" for item in entries]
+        return f"Entries in {folder_name}:\n" + "\n".join(lines)
 
     user_name = _extract_query_user_name(question)
     if user_name and any(term in lowered for term in ["desktop", "ambiente de trabalho", "work environment"]):
