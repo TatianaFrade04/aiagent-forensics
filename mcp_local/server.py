@@ -1766,6 +1766,291 @@ def _default_find_deleted_files(
     }
 
 
+_INSTALLED_PROGRAMS_SCRIPT = r"""
+import sys, json
+try:
+    from Registry import Registry
+    hive_path = sys.argv[1]
+    reg = Registry.Registry(hive_path)
+    programs = []
+    for root_key in ["Microsoft\\Windows\\CurrentVersion\\Uninstall",
+                      "Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"]:
+        try:
+            uk = reg.open(root_key)
+        except Exception:
+            continue
+        for subkey in uk.subkeys():
+            try:
+                vals = {v.name(): v.value() for v in subkey.values()}
+                dn = vals.get("DisplayName", "")
+                if not dn:
+                    continue
+                programs.append({
+                    "name": dn,
+                    "version": vals.get("DisplayVersion", ""),
+                    "publisher": vals.get("Publisher", ""),
+                    "install_date": vals.get("InstallDate", ""),
+                })
+            except:
+                pass
+    seen = set()
+    unique = []
+    for p in programs:
+        k = p["name"].lower()
+        if k not in seen:
+            seen.add(k)
+            unique.append(p)
+    unique.sort(key=lambda x: x["name"].lower())
+    print(json.dumps(unique))
+except Exception as e:
+    print(json.dumps({"error": str(e)}))
+"""
+
+
+def _default_find_installed_programs(
+    evidence_dir: str,
+    image_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """List installed programs from the SOFTWARE registry hive Uninstall key."""
+    img, offset, err = _resolve_image_and_offset(evidence_dir, image_path)
+    if not img:
+        return {"status": "artifact_not_found", "message": err or "No image."}
+    container_image = _to_container_path(img, evidence_dir)
+
+    inode = _find_inode_for_path(img, offset, "Windows/System32/config/SOFTWARE")
+    if not inode:
+        return {"status": "path_not_resolved", "message": "SOFTWARE hive not found."}
+
+    import tempfile as _tf, time as _time
+    tmp_hive = f"/tmp/SOFTWARE_{_time.time_ns()}"
+    extract = run_cmd(["bash", "-c", f"icat -o {offset} -i ewf {container_image} {inode} > {tmp_hive}"])
+    if extract.get("returncode", 1) != 0:
+        return {"status": "tool_error", "message": "Failed to extract SOFTWARE hive."}
+
+    script_escaped = _INSTALLED_PROGRAMS_SCRIPT.replace('"', '\\"').replace("'", "\\'")
+    parse_cmd = f"python3 -c '{_INSTALLED_PROGRAMS_SCRIPT}' {tmp_hive}"
+    result = run_cmd(["bash", "-c", parse_cmd])
+    out = (result.get("stdout") or "").strip()
+    try:
+        import json as _json
+        programs = _json.loads(out)
+        if isinstance(programs, dict) and "error" in programs:
+            return {"status": "tool_error", "message": programs["error"]}
+        return {"status": "ok", "programs": programs, "count": len(programs)}
+    except Exception as e:
+        return {"status": "tool_error", "message": f"Parse error: {e}", "raw": out[:500]}
+
+
+_ENCRYPTED_EXTENSIONS = {
+    ".enc", ".encrypted", ".gpg", ".pgp", ".aes", ".locked", ".crypt",
+    ".vault", ".crypz", ".locky", ".cerber", ".ezz", ".exx", ".crypted",
+    ".cryptolocker", ".zepto", ".osiris", ".wncry", ".wannacry",
+}
+_COMMON_EXTS = {
+    ".txt", ".doc", ".docx", ".pdf", ".jpg", ".jpeg", ".png", ".gif", ".bmp",
+    ".mp3", ".mp4", ".avi", ".mov", ".exe", ".dll", ".sys", ".ini", ".cfg",
+    ".xml", ".html", ".htm", ".css", ".js", ".py", ".zip", ".rar", ".7z",
+    ".xlsx", ".xls", ".ppt", ".pptx", ".log", ".dat", ".bak", ".tmp", ".eml",
+    ".msg", ".pst", ".ost", ".mbox", ".evtx", ".reg", ".bat", ".cmd", ".ps1",
+    ".lnk", ".url", ".ico", ".ttf", ".cat", ".inf", ".msi", ".cab",
+    ".iso", ".img", ".vhd", ".vmdk", ".db", ".sqlite", ".sqlite3", ".json",
+    ".oeaccount", ".wav", ".flac", ".ogg",
+}
+_BASE64_RE = re.compile(r'^[A-Za-z0-9+/]{24,}={0,2}$')
+_HEX_RE = re.compile(r'^[0-9a-fA-F]{20,}$')
+_GUID_RE = re.compile(r'^[{(]?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}')
+
+
+def _default_get_install_history(
+    evidence_dir: str,
+    image_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Read Application event log for EID 1033 (install) and 1034 (uninstall) events."""
+    import json as _json
+    img, offset, err = _resolve_image_and_offset(evidence_dir, image_path)
+    if not img:
+        return {"status": "artifact_not_found", "message": err or "No image."}
+    container_image = _to_container_path(img, evidence_dir)
+
+    inode = _find_inode_for_path(img, offset, "Windows/System32/winevt/Logs/Application.evtx")
+    if not inode:
+        return {"status": "path_not_resolved", "message": "Application.evtx not found."}
+
+    script = r"""
+import sys, json, re
+from xml.etree import ElementTree as ET
+try:
+    import Evtx.Evtx as evtx
+except ImportError:
+    print(json.dumps({"error": "python-evtx not installed"})); sys.exit(0)
+results = []
+try:
+    with evtx.Evtx(sys.argv[1]) as log:
+        for record in log.records():
+            try:
+                xml = record.xml()
+                root = ET.fromstring(xml)
+                ns = {"w": "http://schemas.microsoft.com/win/2004/08/events/event"}
+                eid_el = root.find(".//w:EventID", ns)
+                if eid_el is None: continue
+                eid = eid_el.text
+                if eid not in ("1033", "1034"): continue
+                ts_el = root.find(".//w:TimeCreated", ns)
+                ts = ts_el.get("SystemTime", "") if ts_el is not None else ""
+                data_els = root.findall(".//w:Data", ns)
+                vals = []
+                for d in data_els:
+                    raw = (d.text or "").strip()
+                    clean = re.sub(r"<[^>]+>", " ", raw).strip()
+                    vals.append(clean)
+                # EID 1033/1034 may store all fields in a single Data element (newline-separated)
+                if len(vals) == 1 and "\n" in vals[0]:
+                    vals = [v.strip() for v in vals[0].split("\n") if v.strip()]
+                name = vals[0] if len(vals) > 0 else ""
+                version = vals[1] if len(vals) > 1 else ""
+                publisher = vals[4] if len(vals) > 4 else ""
+                if not name or name.startswith("(IIS-"): continue
+                key = f"{name}|{version}"
+                results.append({"ts": ts[:10], "eid": eid, "key": key,
+                    "action": "install" if eid == "1033" else "uninstall",
+                    "name": name, "version": version, "publisher": publisher})
+            except: pass
+    print(json.dumps(results))
+except Exception as e:
+    print(json.dumps({"error": str(e)}))
+"""
+    import time as _time, base64 as _b64
+    tmp = f"/tmp/app_{_time.time_ns()}.evtx"
+    script_file = f"/tmp/inst_hist_{_time.time_ns()}.py"
+    run_cmd(["bash", "-c", f"icat -o {offset} -i ewf {container_image} {inode} > {tmp}"])
+    # Write script via base64 to avoid quoting/newline issues
+    encoded = _b64.b64encode(script.encode()).decode()
+    run_cmd(["bash", "-c", f"echo {encoded} | base64 -d > {script_file}"])
+    result = run_cmd(["bash", "-c", f"python3 {script_file} {tmp}"])
+    out = (result.get("stdout") or "").strip()
+    try:
+        events = _json.loads(out)
+        if isinstance(events, dict) and "error" in events:
+            return {"status": "tool_error", "message": events["error"]}
+        # Deduplicate by name+version, keep earliest timestamp
+        seen: dict = {}
+        for e in events:
+            k = e.get("key", e["name"])
+            if k not in seen:
+                seen[k] = e
+        deduped = list(seen.values())
+        installs = [e for e in deduped if e["action"] == "install"]
+        uninstalls = [e for e in deduped if e["action"] == "uninstall"]
+        return {
+            "status": "ok",
+            "installs": installs,
+            "uninstalls": uninstalls,
+            "install_count": len(installs),
+            "uninstall_count": len(uninstalls),
+        }
+    except Exception as e:
+        return {"status": "tool_error", "message": f"Parse error: {e}", "raw": out[:300]}
+
+
+def _default_find_prefetch_files(
+    evidence_dir: str,
+    image_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """List prefetch files (.pf) to show all programs ever executed."""
+    img, offset, err = _resolve_image_and_offset(evidence_dir, image_path)
+    if not img:
+        return {"status": "artifact_not_found", "message": err or "No image."}
+    container_image = _to_container_path(img, evidence_dir)
+
+    fls_result = run_cmd(["fls", "-r", "-l", "-i", "ewf", "-o", str(offset), container_image])
+    fls_out = (fls_result.get("stdout") or "").strip()
+
+    programs: List[Dict[str, str]] = []
+    for line in fls_out.splitlines():
+        if ".pf" not in line.lower():
+            continue
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        path = parts[1].strip()
+        basename = os.path.basename(path)
+        if not basename.lower().endswith(".pf"):
+            continue
+        # Prefetch name format: PROGRAMNAME-HASH.pf
+        name_part = basename[:-3]  # strip .pf
+        if "-" in name_part:
+            prog_name = name_part.rsplit("-", 1)[0]
+        else:
+            prog_name = name_part
+        mtime = parts[2].strip() if len(parts) > 2 else ""
+        programs.append({"program": prog_name, "pf_file": basename, "last_run": mtime[:10]})
+
+    programs.sort(key=lambda x: x["program"])
+    return {
+        "status": "ok",
+        "programs": programs,
+        "count": len(programs),
+        "note": "Only 5 prefetch files found — typical system has 100+. Prefetch directory may have been wiped." if len(programs) <= 5 else "",
+    }
+
+
+def _default_find_suspicious_files(
+    evidence_dir: str,
+    image_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Find potentially encrypted/encoded files in the forensic image."""
+    img, offset, err = _resolve_image_and_offset(evidence_dir, image_path)
+    if not img:
+        return {"status": "artifact_not_found", "message": err or "No image."}
+    container_image = _to_container_path(img, evidence_dir)
+
+    fls_result = run_cmd(["fls", "-r", "-l", "-p", "-i", "ewf", "-o", str(offset), container_image])
+    fls_out = (fls_result.get("stdout") or "").strip()
+    if not fls_out:
+        return {"status": "tool_error", "message": "fls returned no output"}
+
+    encrypted: List[str] = []
+    encoded_names: List[str] = []
+    strange_ext: List[str] = []
+
+    for line in fls_out.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        flag = parts[0].strip()
+        if flag.startswith("d/"):
+            continue  # skip directories
+        path = parts[1].strip()
+        basename = os.path.basename(path)
+        name_no_ext, ext = os.path.splitext(basename)
+        ext_lower = ext.lower()
+
+        # Encrypted extensions
+        if ext_lower in _ENCRYPTED_EXTENSIONS:
+            encrypted.append(path)
+
+        # Encoded filenames (Base64 or long hex), but not GUIDs, MSHist folders, or known cache patterns
+        if not _GUID_RE.match(basename) and not basename.upper().startswith("MSHIST"):
+            if _BASE64_RE.match(name_no_ext) or _HEX_RE.match(name_no_ext):
+                encoded_names.append(path)
+
+        # Strange/unknown extensions — only flag user files to avoid system noise
+        path_upper = path.upper()
+        if ext_lower and ext_lower not in _COMMON_EXTS and "USERS/" in path_upper:
+            if not any(ext_lower.startswith(p) for p in (".0_", ".0__", ".regtrans", ".tm")):
+                strange_ext.append(f"{ext_lower}  {path}")
+
+    return {
+        "status": "ok",
+        "encrypted_files": encrypted,
+        "encrypted_count": len(encrypted),
+        "encoded_name_files": encoded_names[:50],
+        "encoded_count": len(encoded_names),
+        "strange_extension_files": strange_ext[:50],
+        "strange_ext_count": len(strange_ext),
+    }
+
+
 def _default_find_flag(
     evidence_dir: str,
     image_path: Optional[str] = None,
@@ -1958,5 +2243,21 @@ def create_default_server(
     server.register_tool(
         "find_deleted_files",
         lambda path_filter=None, image_path=None: _default_find_deleted_files(evidence_dir, path_filter, image_path),
+    )
+    server.register_tool(
+        "find_suspicious_files",
+        lambda image_path=None: _default_find_suspicious_files(evidence_dir, image_path),
+    )
+    server.register_tool(
+        "find_installed_programs",
+        lambda image_path=None: _default_find_installed_programs(evidence_dir, image_path),
+    )
+    server.register_tool(
+        "get_install_history",
+        lambda image_path=None: _default_get_install_history(evidence_dir, image_path),
+    )
+    server.register_tool(
+        "find_prefetch_files",
+        lambda image_path=None: _default_find_prefetch_files(evidence_dir, image_path),
     )
     return server

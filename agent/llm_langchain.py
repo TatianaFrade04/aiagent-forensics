@@ -56,6 +56,9 @@ ARTIFACT_INTENTS = [
     "email_account_lookup",
     "flag_search",
     "deleted_files_lookup",
+    "suspicious_files_lookup",
+    "installed_programs_lookup",
+    "prefetch_lookup",
     "insufficient_evidence",
     "unsafe_inference",
 ]
@@ -110,6 +113,9 @@ class OrchestrationDecision(BaseModel):
         "email_account_lookup",
         "flag_search",
         "deleted_files_lookup",
+        "suspicious_files_lookup",
+        "installed_programs_lookup",
+        "prefetch_lookup",
         "insufficient_evidence",
         "unsafe_inference",
     ]
@@ -516,6 +522,45 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
             if extracted_ts:
                 decision.entities.timestamp_target = extracted_ts
 
+    # Suspicious/encrypted files guard
+    _SUSPICIOUS_TOKENS = [
+        "encriptado", "encriptados", "encrypted", "codificado", "codificados",
+        "ficheiros encript", "ficheiros codif", "encrypted files", "ficheiros suspeitos",
+        "extensão estranha", "extensao estranha", "strange extension", "nome codificado",
+        "encoded name", "ransomware", "pgp", "gpg", ".enc ", "ficheiros cifrados",
+        "cipher", "cifrado",
+    ]
+    if any(tok in lowered_q for tok in _SUSPICIOUS_TOKENS):
+        decision.domain = "artifact"
+        decision.intent = "suspicious_files_lookup"
+        decision.needs_image = False
+
+    # Installed/uninstalled programs guard
+    _INSTALLED_TOKENS = [
+        "programas instalados", "installed programs", "software instalado",
+        "que programas", "what programs", "aplicações instaladas", "apps instaladas",
+        "o que foi instalado", "what was installed", "installed software",
+        "lista de programas", "list programs", "programas no computador",
+        "programas desinstalados", "uninstalled programs", "o que foi desinstalado",
+        "what was uninstalled", "install history", "historial de instalações",
+        "historial de instalaçoes",
+    ]
+    if any(tok in lowered_q for tok in _INSTALLED_TOKENS):
+        decision.domain = "artifact"
+        decision.intent = "installed_programs_lookup"
+        decision.needs_image = False
+
+    # Prefetch guard
+    _PREFETCH_TOKENS = [
+        "prefetch", "programas executados", "programs executed", "programs run",
+        "que programas foram usados", "what programs were used", "que programas correram",
+        "executed programs", "ran programs", "prefetch files",
+    ]
+    if any(tok in lowered_q for tok in _PREFETCH_TOKENS):
+        decision.domain = "artifact"
+        decision.intent = "prefetch_lookup"
+        decision.needs_image = False
+
     # Deleted files guard
     _DELETED_TOKENS = [
         "foi apagado", "foram apagados", "foi eliminado", "foram eliminados",
@@ -555,6 +600,7 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
         "filesystem_stats", "disk_metadata", "file_hash_lookup", "file_size_lookup",
         "file_content_inspection", "registry_lookup", "event_log_lookup",
         "email_account_lookup", "flag_search", "deleted_files_lookup",
+        "suspicious_files_lookup", "installed_programs_lookup", "prefetch_lookup",
     }
     if decision.domain == "artifact":
         if decision.entities.path_scope == "host_filesystem" and decision.intent not in _protected_intents:
@@ -574,7 +620,8 @@ def _apply_artifact_entity_rules(decision: OrchestrationDecision, question: str)
             decision.intent = "directory_listing"
             decision.entities.operation = "list"
 
-        if decision.entities.operation == "list" or "lista" in lowered_q or "list" in lowered_q:
+        if (decision.entities.operation == "list" or "lista" in lowered_q or "list" in lowered_q) \
+                and decision.intent not in _protected_intents:
             if decision.entities.target_path:
                 decision.intent = "directory_listing"
         if decision.entities.operation == "query_last_used" or "ultima vez" in lowered_q or "last time" in lowered_q:
@@ -937,6 +984,12 @@ def _derive_artifact_tool_plan(decision: OrchestrationDecision) -> List[str]:
         return ["find_flag"]
     if decision.intent == "deleted_files_lookup":
         return ["find_deleted_files"]
+    if decision.intent == "suspicious_files_lookup":
+        return ["find_suspicious_files"]
+    if decision.intent == "installed_programs_lookup":
+        return ["find_installed_programs", "get_install_history"]
+    if decision.intent == "prefetch_lookup":
+        return ["find_prefetch_files"]
 
     if not entities.user:
         return ["get_case_context", "query_evidence"]
@@ -950,7 +1003,8 @@ def _apply_tool_plan_rules(decision: OrchestrationDecision) -> OrchestrationDeci
             "file_hash_lookup", "file_size_lookup", "file_content_inspection",
             "filesystem_stats", "disk_metadata", "registry_lookup", "event_log_lookup",
             "file_search", "artifact_lookup", "email_account_lookup", "flag_search",
-            "deleted_files_lookup", "directory_listing", "path_lookup",
+            "deleted_files_lookup", "suspicious_files_lookup", "installed_programs_lookup",
+            "directory_listing", "path_lookup",
         }:
             decision.tool_plan = _derive_artifact_tool_plan(decision)
             return decision
@@ -1201,6 +1255,18 @@ def _execute_artifact_tool(
         path_filter = entities.target_path or None
         return mcp_client.find_deleted_files(path_filter=path_filter)
 
+    if tool_name == "find_suspicious_files":
+        return mcp_client.find_suspicious_files()
+
+    if tool_name == "find_installed_programs":
+        return mcp_client.find_installed_programs()
+
+    if tool_name == "get_install_history":
+        return mcp_client.get_install_history()
+
+    if tool_name == "find_prefetch_files":
+        return mcp_client.find_prefetch_files()
+
     return {
         "status": "tool_error",
         "message": f"Unknown artifact tool '{tool_name}'.",
@@ -1284,6 +1350,21 @@ def _run_artifact_flow(
 
     if decision.intent == "deleted_files_lookup":
         direct_answer = _build_deleted_files_answer(tool_results, original_question)
+        if direct_answer:
+            return decision, direct_answer
+
+    if decision.intent == "suspicious_files_lookup":
+        direct_answer = _build_suspicious_files_answer(tool_results)
+        if direct_answer:
+            return decision, direct_answer
+
+    if decision.intent == "installed_programs_lookup":
+        direct_answer = _build_installed_programs_answer(tool_results, original_question)
+        if direct_answer:
+            return decision, direct_answer
+
+    if decision.intent == "prefetch_lookup":
+        direct_answer = _build_prefetch_answer(tool_results)
         if direct_answer:
             return decision, direct_answer
 
@@ -1425,6 +1506,112 @@ def _build_deleted_files_answer(tool_results: List[dict], original_question: str
             f"By file type (top 10):\n{ext_lines}"
             + detail
         )
+    return None
+
+
+def _build_suspicious_files_answer(tool_results: List[dict]) -> Optional[str]:
+    for item in tool_results:
+        result = item.get("result") or {}
+        if result.get("status") != "ok":
+            continue
+        enc = result.get("encrypted_files", [])
+        encoded = result.get("encoded_name_files", [])
+        strange = result.get("strange_extension_files", [])
+        lines = []
+        if enc:
+            lines.append(f"**Encrypted file extensions** ({len(enc)}):\n" + "\n".join(f"- {f}" for f in enc[:20]))
+        else:
+            lines.append("**Encrypted file extensions:** none found.")
+        if encoded:
+            lines.append(f"\n**Encoded/obfuscated names** ({result.get('encoded_count', len(encoded))}):\n" + "\n".join(f"- {f}" for f in encoded[:20]))
+        else:
+            lines.append("\n**Encoded/obfuscated names:** none found.")
+        if strange:
+            lines.append(f"\n**Strange extensions in user files** ({result.get('strange_ext_count', len(strange))}):\n" + "\n".join(f"- {f}" for f in strange[:20]))
+        else:
+            lines.append("\n**Strange extensions in user files:** none found.")
+        return "\n".join(lines)
+    return None
+
+
+def _build_installed_programs_answer(tool_results: List[dict], original_question: str = "") -> Optional[str]:
+    registry_result = next((i["result"] for i in tool_results if i["result"].get("status") == "ok" and "programs" in i["result"]), None)
+    history_result = next((i["result"] for i in tool_results if i["result"].get("status") == "ok" and "installs" in i["result"]), None)
+
+    if not registry_result and not history_result:
+        return None
+
+    _count_tokens = ["quantos", "how many", "conta", "count", "número", "numero", "total"]
+    lowered_q = (original_question or "").lower()
+    is_uninstall_q = any(tok in lowered_q for tok in ["desinstal", "uninstall", "removid", "removed"])
+
+    sections = []
+
+    # Registry section — currently installed
+    if registry_result and not is_uninstall_q:
+        programs = registry_result.get("programs", [])
+        if programs:
+            lines = []
+            for p in programs:
+                line = f"- **{p['name']}**"
+                if p.get("version"):
+                    line += f" v{p['version']}"
+                if p.get("publisher"):
+                    line += f" ({p['publisher']})"
+                if p.get("install_date"):
+                    line += f" — installed {p['install_date']}"
+                lines.append(line)
+            sections.append(f"**Currently installed** ({len(programs)}):\n" + "\n".join(lines))
+
+    # Event log section
+    if history_result:
+        installs = history_result.get("installs", [])
+        uninstalls = history_result.get("uninstalls", [])
+        if is_uninstall_q:
+            if uninstalls:
+                lines = [f"- **{e['name']}** v{e['version']} ({e['ts']})" for e in uninstalls]
+                sections.append(f"**Uninstalled** ({len(uninstalls)}):\n" + "\n".join(lines))
+            else:
+                sections.append("**Uninstalled programs:** No EID 1034 uninstall events found in Application log.")
+            # Cross-reference: installed via log but not in registry = likely uninstalled
+            if registry_result:
+                reg_names = {p["name"].lower() for p in registry_result.get("programs", [])}
+                log_only = [e for e in installs if e["name"].lower() not in reg_names]
+                if log_only:
+                    lines = [f"- **{e['name']}** v{e['version']} installed {e['ts']} (no longer in registry)" for e in log_only]
+                    sections.append(f"**Installed but no longer in registry** (likely uninstalled) ({len(log_only)}):\n" + "\n".join(lines))
+        else:
+            if installs:
+                lines = [f"- **{e['name']}** v{e['version']} by {e['publisher']} on {e['ts']}" for e in installs]
+                sections.append(f"**Install history from Event Log** ({len(installs)}):\n" + "\n".join(lines))
+
+    # Fallback for uninstall queries when history failed but registry available
+    if is_uninstall_q and not sections and registry_result:
+        programs = registry_result.get("programs", [])
+        sections.append(
+            "**No EID 1034 uninstall events** found in Application Event Log.\n"
+            "These programs are currently installed (none confirmed uninstalled during the evidence period):\n"
+            + "\n".join(f"- {p['name']}" for p in programs[:20])
+        )
+
+    return "\n\n".join(sections) if sections else None
+
+
+def _build_prefetch_answer(tool_results: List[dict]) -> Optional[str]:
+    for item in tool_results:
+        result = item.get("result") or {}
+        if result.get("status") != "ok":
+            continue
+        programs = result.get("programs", [])
+        count = result.get("count", len(programs))
+        note = result.get("note", "")
+        if count == 0:
+            return "No prefetch files found in Windows\\Prefetch\\."
+        lines = [f"- **{p['program']}** (last run: {p['last_run']})" if p.get("last_run") else f"- **{p['program']}**" for p in programs]
+        header = f"**{count} prefetch files** found (programs ever executed):"
+        if note:
+            header = f"⚠️ {note}\n\n" + header
+        return header + "\n" + "\n".join(lines)
     return None
 
 

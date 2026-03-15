@@ -31,7 +31,7 @@ def run_cmd(argv: List[str], timeout: int = 120, env: Optional[Dict[str, str]] =
     if argv and argv[0] in _FORENSIC_BINARIES:
         translated = []
         for arg in argv:
-            if isinstance(arg, str) and (":\\" in arg or arg.startswith("C:/")):
+            if isinstance(arg, str) and (":\\" in arg or arg.lower().startswith("c:/")):
                 arg = _translate_path(arg)
             translated.append(arg)
         final_argv = ["docker", "exec", _DOCKER_CONTAINER] + translated
@@ -41,13 +41,12 @@ def run_cmd(argv: List[str], timeout: int = 120, env: Optional[Dict[str, str]] =
     result = subprocess.run(
         final_argv,
         capture_output=True,
-        text=True,
         timeout=timeout,
         env=env
     )
     return {
         "argv": final_argv,
         "returncode": result.returncode,
-        "stdout": result.stdout,
-        "stderr": result.stderr
+        "stdout": result.stdout.decode("utf-8", errors="replace"),
+        "stderr": result.stderr.decode("utf-8", errors="replace"),
     }

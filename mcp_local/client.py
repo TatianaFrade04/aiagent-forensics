@@ -147,3 +147,15 @@ class LocalMCPClient:
 
     def find_deleted_files(self, path_filter: Optional[str] = None, image_path: Optional[str] = None) -> Any:
         return self._server.call_tool("find_deleted_files", path_filter=path_filter, image_path=image_path)
+
+    def find_suspicious_files(self, image_path: Optional[str] = None) -> Any:
+        return self._server.call_tool("find_suspicious_files", image_path=image_path)
+
+    def find_installed_programs(self, image_path: Optional[str] = None) -> Any:
+        return self._server.call_tool("find_installed_programs", image_path=image_path)
+
+    def get_install_history(self, image_path: Optional[str] = None) -> Any:
+        return self._server.call_tool("get_install_history", image_path=image_path)
+
+    def find_prefetch_files(self, image_path: Optional[str] = None) -> Any:
+        return self._server.call_tool("find_prefetch_files", image_path=image_path)
