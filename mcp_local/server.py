@@ -1202,9 +1202,166 @@ def _default_get_file_hash(evidence_dir: str, file_path: str, algorithm: str = "
     }
 
 
+def _build_match_result(
+    original_filename: str,
+    matches: List[Tuple[str, int]],
+) -> Dict[str, Any]:
+    """Build a status dict from a (resolved_path, size_bytes) match list.
+
+    Returns 'ok' for a single unique match, 'multiple_matches' for several.
+    Never mutates *matches*.
+    """
+    if len(matches) == 1:
+        return {
+            "status": "ok",
+            "file_path": matches[0][0],   # resolved full path from fls
+            "size_bytes": matches[0][1],
+        }
+    paths_str = "\n".join(
+        f"  - {p} ({s:,} bytes)" for (p, s) in matches[:10]
+    )
+    return {
+        "status": "multiple_matches",
+        "file_path": original_filename,
+        "message": (
+            f"Found {len(matches)} file(s) for '{original_filename}'. "
+            f"Please specify the full path:\n{paths_str}"
+        ),
+        "matches": [{"path": p, "size_bytes": s} for (p, s) in matches[:10]],
+    }
+
+
+def _find_file_in_fls_output(output: str, filename: str) -> Dict[str, Any]:
+    """Pure matching logic: locate *filename* inside fls -l -p stdout.
+
+    Search strategy (applied in order; halts at first success):
+
+      Pass 1 — Exact case-insensitive basename match.
+               Handles identical names regardless of case ("notes.TXT" for "notes.txt").
+
+      Pass 2 — Fuzzy basename match via difflib.get_close_matches (cutoff 0.75).
+               Catches single-character typos, transpositions, and minor capitalisation
+               differences.  When a single fuzzy candidate is found the result has
+               status 'ok' *plus* a 'fuzzy_note' field describing what was matched,
+               so the caller/responder can inform the user.
+
+    Returns the same structure as _build_match_result:
+      - "ok"               : one match; file_path (resolved) + size_bytes [+ fuzzy_note].
+      - "multiple_matches" : more than one file equally (or similarly) named.
+      - "path_not_resolved": nothing found at either pass.
+    """
+    import difflib
+
+    target_lower = filename.strip().lower()
+
+    # Parse every fls -l -p line into (full_path, basename_lower, size_bytes).
+    # fls -l -p TSV: <type inode:>\t<full-path>\t<mtime>\t<atime>\t<ctime>\t<crtime>\t<size>\t<uid>\t<gid>
+    all_entries: List[Tuple[str, str, int]] = []
+    for line in output.splitlines():
+        tab_parts = line.split("\t")
+        if len(tab_parts) < 2:
+            continue
+        path_token = tab_parts[1].strip()
+        if not path_token:
+            continue
+        basename = path_token.split("/")[-1].lower()
+        size_bytes: Optional[int] = None
+        if len(tab_parts) >= 7 and tab_parts[6].strip().isdigit():
+            size_bytes = int(tab_parts[6].strip())
+        else:
+            # Fallback: last purely-numeric token that is plausibly a byte count.
+            tokens = line.split()
+            numeric = [t for t in tokens if t.isdigit() and len(t) <= 12]
+            if numeric:
+                size_bytes = int(numeric[-1])
+        if size_bytes is not None:
+            all_entries.append((path_token, basename, size_bytes))
+
+    # --- Pass 1: exact case-insensitive basename match ---
+    exact: List[Tuple[str, int]] = [
+        (p, s) for (p, bn, s) in all_entries if bn == target_lower
+    ]
+    if exact:
+        return _build_match_result(filename, exact)
+
+    # --- Pass 2: fuzzy basename match (difflib, cutoff 0.75) ---
+    all_basenames = [bn for (_, bn, _) in all_entries]
+    close_names = set(
+        difflib.get_close_matches(target_lower, all_basenames, n=5, cutoff=0.75)
+    )
+    if close_names:
+        fuzzy_raw: List[Tuple[str, int]] = [
+            (p, s) for (p, bn, s) in all_entries if bn in close_names
+        ]
+        # Deduplicate paths (allocated + unallocated fls entries for the same file).
+        seen: set = set()
+        fuzzy: List[Tuple[str, int]] = []
+        for p, s in fuzzy_raw:
+            if p.lower() not in seen:
+                seen.add(p.lower())
+                fuzzy.append((p, s))
+        if fuzzy:
+            result = _build_match_result(filename, fuzzy)
+            if result["status"] == "ok":
+                actual_name = fuzzy[0][0].split("/")[-1]
+                result["fuzzy_note"] = (
+                    f"No exact match for '{filename}'. "
+                    f"Closest match: '{actual_name}'."
+                )
+            return result
+
+    return {
+        "status": "path_not_resolved",
+        "file_path": filename,
+        "message": f"File '{filename}' not found in forensic image listing.",
+    }
+
+
+def _default_find_file_by_name(evidence_dir: str, filename: str) -> Dict[str, Any]:
+    """Search the forensic image for a file by bare basename.
+
+    Delegates all matching to _find_file_in_fls_output (exact then fuzzy).
+    Returns the same status structure as get_file_size so the responder handles
+    results from both entry points uniformly:
+      - "ok"               : one match; file_path (resolved) + size_bytes [+ fuzzy_note].
+      - "multiple_matches" : more than one file matches by name or close similarity.
+      - "path_not_resolved": no file found at any level of matching.
+    """
+    if not filename:
+        return {"status": "path_not_resolved", "file_path": filename, "message": "Filename was not provided."}
+
+    resolved_image, primary_offset, error = _resolve_primary_image_and_offset(evidence_dir)
+    if not resolved_image:
+        return {"status": "artifact_not_found", "file_path": filename, "message": error or "No forensic image available."}
+    if not primary_offset:
+        return {"status": "insufficient_index_data", "file_path": filename, "message": error or "Primary partition offset unavailable."}
+
+    result = run_cmd(
+        ["fls", "-r", "-l", "-p", "-i", "ewf", "-o", primary_offset, resolved_image],
+        timeout=300,
+    )
+    output = (result.get("stdout") or "").strip()
+    if result["returncode"] != 0 and not output:
+        stderr = (result.get("stderr") or "").strip() or "fls command failed"
+        return {"status": "tool_error", "file_path": filename, "message": stderr}
+
+    return _find_file_in_fls_output(output, filename)
+
+
 def _default_get_file_size(evidence_dir: str, file_path: str) -> Dict[str, Any]:
+    """Return the size in bytes of a file at an explicit path in the forensic image.
+
+    *file_path* should contain at least one path separator ('/').  For bare
+    filenames (no separator), the executor should call _default_find_file_by_name
+    via client.find_file_by_name instead.  As a safety fallback, bare names
+    received here are delegated to _default_find_file_by_name automatically.
+    """
     if not file_path:
         return {"status": "path_not_resolved", "file_path": file_path, "message": "File path was not provided."}
+
+    # Safety fallback: bare filename (no '/') → basename search.
+    if "/" not in file_path.strip().lstrip("/"):
+        return _default_find_file_by_name(evidence_dir, file_path)
 
     resolved_image, primary_offset, error = _resolve_primary_image_and_offset(evidence_dir)
     if not resolved_image:
@@ -1221,34 +1378,38 @@ def _default_get_file_size(evidence_dir: str, file_path: str) -> Dict[str, Any]:
         stderr = (result.get("stderr") or "").strip() or "fls command failed"
         return {"status": "tool_error", "file_path": file_path, "message": stderr}
 
-    target_lower = file_path.strip().lstrip("/").lower()
+    # fls -l -p TSV: <type inode:>\t<full-path>\t<mtime>\t<atime>\t<ctime>\t<crtime>\t<size>\t<uid>\t<gid>
+    target = file_path.strip().lstrip("/")
+    target_lower = target.lower()
     for line in output.splitlines():
-        if target_lower not in line.lower():
-            continue
-        # fls -l output is tab-separated:
-        # r/r <inode>:\t<path>\t<mtime>\t<atime>\t<ctime>\t<crtime>\t<size>\t<uid>\t<gid>
         tab_parts = line.split("\t")
-        if len(tab_parts) >= 7:
-            size_field = tab_parts[6].strip()
-            if size_field.isdigit():
+        if len(tab_parts) < 2:
+            continue
+        path_token = tab_parts[1].strip()
+        if not path_token:
+            continue
+        path_lower = path_token.lower()
+        if path_lower == target_lower or path_lower.endswith("/" + target_lower):
+            size_bytes = None
+            if len(tab_parts) >= 7 and tab_parts[6].strip().isdigit():
+                size_bytes = int(tab_parts[6].strip())
+            else:
+                tokens = line.split()
+                numeric = [t for t in tokens if t.isdigit() and len(t) <= 12]
+                if numeric:
+                    size_bytes = int(numeric[-1])
+            if size_bytes is not None:
                 return {
                     "status": "ok",
-                    "file_path": file_path,
-                    "size_bytes": int(size_field),
-                    "raw_line": line.strip(),
+                    "file_path": path_token,
+                    "size_bytes": size_bytes,
                 }
-        # Fallback: last purely-numeric token (guards against timestamps like "2015-05-26")
-        tokens = line.split()
-        numeric = [p for p in tokens if p.isdigit() and len(p) <= 12]
-        if numeric:
-            return {
-                "status": "ok",
-                "file_path": file_path,
-                "size_bytes": int(numeric[-1]),
-                "raw_line": line.strip(),
-            }
 
-    return {"status": "path_not_resolved", "file_path": file_path, "message": f"File '{file_path}' not found in forensic image listing."}
+    return {
+        "status": "path_not_resolved",
+        "file_path": file_path,
+        "message": f"File at path '{file_path}' not found in forensic image listing.",
+    }
 
 
 def _default_extract_file_content(evidence_dir: str, file_path: str, max_bytes: int = 8192) -> Dict[str, Any]:
@@ -1280,11 +1441,42 @@ def _default_extract_file_content(evidence_dir: str, file_path: str, max_bytes: 
         content = raw
 
     truncated = len(content) > max_bytes
+    snippet = content[:max_bytes]
+
+    # Detect mbox format: the first line starts with "From " followed by a sender
+    # address and a date stamp (standard POSIX mbox envelope-sender line).
+    # Thunderbird stores each mail folder (INBOX, Sent, Drafts …) as a single mbox
+    # file.  Without mbox-aware parsing `extract_file_content` would return raw mbox
+    # bytes that the LLM cannot present as a readable email.
+    first_line = snippet.split("\n", 1)[0]
+    if re.match(r"^From \S", first_line):
+        # Split on mbox message boundaries: a line starting with "From " that
+        # is preceded by a blank line (or at the very start of the file).
+        # re.split on \n\nFrom preserves the separator in subsequent parts.
+        parts = re.split(r"\n(?=From \S)", snippet)
+        # parts[0] is the first message (including its "From " envelope line).
+        # Skip the envelope line; the RFC 2822 headers + body start on line 2.
+        first_msg_lines = parts[0].split("\n")[1:]  # drop "From user@host date" line
+        first_message = "\n".join(first_msg_lines).strip()
+        total_messages = len(parts)
+        return {
+            "status": "ok",
+            "file_path": file_path,
+            "inode": inode,
+            "format": "mbox",
+            "content": first_message,
+            "truncated": truncated,
+            "mbox_note": (
+                f"This is message 1 of {total_messages} in a Thunderbird mbox folder. "
+                "To read another message, the file contains multiple 'From ' delimited messages."
+            ),
+        }
+
     return {
         "status": "ok",
         "file_path": file_path,
         "inode": inode,
-        "content": content[:max_bytes],
+        "content": snippet,
         "truncated": truncated,
     }
 
@@ -1293,12 +1485,60 @@ def _default_extract_file_content(evidence_dir: str, file_path: str, max_bytes: 
 # Filesystem stats
 # =========================
 
-def _default_get_filesystem_stats(evidence_dir: str, image_path: Optional[str] = None) -> Dict[str, Any]:
+def _extract_partition_offsets_all(mmls_output: str) -> List[str]:
+    """
+    Return start-sector offsets for all real (non-meta, non-unallocated) partitions
+    from mmls output, sorted by start sector ascending.  Index is 1-based.
+
+    Filters out entries whose slot field is non-numeric ("Meta", "-------", etc.).
+    """
+    results = []
+    for line in (mmls_output or "").splitlines():
+        stripped = line.strip()
+        if not stripped or ":" not in stripped:
+            continue
+        right_side = stripped.split(":", 1)[1].strip()
+        parts = right_side.split()
+        if len(parts) < 5:
+            continue
+        slot = parts[0]
+        start_sector = parts[1]
+        length_sector = parts[3]
+        if not start_sector.isdigit() or not length_sector.isdigit():
+            continue
+        if not slot.isdigit():
+            continue
+        results.append((int(start_sector), start_sector))
+    results.sort(key=lambda x: x[0])
+    return [r[1] for r in results]
+
+
+def _default_get_filesystem_stats(
+    evidence_dir: str,
+    image_path: Optional[str] = None,
+    partition_index: Optional[int] = None,
+) -> Dict[str, Any]:
     resolved_image, primary_offset, error = _resolve_image_and_offset(evidence_dir, image_path)
     if not resolved_image:
         return {"status": "artifact_not_found", "image_path": image_path, "message": error or "No forensic image available."}
     if not primary_offset:
         return {"status": "insufficient_index_data", "image_path": image_path, "message": error or "Primary partition offset unavailable."}
+
+    # When the caller requests a specific partition, override the auto-detected offset.
+    if partition_index is not None:
+        mmls_result = run_cmd(["mmls", "-i", "ewf", resolved_image], timeout=120)
+        all_offsets = _extract_partition_offsets_all((mmls_result.get("stdout") or ""))
+        if partition_index < 1 or partition_index > len(all_offsets):
+            return {
+                "status": "artifact_not_found",
+                "image_path": image_path,
+                "partition_index": partition_index,
+                "message": (
+                    f"Partition index {partition_index} is out of range. "
+                    f"Found {len(all_offsets)} real (non-meta) partition(s)."
+                ),
+            }
+        primary_offset = all_offsets[partition_index - 1]
 
     result = run_cmd(["fsstat", "-i", "ewf", "-o", primary_offset, resolved_image], timeout=120)
     output = (result.get("stdout") or "").strip()
@@ -1371,25 +1611,28 @@ def _default_get_disk_metadata(evidence_dir: str, image_path: Optional[str] = No
                     gpt_header_slot = slot_part
                     break
 
-    # Extract disk GUID by reading the raw GPT header sector via mmcat | python3
+    # Extract disk GUID by hex-dumping the raw GPT header sector with od.
+    # Using od avoids any dependency on python3 being present in the container's PATH.
     if scheme == "GPT" and gpt_header_slot:
         container_image = _to_container_path(resolved_image, evidence_dir)
-        py_script = (
-            "import sys,struct;"
-            "data=sys.stdin.buffer.read();"
-            "r=data[56:72] if data[:8]==b'EFI PART' else b'';"
-            "p1,p2,p3=struct.unpack_from('<IHH',r) if len(r)==16 else (0,0,0);"
-            "p4=r[8:10].hex().upper() if len(r)==16 else '';"
-            "p5=r[10:16].hex().upper() if len(r)==16 else '';"
-            "print('%08X-%04X-%04X-%s-%s'%(p1,p2,p3,p4,p5)) if len(r)==16 else None"
+        bash_cmd = (
+            f"mmcat -i ewf {container_image} {gpt_header_slot} 2>/dev/null "
+            f"| od -A n -v -t x1 | tr -dc '0-9a-fA-F'"
         )
-        bash_cmd = f"mmcat -i ewf {container_image} {gpt_header_slot} | python3 -c \"{py_script}\""
-        guid_result = run_cmd(["bash", "-c", bash_cmd], timeout=30)
-        raw_guid = (guid_result.get("stdout") or "").strip()
-        if guid_result["returncode"] == 0 and re.match(
-            r"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}", raw_guid
-        ):
-            disk_guid = raw_guid
+        hex_result = run_cmd(["bash", "-c", bash_cmd], timeout=30)
+        raw_hex = (hex_result.get("stdout") or "").strip()
+        # GPT signature "EFI PART" = 4546492050415254 (8 bytes = 16 hex chars)
+        # Disk GUID is at byte offset 56 (hex offset 112) and is 16 bytes (32 hex chars).
+        if len(raw_hex) >= 144 and raw_hex[:16].upper() == "4546492050415254":
+            try:
+                import struct as _struct
+                guid_bytes = bytes.fromhex(raw_hex[112:144])
+                p1, p2, p3 = _struct.unpack_from("<IHH", guid_bytes, 0)
+                p4 = guid_bytes[8:10].hex().upper()
+                p5 = guid_bytes[10:16].hex().upper()
+                disk_guid = f"{p1:08X}-{p2:04X}-{p3:04X}-{p4}-{p5}"
+            except Exception:
+                disk_guid = None
 
     # Parse partitions (reuse existing logic) and capture per-partition GUIDs
     partitions = []
@@ -1512,8 +1755,11 @@ def _default_query_registry(
     run_cmd(["bash", "-lc", write_script_cmd], timeout=30)
 
     key_arg = key_path or ""
-    parse_cmd = f"python3 {script_path} {tmp_path} {key_arg}" if key_arg else f"python3 {script_path} {tmp_path}"
-    parse_result = run_cmd(["bash", "-lc", parse_cmd], timeout=60)
+    # Invoke python3 directly via docker exec to avoid PATH issues in bash login shells.
+    parse_argv = ["python3", script_path, tmp_path]
+    if key_arg:
+        parse_argv.append(key_arg)
+    parse_result = run_cmd(parse_argv, timeout=60)
     stdout = (parse_result.get("stdout") or "").strip()
     stderr = (parse_result.get("stderr") or "").strip()
 
@@ -1664,8 +1910,11 @@ def _default_query_event_log(
     event_ids_arg = ",".join(str(e) for e in (event_ids or []))
     ts_arg = (timestamp or "").strip()
     user_arg = (username or "").strip().replace("'", "")
-    parse_cmd = f"python3 {script_path} {tmp_evtx} '{event_ids_arg}' '{ts_arg}' '{user_arg}'"
-    parse_result = run_cmd(["bash", "-lc", parse_cmd], timeout=120)
+    # Invoke python3 directly via docker exec to avoid PATH issues in bash login shells.
+    parse_result = run_cmd(
+        ["python3", script_path, tmp_evtx, event_ids_arg, ts_arg, user_arg],
+        timeout=120,
+    )
     stdout = (parse_result.get("stdout") or "").strip()
 
     run_cmd(["bash", "-lc", f"rm -f {tmp_evtx} {script_path}"], timeout=10)
@@ -1685,6 +1934,36 @@ def _default_query_event_log(
 
 _LOGON_EVENT_IDS = [4624, 4647, 4634, 4648]
 
+# System event log IDs used as fallback when Security log has no logon events.
+# 6005 = EventLog service started (OS boot),  6006 = EventLog service stopped (clean shutdown)
+# 6008 = unexpected shutdown,  6009 = OS version logged at boot
+_BOOT_SHUTDOWN_EVENT_IDS = [6005, 6006, 6008, 6009]
+
+
+def _build_timeline_result(
+    events: list,
+    user: Optional[str],
+    timestamp: Optional[str],
+    source: str,
+) -> Dict[str, Any]:
+    """Shared helper: extract dates and first/last from an event list."""
+    events_sorted = sorted(events, key=lambda e: str(e.get("timestamp", "")))
+    unique_dates: list = sorted({
+        str(e.get("timestamp", ""))[:10]
+        for e in events_sorted
+        if len(str(e.get("timestamp", ""))) >= 10
+    })
+    return {
+        "status": "ok",
+        "source": source,
+        "user": user,
+        "timestamp_filter": timestamp,
+        "first_event": events_sorted[0],
+        "last_event": events_sorted[-1],
+        "total_events": len(events),
+        "unique_active_dates": unique_dates,
+    }
+
 
 def _default_query_timeline(
     evidence_dir: str,
@@ -1692,11 +1971,20 @@ def _default_query_timeline(
     timestamp: Optional[str] = None,
     image_path: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Find logon/logoff events for a user or on a specific date.
-    - user: filter by username (optional)
-    - timestamp: ISO date or datetime prefix to filter events (optional)
     """
-    result = _default_query_event_log(
+    Multi-source timeline query:
+
+    Layer 1 — Security event log (logon/logoff IDs 4624/4647/4634/4648).
+              Best source: captures interactive and remote logons per user.
+    Layer 2 — System event log (boot/shutdown IDs 6005/6006/6008/6009).
+              Fallback: present even when auditing is disabled.
+    Layer 3 — fls timestamp scan of the primary partition root.
+              Last resort: works from filesystem metadata when no EVTX is available.
+
+    The 'source' field in the result indicates which layer succeeded.
+    """
+    # --- Layer 1: Security log ---
+    sec_result = _default_query_event_log(
         evidence_dir,
         log_name="security",
         event_ids=_LOGON_EVENT_IDS,
@@ -1704,108 +1992,360 @@ def _default_query_timeline(
         username=user,
         image_path=image_path,
     )
-    if result.get("status") != "ok":
-        return result
+    if sec_result.get("status") == "ok":
+        events = sec_result.get("events") or []
+        if events:
+            return _build_timeline_result(events, user, timestamp, source="security_event_log")
 
-    events = result.get("events", [])
-    if not events:
-        who = f"user '{user}'" if user else "any user"
-        when = f" on {timestamp}" if timestamp else ""
-        return {
-            "status": "artifact_not_found",
-            "user": user,
-            "timestamp_filter": timestamp,
-            "message": f"No logon/logoff events found for {who}{when} in Security event log.",
-        }
+    # Collect the error context from Layer 1 so we can report it if all layers fail.
+    layer1_status = sec_result.get("status", "tool_error")
+    layer1_msg = sec_result.get("message", "")
 
-    # Sort by timestamp and return last event plus summary
-    events_sorted = sorted(events, key=lambda e: str(e.get("timestamp", "")))
-    last_event = events_sorted[-1]
-    first_event = events_sorted[0]
+    # --- Layer 2: System log (boot/shutdown events) ---
+    sys_result = _default_query_event_log(
+        evidence_dir,
+        log_name="system",
+        event_ids=_BOOT_SHUTDOWN_EVENT_IDS,
+        timestamp=timestamp,
+        username=None,   # boot events have no user field
+        image_path=image_path,
+    )
+    if sys_result.get("status") == "ok":
+        events = sys_result.get("events") or []
+        if events:
+            return _build_timeline_result(events, user, timestamp, source="system_event_log")
 
-    # Extract unique active dates (YYYY-MM-DD) from all event timestamps
-    unique_dates: list = sorted({
-        str(e.get("timestamp", ""))[:10]
-        for e in events_sorted
-        if len(str(e.get("timestamp", ""))) >= 10
-    })
+    # --- Layer 3: fls timestamp scan ---
+    resolved_image, primary_offset, err = _resolve_image_and_offset(evidence_dir, image_path)
+    if resolved_image and primary_offset:
+        fls_result = run_cmd(
+            ["fls", "-r", "-m", "/", "-i", "ewf", "-o", primary_offset, resolved_image],
+            timeout=360,
+        )
+        fls_out = (fls_result.get("stdout") or "").strip()
+        # mactime body file: col 9 is mtime Unix timestamp.  Collect unique YYYY-MM-DD.
+        dates_from_fls: set = set()
+        import time as _time
+        for line in fls_out.splitlines():
+            parts = line.split("|")
+            if len(parts) < 11:
+                continue
+            try:
+                mtime = int(parts[8])
+                if mtime > 0:
+                    dates_from_fls.add(
+                        _time.strftime("%Y-%m-%d", _time.gmtime(mtime))
+                    )
+            except (ValueError, IndexError):
+                continue
+        if dates_from_fls:
+            sorted_dates = sorted(dates_from_fls)
+            first_date = sorted_dates[0]
+            last_date = sorted_dates[-1]
+            return {
+                "status": "ok",
+                "source": "filesystem_timestamps",
+                "user": user,
+                "timestamp_filter": timestamp,
+                "first_event": {"timestamp": first_date, "source": "fls_mtime"},
+                "last_event": {"timestamp": last_date, "source": "fls_mtime"},
+                "total_events": len(dates_from_fls),
+                "unique_active_dates": sorted_dates,
+            }
 
+    # All layers exhausted.
+    who = f"user '{user}'" if user else "any user"
+    when = f" on {timestamp}" if timestamp else ""
     return {
-        "status": "ok",
+        "status": "artifact_not_found",
         "user": user,
         "timestamp_filter": timestamp,
-        "last_event": last_event,
-        "first_event": first_event,
-        "total_events": len(events),
-        "unique_active_dates": unique_dates,
+        "message": (
+            f"No timeline events found for {who}{when}. "
+            f"Security log status: {layer1_status} ({layer1_msg}). "
+            "System log and filesystem timestamps also yielded no data."
+        ),
     }
 
 
+# Reads from the file path given in sys.argv[1] so it can be invoked directly
+# via docker exec (run_cmd(["python3", script_path, temp_file])) rather than
+# via a bash pipe, which fails when python3 is not on the container's login PATH.
 _OEACCOUNT_PARSE_SCRIPT = (
-    'import sys,re;'
-    'raw=sys.stdin.buffer.read();'
-    r'text=raw.decode("utf-16",errors="ignore") if raw[:2] in (b"\xff\xfe",b"\xfe\xff") else raw.decode("utf-8",errors="ignore");'
+    'import sys,re,json;'
+    'src=open(sys.argv[1],"rb").read() if len(sys.argv)>1 else sys.stdin.buffer.read();'
+    r'text=src.decode("utf-16",errors="ignore") if src[:2] in (b"\xff\xfe",b"\xfe\xff") else src.decode("utf-8",errors="ignore");'
     r'acct=re.search(r"<Account_Name[^>]*>([^<]+)</Account_Name>",text);'
     r'imap=re.search(r"<IMAP_User_Name[^>]*>([^<]+)</IMAP_User_Name>",text);'
     r'smtp=re.search(r"<SMTP_Email_Address[^>]*>([^<]+)</SMTP_Email_Address>",text);'
-    'import json;'
     'print(json.dumps({"account":acct.group(1).strip() if acct else None,"email":smtp.group(1).strip() if smtp else (imap.group(1).strip() if imap else None)}))'
 )
+
+# Email artifact suffixes to search for in the forensic image listing.
+_EMAIL_ARTIFACT_SUFFIXES = (".oeaccount", ".pst", ".ost", ".eml", ".nws", ".dbx", ".mbox")
+
+# Thunderbird profile marker files / directories used to detect TB installations.
+_THUNDERBIRD_MARKERS = ("prefs.js", "localfolders", "imap.sbd", "smtp")
+
+# Maximum number of lines to scan of a Thunderbird INBOX to count messages.
+_MBOX_SCAN_LIMIT = 50_000
+
+
+def _count_mbox_messages(evidence_dir: str, container_image: str, offset: str, inode: str) -> int:
+    """
+    Count messages in a Unix mbox file (Thunderbird INBOX / Sent / Drafts).
+    Each message starts with a 'From ' line at the start of a line.
+    Uses `icat` to stream the file and counts those lines in the container.
+    Returns the count, or 0 on failure.
+    """
+    import time as _time
+    tmp = f"/tmp/mbox_{inode}_{int(_time.time())}"
+    extract_cmd = f"icat -i ewf -o {offset} {container_image} {inode} > {tmp}"
+    run_cmd(["bash", "-c", extract_cmd], timeout=60)
+
+    # Count lines matching '^From ' using grep -c (POSIX, always present in container).
+    count_result = run_cmd(["bash", "-c", f"grep -c '^From ' {tmp} 2>/dev/null || echo 0"], timeout=30)
+    run_cmd(["bash", "-c", f"rm -f {tmp}"], timeout=10)
+
+    raw = (count_result.get("stdout") or "0").strip()
+    try:
+        return int(raw.split()[0])
+    except (ValueError, IndexError):
+        return 0
 
 
 def _default_get_email_accounts(
     evidence_dir: str,
     user: Optional[str] = None,
     image_path: Optional[str] = None,
+    query_type: str = "accounts",
 ) -> Dict[str, Any]:
-    """Extract email account addresses from Windows Live Mail .oeaccount files."""
-    img, offset, _pt = _resolve_image_and_offset(evidence_dir, image_path)
+    """
+    Search the forensic image for email artifacts across multiple email clients.
+
+    query_type:
+      "accounts" (default) — focus on account/configuration discovery.
+      "count"              — focus on message counts per mailbox.
+
+    Clients supported:
+      - Windows Live Mail  : *.oeaccount (parse for email address)
+      - Outlook            : *.pst / *.ost (path + size)
+      - Individual messages: *.eml / *.nws (count)
+      - Outlook Express    : *.dbx (path + size)
+      - Thunderbird        : prefs.js (detects presence); INBOX-style mbox files (count)
+      - Generic mbox       : *.mbox (count via 'From ' lines)
+
+    Always returns all found artifact types; the caller (LLM responder) decides
+    how to present them based on query_type.
+    """
+    img, offset, error = _resolve_image_and_offset(evidence_dir, image_path)
+    if not img:
+        return {"status": "artifact_not_found", "message": error or "No forensic image available."}
+    if not offset:
+        return {"status": "insufficient_index_data", "message": error or "Primary partition offset unavailable."}
+
     container_image = _to_container_path(img, evidence_dir)
 
-    # Find all .oeaccount files
-    fls_result = run_cmd(["fls", "-r", "-l", "-i", "ewf", "-o", str(offset), container_image])
+    # Bug fix: add -p so tab_parts[1] contains the full path (e.g.
+    # /Users/Jimmy/AppData/Roaming/Thunderbird/Profiles/xxx/INBOX) rather than
+    # just the bare filename.  Without -p, "thunderbird" never appears in the
+    # line and all TB-profile detection fails.  Also, suffix matching must be
+    # done on the FILENAME portion (tab_parts[1] basename), NOT on the end of
+    # the whole tab-separated line (which ends with uid/gid numbers, not
+    # the extension).
+    fls_result = run_cmd(["fls", "-r", "-l", "-p", "-i", "ewf", "-o", str(offset), container_image])
     fls_out = (fls_result.get("stdout") or "").strip()
     if not fls_out:
-        return {"status": "tool_error", "message": "fls returned no output"}
+        return {"status": "tool_error", "message": "fls returned no output."}
 
-    lines = fls_out.splitlines()
-    accounts = []
     user_tokens = [t for t in (user or "").lower().split() if len(t) > 2]
-    for line in lines:
-        if ".oeaccount" not in line.lower():
+
+    accounts: List[Dict[str, Any]] = []       # Windows Live Mail parsed accounts
+    outlook_files: List[Dict[str, Any]] = []  # PST / OST artifacts
+    dbx_files: List[Dict[str, Any]] = []      # Outlook Express DBX files
+    eml_count = 0
+    eml_paths: List[str] = []                 # up to 20 .eml paths (for read_file_content follow-ups)
+    mbox_entries: List[Dict[str, Any]] = []   # Thunderbird / generic mbox
+    thunderbird_profiles: List[str] = []      # Thunderbird profile paths
+
+    import time as _time
+    script_path = f"/tmp/oeacct_parse_{int(_time.time())}.py"
+    script_written = False
+
+    # ---- Single-pass scan over fls -l -p output ----
+    # fls -l -p line format (tab-separated):
+    #   <type> <inode>:\t<full-path>\t<mtime>\t<atime>\t<ctime>\t<crtime>\t<size>\t<uid>\t<gid>
+    for line in fls_out.splitlines():
+        tab_parts = line.split("\t")
+        if len(tab_parts) < 2:
             continue
-        # Extract inode
+        path_token = tab_parts[1].strip()
+        if not path_token:
+            continue
+        path_lower = path_token.lower()
+        # Filename is the last path component.
+        name = path_token.split("/")[-1] if "/" in path_token else path_token
+        name_lower = name.lower()
+
+        # ------ Thunderbird prefs.js (profile detector) ------
+        # With -p, lines for TB prefs.js look like:
+        #   r/r 1234-128-3:  /Users/Jimmy/.../Thunderbird/Profiles/xxx.default/prefs.js  ...
+        if "thunderbird" in path_lower and name_lower == "prefs.js":
+            profile_dir = "/".join(path_token.rstrip("/").split("/")[:-1])
+            if profile_dir and profile_dir not in thunderbird_profiles:
+                thunderbird_profiles.append(profile_dir)
+            continue
+
+        # ------ Thunderbird mbox folders (extensionless files inside TB profile) ------
+        # INBOX, Sent, Drafts, Trash, etc. are extensionless mbox files.
+        # Only match files that are BOTH inside a Thunderbird profile directory AND
+        # have no file extension.  Files WITH an extension (e.g. .eml) inside a
+        # Thunderbird folder fall through to the suffix-based checks below.
+        if "thunderbird" in path_lower and "profiles" in path_lower and "." not in name:
+            m = re.search(r"r/r\s+(\d+)-", line)
+            if m:
+                size = int(tab_parts[6].strip()) if len(tab_parts) >= 7 and tab_parts[6].strip().isdigit() else 0
+                if size > 512 and (
+                    query_type == "count"
+                    or not user_tokens
+                    or any(tok in path_lower for tok in user_tokens)
+                ):
+                    msg_count = _count_mbox_messages(evidence_dir, container_image, offset, m.group(1))
+                    if msg_count > 0:
+                        mbox_entries.append({
+                            "type": "thunderbird_mbox",
+                            "path": path_token,
+                            "size_bytes": size,
+                            "message_count": msg_count,
+                        })
+            continue  # extensionless TB-profile file: done, skip suffix processing
+
+        # Suffix-based matching — checked against the FILENAME only (name_lower),
+        # not the full line, because fls -l lines end with timestamps/uid/gid.
+        if not any(name_lower.endswith(sfx) for sfx in _EMAIL_ARTIFACT_SUFFIXES):
+            continue
+
+        # ------ individual email messages (.eml / .nws) ------
+        if name_lower.endswith(".eml") or name_lower.endswith(".nws"):
+            if not user_tokens or any(tok in path_lower for tok in user_tokens):
+                eml_count += 1
+                if len(eml_paths) < 20:
+                    eml_paths.append(path_token)
+            continue
+
+        # ------ Outlook data files (.pst / .ost) ------
+        if name_lower.endswith(".pst") or name_lower.endswith(".ost"):
+            size_token = tab_parts[6].strip() if len(tab_parts) >= 7 and tab_parts[6].strip().isdigit() else ""
+            ext = ".pst" if name_lower.endswith(".pst") else ".ost"
+            entry: Dict[str, Any] = {"type": "outlook", "format": ext, "path": path_token}
+            if size_token:
+                entry["size_bytes"] = int(size_token)
+            if user_tokens and not any(tok in path_lower for tok in user_tokens):
+                continue
+            outlook_files.append(entry)
+            continue
+
+        # ------ Outlook Express (.dbx) ------
+        if name_lower.endswith(".dbx"):
+            size_token = tab_parts[6].strip() if len(tab_parts) >= 7 and tab_parts[6].strip().isdigit() else ""
+            entry = {"type": "outlook_express", "format": ".dbx", "path": path_token}
+            if size_token:
+                entry["size_bytes"] = int(size_token)
+            if user_tokens and not any(tok in path_lower for tok in user_tokens):
+                continue
+            dbx_files.append(entry)
+            continue
+
+        # ------ Generic mbox files (.mbox) ------
+        if name_lower.endswith(".mbox"):
+            m = re.search(r"r/r\s+(\d+)-", line)
+            if m:
+                size_token = tab_parts[6].strip() if len(tab_parts) >= 7 and tab_parts[6].strip().isdigit() else ""
+                size = int(size_token) if size_token.isdigit() else 0
+                if user_tokens and not any(tok in path_lower for tok in user_tokens):
+                    continue
+                msg_count = _count_mbox_messages(evidence_dir, container_image, offset, m.group(1)) if size > 512 else 0
+                mbox_entries.append({
+                    "type": "mbox",
+                    "format": ".mbox",
+                    "path": path_token,
+                    "size_bytes": size,
+                    "message_count": msg_count,
+                })
+            continue
+
+        # ------ Windows Live Mail (.oeaccount) ------
+        if not name_lower.endswith(".oeaccount"):
+            continue
         m = re.search(r"r/r\s+(\d+)-", line)
         if not m:
             continue
         inode = m.group(1)
-        # Read and parse the file
-        parse_cmd = f"icat -o {offset} -i ewf {container_image} {inode} | python3 -c '{_OEACCOUNT_PARSE_SCRIPT}'"
-        out_result = run_cmd(["bash", "-c", parse_cmd])
-        out = (out_result.get("stdout") or "").strip()
-        if not out:
+
+        if not script_written:
+            write_cmd = f"cat > {script_path} << 'PYEOF'\n{_OEACCOUNT_PARSE_SCRIPT.strip()}\nPYEOF"
+            run_cmd(["bash", "-lc", write_cmd], timeout=30)
+            script_written = True
+
+        tmp_acct = f"/tmp/oeacct_{inode}_{int(_time.time())}"
+        extract_cmd = f"icat -i ewf -o {offset} {container_image} {inode} > {tmp_acct}"
+        run_cmd(["bash", "-c", extract_cmd], timeout=30)
+        out_result = run_cmd(["python3", script_path, tmp_acct], timeout=30)
+        run_cmd(["bash", "-c", f"rm -f {tmp_acct}"], timeout=10)
+
+        raw_out = (out_result.get("stdout") or "").strip()
+        if not raw_out:
             continue
         try:
             import json as _json
-            parsed = _json.loads(out.strip())
+            parsed = _json.loads(raw_out)
             if not parsed.get("email"):
                 continue
-            # Filter by user post-parse: check if user tokens appear in account name or email
             if user_tokens:
                 acct_lower = (parsed.get("account") or "").lower() + " " + (parsed.get("email") or "").lower()
                 if not any(tok in acct_lower for tok in user_tokens):
                     continue
-            accounts.append(parsed)
+            accounts.append({"type": "windows_live_mail", **parsed})
         except Exception:
             pass
 
-    if not accounts:
+    if script_written:
+        run_cmd(["bash", "-c", f"rm -f {script_path}"], timeout=10)
+
+    total_message_count = (
+        eml_count
+        + sum(e.get("message_count", 0) for e in mbox_entries)
+    )
+    has_any = bool(accounts or outlook_files or dbx_files or eml_count or mbox_entries or thunderbird_profiles)
+
+    if not has_any:
         return {
             "status": "artifact_not_found",
-            "message": "No .oeaccount files found" + (f" for user '{user}'" if user else "") + ".",
+            "query_type": query_type,
+            "message": (
+                "No email artifacts (.oeaccount, .pst, .ost, .eml, .dbx, .mbox, Thunderbird) found"
+                + (f" for user '{user}'" if user else "") + "."
+            ),
         }
 
-    return {"status": "ok", "accounts": accounts, "count": len(accounts)}
+    return {
+        "status": "ok",
+        "query_type": query_type,
+        "thunderbird_profiles": thunderbird_profiles,
+        "thunderbird_mbox_folders": mbox_entries,
+        "windows_live_mail_accounts": accounts,
+        "wlm_count": len(accounts),
+        "outlook_files": outlook_files,
+        "outlook_count": len(outlook_files),
+        "dbx_files": dbx_files,
+        "dbx_count": len(dbx_files),
+        "eml_message_count": eml_count,
+        # eml_paths: up to 20 paths the user can paste into a read_file_content query.
+        "eml_paths": eml_paths,
+        "generic_mbox_files": [e for e in mbox_entries if e.get("type") == "mbox"],
+        "total_message_count": total_message_count,
+        "total_artifacts": len(accounts) + len(outlook_files) + len(dbx_files) + eml_count + len(mbox_entries),
+    }
 
 
 def create_default_server(
@@ -1900,12 +2440,18 @@ def create_default_server(
         lambda file_path: _default_get_file_size(evidence_dir, file_path),
     )
     server.register_tool(
+        "find_file_by_name",
+        lambda filename: _default_find_file_by_name(evidence_dir, filename),
+    )
+    server.register_tool(
         "extract_file_content",
         lambda file_path, max_bytes=8192: _default_extract_file_content(evidence_dir, file_path, max_bytes),
     )
     server.register_tool(
         "get_filesystem_stats",
-        lambda image_path=None: _default_get_filesystem_stats(evidence_dir, image_path),
+        lambda image_path=None, partition_index=None: _default_get_filesystem_stats(
+            evidence_dir, image_path, partition_index=partition_index
+        ),
     )
     server.register_tool(
         "get_disk_metadata",
@@ -1931,6 +2477,8 @@ def create_default_server(
     )
     server.register_tool(
         "get_email_accounts",
-        lambda user=None, image_path=None: _default_get_email_accounts(evidence_dir, user, image_path),
+        lambda user=None, image_path=None, query_type="accounts": _default_get_email_accounts(
+            evidence_dir, user, image_path, query_type
+        ),
     )
     return server

@@ -86,11 +86,19 @@ class LocalMCPClient:
     def get_file_size(self, file_path: str) -> Any:
         return self._server.call_tool("get_file_size", file_path=file_path)
 
+    def find_file_by_name(self, filename: str) -> Any:
+        """Search the forensic image for a file by bare filename (no path separator).
+
+        Returns the same status structure as get_file_size so the executor can
+        forward the result to the responder using the 'get_file_size' tool label.
+        """
+        return self._server.call_tool("find_file_by_name", filename=filename)
+
     def extract_file_content(self, file_path: str, max_bytes: int = 8192) -> Any:
         return self._server.call_tool("extract_file_content", file_path=file_path, max_bytes=max_bytes)
 
-    def get_filesystem_stats(self, image_path: Optional[str] = None) -> Any:
-        return self._server.call_tool("get_filesystem_stats", image_path=image_path)
+    def get_filesystem_stats(self, image_path: Optional[str] = None, partition_index: Optional[int] = None) -> Any:
+        return self._server.call_tool("get_filesystem_stats", image_path=image_path, partition_index=partition_index)
 
     def get_disk_metadata(self, image_path: Optional[str] = None) -> Any:
         return self._server.call_tool("get_disk_metadata", image_path=image_path)
@@ -139,5 +147,6 @@ class LocalMCPClient:
         self,
         user: Optional[str] = None,
         image_path: Optional[str] = None,
+        query_type: str = "accounts",
     ) -> Any:
-        return self._server.call_tool("get_email_accounts", user=user, image_path=image_path)
+        return self._server.call_tool("get_email_accounts", user=user, image_path=image_path, query_type=query_type)

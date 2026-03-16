@@ -1,9 +1,13 @@
+import logging
 import os
 import subprocess
 from typing import List, Optional, Dict, Any
 
+from agent.container import ContainerError, get_manager
+
+log = logging.getLogger("forensics.runner")
+
 # Binários e comandos que só existem no container Linux
-_DOCKER_CONTAINER = "forensics"
 _FORENSIC_BINARIES = {"mmls", "mmcat", "fls", "fsstat", "icat", "ils", "ls", "bash", "python3", "hivexsh", "hivexget"}
 
 # Pasta de evidências: Windows → container
@@ -23,31 +27,47 @@ def _translate_path(arg: str) -> str:
 def run_cmd(argv: List[str], timeout: int = 120, env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """
     Executa um comando de forma segura (sem shell=True).
-    - Se o binário for uma ferramenta forense (SleuthKit), envia para o container
-      Docker via 'docker exec'.
+    - Se o binário for uma ferramenta forense (SleuthKit), garante que o
+      container Docker está a correr e envia via 'docker exec'.
     - Caso contrário, corre localmente no Windows.
     Devolve um dicionário com stdout/stderr/returncode.
     """
     if argv and argv[0] in _FORENSIC_BINARIES:
+        mgr = get_manager()
+
+        # ── Ensure container is running before every exec ──
+        try:
+            mgr.ensure_running()
+        except ContainerError as exc:
+            log.error("Container not available: %s", exc)
+            return {
+                "argv": argv,
+                "returncode": 1,
+                "stdout": "",
+                "stderr": str(exc),
+            }
+
         translated = []
         for arg in argv:
             if isinstance(arg, str) and (":\\" in arg or arg.startswith("C:/")):
                 arg = _translate_path(arg)
             translated.append(arg)
-        final_argv = ["docker", "exec", _DOCKER_CONTAINER] + translated
+        final_argv = mgr.get_exec_prefix() + translated
     else:
         final_argv = argv
+
+    log.debug("run_cmd: %s", final_argv)
 
     result = subprocess.run(
         final_argv,
         capture_output=True,
         text=True,
         timeout=timeout,
-        env=env
+        env=env,
     )
     return {
         "argv": final_argv,
         "returncode": result.returncode,
         "stdout": result.stdout,
-        "stderr": result.stderr
+        "stderr": result.stderr,
     }
