@@ -75,7 +75,13 @@ echo "" >> "$INFO_FILE"
 echo "=== TABELA DE PARTICOES ===" >> "$INFO_FILE"
 mmls "$RAW_DEVICE" 2>/dev/null >> "$INFO_FILE"
 
-# ─── Tenta montar partições com kpartx / offset ──────────────────────────────
+# ─── Garante loop devices disponíveis ────────────────────────────────────────
+
+for i in $(seq 2 8); do
+    [ -e /dev/loop$i ] || mknod /dev/loop$i b 7 $i 2>/dev/null
+done
+
+# ─── Tenta montar partições via losetup ──────────────────────────────────────
 
 echo ""
 echo "[*] A tentar montar partições..."
@@ -88,31 +94,66 @@ while IFS= read -r line; do
 
     PART_NUM=$(echo "$line" | awk '{print $1}' | tr -d ':')
     START=$(echo "$line" | awk '{print $3}')
+    LENGTH=$(echo "$line" | awk '{print $5}')
 
-    [ -z "$START" ] || [ "$START" = "0" ] && continue
+    [ -z "$START" ] && continue
+    # Ignora sector 0 (MBR/GPT meta)
+    START_DEC=$(echo "$START" | sed 's/^0*//' | tr -d ' ')
+    [ -z "$START_DEC" ] && continue
+    [ "$START_DEC" = "0" ] && continue
 
-    OFFSET_BYTES=$((START * 512))
+    LENGTH_DEC=$(echo "$LENGTH" | sed 's/^0*//')
+    [ -z "$LENGTH_DEC" ] && LENGTH_DEC=0
+
+    OFFSET_BYTES=$((START_DEC * 512))
+    SIZE_BYTES=$((LENGTH_DEC * 512))
     MOUNT_POINT="$FINAL_MOUNT/part$PART_NUM"
     mkdir -p "$MOUNT_POINT"
 
-    # Tenta com ntfs-3g primeiro (Windows), depois vfat, ext4
-    if ntfs-3g -o ro,offset=$OFFSET_BYTES "$RAW_DEVICE" "$MOUNT_POINT" 2>/dev/null; then
-        echo "[+] Partição $PART_NUM montada em $MOUNT_POINT (NTFS, offset=$OFFSET_BYTES)"
-        echo "PART_${PART_NUM}_MOUNT=$MOUNT_POINT" >> "$INFO_FILE"
+    # Encontra próximo loop device livre
+    LOOP_DEV=""
+    for i in $(seq 2 8); do
+        if ! losetup /dev/loop$i > /dev/null 2>&1; then
+            LOOP_DEV="/dev/loop$i"
+            break
+        fi
+    done
+
+    if [ -z "$LOOP_DEV" ]; then
+        echo "[!] Partição $PART_NUM: sem loop devices disponíveis"
         echo "PART_${PART_NUM}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
-        MOUNTED=$((MOUNTED + 1))
-    elif mount -o ro,loop,offset=$OFFSET_BYTES "$RAW_DEVICE" "$MOUNT_POINT" 2>/dev/null; then
-        echo "[+] Partição $PART_NUM montada em $MOUNT_POINT (auto, offset=$OFFSET_BYTES)"
-        echo "PART_${PART_NUM}_MOUNT=$MOUNT_POINT" >> "$INFO_FILE"
-        echo "PART_${PART_NUM}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
-        MOUNTED=$((MOUNTED + 1))
+        rmdir "$MOUNT_POINT" 2>/dev/null
+        continue
+    fi
+
+    # Associa loop device com offset e tamanho
+    losetup -o "$OFFSET_BYTES" --sizelimit "$SIZE_BYTES" "$LOOP_DEV" "$RAW_DEVICE" 2>/dev/null
+
+    if [ $? -eq 0 ]; then
+        # Tenta NTFS (kernel driver, não FUSE)
+        if mount -t ntfs -o ro "$LOOP_DEV" "$MOUNT_POINT" 2>/dev/null; then
+            echo "[+] Partição $PART_NUM montada em $MOUNT_POINT (NTFS via $LOOP_DEV)"
+            echo "PART_${PART_NUM}_MOUNT=$MOUNT_POINT" >> "$INFO_FILE"
+            echo "PART_${PART_NUM}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
+            MOUNTED=$((MOUNTED + 1))
+        elif mount -o ro "$LOOP_DEV" "$MOUNT_POINT" 2>/dev/null; then
+            echo "[+] Partição $PART_NUM montada em $MOUNT_POINT (auto via $LOOP_DEV)"
+            echo "PART_${PART_NUM}_MOUNT=$MOUNT_POINT" >> "$INFO_FILE"
+            echo "PART_${PART_NUM}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
+            MOUNTED=$((MOUNTED + 1))
+        else
+            echo "[!] Partição $PART_NUM: loop device criado mas mount falhou ($LOOP_DEV)"
+            losetup -d "$LOOP_DEV" 2>/dev/null
+            echo "PART_${PART_NUM}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
+            rmdir "$MOUNT_POINT" 2>/dev/null
+        fi
     else
-        # Mesmo sem montar, guarda o offset para uso com fls/icat
+        echo "[!] Partição $PART_NUM: falhou losetup em $LOOP_DEV"
         echo "PART_${PART_NUM}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
         rmdir "$MOUNT_POINT" 2>/dev/null
     fi
 
-done < <(mmls "$RAW_DEVICE" 2>/dev/null | grep -E "^\s+[0-9]+" | grep -iv "Unallocated\|Meta\|GPT\|MBR\|Safety\|Empty")
+done < <(mmls "$RAW_DEVICE" 2>/dev/null | grep -E "^\s*[0-9]+" | grep -iv "Unallocated\|Meta\|GPT\|MBR\|Safety\|Empty")
 
 # ─── Resumo ───────────────────────────────────────────────────────────────────
 

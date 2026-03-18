@@ -21,11 +21,11 @@ def _load_env_path():
                 line = line.strip()
                 if line.startswith("FORENSICS_IMAGE_PATH="):
                     return line.split("=", 1)[1].strip()
-    return os.getenv("FORENSICS_IMAGE_PATH", r"C:\\forensics-agent\\forensics_image")
-FORENSICS_IMAGE_PATH = _load_env_path() or os.getenv(
-    "FORENSICS_IMAGE_PATH",
-    r"C:\forensics-agent\forensics_image"
-)
+    # Default: pasta evidence/ relativa a este ficheiro (../evidence)
+    default = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "evidence"))
+    return os.getenv("FORENSICS_IMAGE_PATH", default)
+
+FORENSICS_IMAGE_PATH = _load_env_path()
 
 # Comandos permitidos (whitelist de segurança)
 ALLOWED_COMMANDS = [

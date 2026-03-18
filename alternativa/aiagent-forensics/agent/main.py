@@ -18,7 +18,7 @@ from tools import run_in_sandbox, stop_container
 
 load_dotenv()
 
-OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "llama3")
+OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "llama3.1:8b")
 OLLAMA_URL     = os.getenv("OLLAMA_URL",     "http://localhost:11434")
 MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "15"))
 
@@ -32,41 +32,30 @@ def run_forensics_command(command: str) -> str:
     Executa comandos forenses dentro de um container Linux seguro e isolado.
     A imagem forense esta montada em read-only e os ficheiros estao acessiveis em /forensics/partN/
 
-    ESTRUTURA TIPICA (sistema Windows):
-      /forensics/part1/                               - particao de sistema (EFI/boot)
-      /forensics/part2/                               - particao principal Windows
-      /forensics/part2/Users/                         - pastas dos utilizadores
-      /forensics/part2/Windows/System32/config/SAM    - base de dados de utilizadores
-      /forensics/part2/Windows/System32/config/SYSTEM - configuracao do sistema
-      /forensics/part2/Windows/System32/winevt/Logs/  - logs de eventos (.evtx)
+    MOUNTED STRUCTURE (Windows system):
+      /forensics/part006/                                      - main Windows partition (NTFS mounted)
+      /forensics/part006/USERS/                                - user home directories
+      /forensics/part006/Windows/System32/config/SAM           - user accounts database
+      /forensics/part006/Windows/System32/config/SYSTEM        - system configuration
+      /forensics/part006/Windows/System32/winevt/Logs/         - event logs (.evtx)
 
-    COMANDOS DISPONIVEIS (usa fls/icat se /forensics estiver vazio):
+    AVAILABLE COMMANDS:
       ls, find, stat, file, grep, strings, cat, xxd, hexdump,
       md5sum, sha1sum, sha256sum, chntpw, mmls, fsstat, fls, icat, evtx_dump
 
-    EXEMPLOS (quando /forensics tem ficheiros montados):
-      ls /forensics/part2/Users
-      find /forensics -name "*.pdf"
-      grep -ri "CTF{" /forensics/
-      md5sum /forensics/part2/Users/Jimmy/Documents/pdf.pdf
-      chntpw -l /forensics/part2/Windows/System32/config/SAM
-      evtx_dump /forensics/part2/Windows/System32/winevt/Logs/System.evtx
+    EXAMPLES (use /forensics/part006 directly):
+      ls /forensics/part006/USERS
+      find /forensics/part006 -name "*.pdf"
+      grep -ri "keyword" /forensics/part006/USERS/
+      md5sum "/forensics/part006/USERS/Jimmy Wilson/Documents/file.pdf"
+      chntpw -l /forensics/part006/Windows/System32/config/SAM
+      evtx_dump /forensics/part006/Windows/System32/winevt/Logs/System.evtx
+      cat /forensics_info.txt
 
-    EXEMPLOS VIA SLEUTH KIT (quando /forensics esta vazio, usa estes):
-      mmls /forensics_ewf/ewf1                              - tabela de particoes
-      fsstat -o 65664 /forensics_ewf/ewf1                   - info do filesystem
-      fls -r -o 65664 /forensics_ewf/ewf1                   - lista todos os ficheiros
-      fls -r -o 65664 /forensics_ewf/ewf1 | grep -i pdf     - procura PDFs
-      fls -r -o 65664 /forensics_ewf/ewf1 | grep -i eml     - procura emails
-      fls -r -o 65664 /forensics_ewf/ewf1 | grep -i Users   - pasta dos utilizadores
-      icat -o 65664 /forensics_ewf/ewf1 <INODE>             - le conteudo de ficheiro
-      cat /forensics_info.txt                               - info das particoes
-
-    NOTAS:
-      - O offset da particao principal e 65664 (sectores) para esta imagem
-      - Executa sempre um comando de cada vez
-      - Se nao souberes o inode, usa fls para encontrar o ficheiro e obter o numero
-      - Para ficheiros binarios, usa icat | strings ou icat | xxd
+    NOTES:
+      - The main partition is MOUNTED at /forensics/part006/
+      - Use ls and find directly on /forensics/part006/
+      - Always execute one command at a time
     """
     return run_in_sandbox(command)
 
@@ -76,7 +65,7 @@ def run_forensics_command(command: str) -> str:
 llm = ChatOllama(
     model=OLLAMA_MODEL,
     base_url=OLLAMA_URL,
-    temperature=0,
+    temperature=0.5,
 )
 
 # ─── Agente ReAct ─────────────────────────────────────────────────────────────
@@ -85,23 +74,16 @@ agent = create_react_agent(
     model=llm,
     tools=[run_forensics_command],
     prompt=(
-    "Responde SEMPRE em portugues. "
-    "IMPORTANTE: Usa SEMPRE a ferramenta run_forensics_command para executar comandos. "
-    "NUNCA digas 'vou executar' sem realmente chamar a ferramenta. "
-    "Cada vez que precisares de informacao, chama run_forensics_command imediatamente.\n"
-    "Es um agente especialista em investigacao forense digital. "
-    "REGRAS OBRIGATORIAS - SEGUE SEMPRE ESTAS REGRAS:\n"
-    "1. NUNCA respondas sem usar a ferramenta run_forensics_command primeiro.\n"
-    "2. A pasta /forensics esta VAZIA. Nao tentes caminhos como /forensics/Users ou /forensics/part2.\n"
-    "3. Para aceder a ficheiros DEVES usar SEMPRE fls e icat com offset 65664 sobre /forensics_ewf/ewf1.\n"
-    "4. FLUXO OBRIGATORIO para encontrar um ficheiro:\n"
-    "   Passo 1: run_forensics_command('fls -r -o 65664 /forensics_ewf/ewf1 | grep -i NOME_FICHEIRO')\n"
-    "   Passo 2: Obtem o numero do inode do resultado (ex: r/r 936-128-3: R40599.pdf -> inode e 936)\n"
-    "   Passo 3: run_forensics_command('icat -o 65664 /forensics_ewf/ewf1 INODE | md5sum')\n"
-    "5. Para listar utilizadores: run_forensics_command('fls -o 65664 /forensics_ewf/ewf1 4213')\n"
-    "6. Para ler emails: usa icat para extrair o ficheiro e strings para ler o conteudo.\n"
-    "7. Executa SEMPRE um comando de cada vez e analisa o resultado antes de continuar.\n"
-    "8. NUNCA inventes caminhos ou resultados. Se nao sabes, usa fls para procurar.\n"
+    "You are a digital forensics expert agent. "
+    "IMPORTANT: ALWAYS use the run_forensics_command tool to execute commands. "
+    "NEVER say 'I will execute' without actually calling the tool. "
+    "Every time you need information, call run_forensics_command immediately.\n"
+    "MANDATORY RULES - ALWAYS FOLLOW THESE:\n"
+    "1. NEVER respond without using run_forensics_command first.\n"
+    "2. ALL evidence is inside /forensics/. Always search and look for files under /forensics/.\n"
+    "3. NEVER use fls/icat unless ls/find do not work.\n"
+    "5. ALWAYS execute one command at a time and analyse the result before continuing.\n"
+    "6. NEVER invent paths or results. If unsure, use find to search.\n"
     ),
 )
 
