@@ -68,7 +68,7 @@ def build_pipeline():
     llm = ChatOllama(
         model=OLLAMA_MODEL,
         base_url=OLLAMA_BASE_URL,
-        temperature=0,
+        temperature=0.5,
         validate_model_on_init=False,
     )
 
