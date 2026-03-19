@@ -1,9 +1,0 @@
-# Lista de pastas com evidências a partilhar para dentro do Docker.
-# Cada linha é um caminho Windows para uma pasta.
-# Essa pasta fica acessível em /evidence/<nome_da_pasta>/ dentro do container.
-# Adiciona ou comenta linhas para gerir as evidências activas.
-# Exemplo de entradas adicionais:
-#   C:\Cases\Case2024
-#   D:\Forensics\BackupImages
-
-C:\AIAgentForensics\evidence

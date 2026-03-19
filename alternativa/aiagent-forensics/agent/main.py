@@ -6,6 +6,8 @@ Politécnico de Leiria — ESTG | Licenciatura em Engenharia Informática
 
 import atexit
 import os
+import json
+import re
 from dotenv import load_dotenv
 
 from langchain_ollama import ChatOllama
@@ -75,15 +77,16 @@ agent = create_react_agent(
     tools=[run_forensics_command],
     prompt=(
     "You are a digital forensics expert agent. "
-    "IMPORTANT: ALWAYS use the run_forensics_command tool to execute commands. "
-    "NEVER say 'I will execute' without actually calling the tool. "
-    "Every time you need information, call run_forensics_command immediately.\n"
-    "MANDATORY RULES - ALWAYS FOLLOW THESE:\n"
-    "1. NEVER respond without using run_forensics_command first.\n"
-    "2. ALL evidence is inside /forensics/. Always search and look for files under /forensics/.\n"
-    "3. NEVER use fls/icat unless ls/find do not work.\n"
-    "5. ALWAYS execute one command at a time and analyse the result before continuing.\n"
-    "6. NEVER invent paths or results. If unsure, use find to search.\n"
+    "You have ONE tool: run_forensics_command(command='...'). "
+    "CRITICAL: Paths with spaces MUST use single quotes: cat '/forensics/part006/USERS/Jimmy Wilson/Desktop/file.txt'. "
+    "NEVER write: cat /forensics/part006/USERS/Jimmy Wilson/... (unquoted spaces break the command). "
+    "ALWAYS write: cat '/forensics/part006/USERS/Jimmy Wilson/...' (single-quoted). "
+    "NEVER output JSON. ALWAYS call run_forensics_command directly.\n"
+    "RULES:\n"
+    "1. Every answer requires calling run_forensics_command first to get real data.\n"
+    "2. ALL files are under /forensics/part006/.\n"
+    "3. Execute one command at a time and wait for the result.\n"
+    "4. Never invent results. If unsure, use find to search.\n"
     ),
 )
 
@@ -112,7 +115,7 @@ def main():
     print(f"[*] Modelo: {OLLAMA_MODEL} via {OLLAMA_URL}")
     print("[*] A verificar container...\n")
 
-    history = []
+    messages = []
 
     while True:
         try:
@@ -129,7 +132,7 @@ def main():
             break
 
         if user_input.lower() == "limpar":
-            history.clear()
+            messages.clear()
             print("[*] Historico limpo.\n")
             continue
 
@@ -137,12 +140,12 @@ def main():
             cmd_estrutura()
             continue
 
-        history.append({"role": "user", "content": user_input})
+        messages.append({"role": "user", "content": user_input})
 
         print()
         try:
-            result = agent.invoke({"messages": history})
-            messages = result.get("messages", [])
+            result = agent.invoke({"messages": messages})
+            messages = result.get("messages", messages)
 
             resposta = ""
             for msg in reversed(messages):
@@ -153,16 +156,47 @@ def main():
             if not resposta:
                 resposta = "(sem resposta)"
 
+            # Fallback 1: detecta tool calls em texto (JSON ou Python-like)
+            cmd = None
+            for pattern in [
+                r'"command"\s*:\s*"([^"]+)"',                        # JSON: "command": "..."
+                r"run_forensics_command\(command='([^']+)'",          # Python single-quote
+                r'run_forensics_command\(command="([^"]+)"',          # Python double-quote
+            ]:
+                m = re.search(pattern, resposta)
+                if m:
+                    cmd = m.group(1)
+                    break
+
+            # Fallback 1b: formato {"name": "ls", "parameters": {"path": "..."}}
+            if not cmd:
+                name_m = re.search(r'"name"\s*:\s*"(\w+)"', resposta)
+                path_m = re.search(r'"path"\s*:\s*"([^"]+)"', resposta)
+                if name_m and path_m:
+                    cmd = f"{name_m.group(1)} '{path_m.group(1)}'"
+            if cmd:
+                output = run_in_sandbox(cmd)
+                resposta = f"$ {cmd}\n{output}"
+
+            # Fallback 2: verifica se alguma ferramenta foi chamada
+            # Se não foi, o modelo alucionou — executa find com o nome do ficheiro
+            elif not any(msg.__class__.__name__ == "ToolMessage" for msg in messages):
+                # Extrai possível nome de ficheiro da pergunta do utilizador
+                file_match = re.search(r'"([^"]+\.\w+)"', user_input)
+                if file_match:
+                    filename = file_match.group(1)
+                    find_cmd = f"find /forensics/part006 -iname '{filename}'"
+                    output = run_in_sandbox(find_cmd)
+                    resposta = f"[Nenhuma ferramenta chamada — a executar find automaticamente]\n$ {find_cmd}\n{output}"
+
             print(f"\n{'='*60}")
             print(f"Agente: {resposta}")
             print(f"{'='*60}\n")
 
-            history.append({"role": "assistant", "content": resposta})
-
         except Exception as e:
             print(f"\n[!] Erro: {str(e)}\n")
-            if history and history[-1]["role"] == "user":
-                history.pop()
+            if messages and messages[-1].get("role") == "user":
+                messages.pop()
 
 
 if __name__ == "__main__":

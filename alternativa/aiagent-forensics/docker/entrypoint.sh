@@ -77,9 +77,12 @@ mmls "$RAW_DEVICE" 2>/dev/null >> "$INFO_FILE"
 
 # ─── Garante loop devices disponíveis ────────────────────────────────────────
 
+# Cria loop devices se não existirem e limpa stale do container anterior
 for i in $(seq 2 8); do
     [ -e /dev/loop$i ] || mknod /dev/loop$i b 7 $i 2>/dev/null
 done
+# Liberta loop devices stale (não associados a ficheiros acessíveis)
+losetup -D 2>/dev/null
 
 # ─── Tenta montar partições via losetup ──────────────────────────────────────
 
@@ -97,7 +100,6 @@ while IFS= read -r line; do
     LENGTH=$(echo "$line" | awk '{print $5}')
 
     [ -z "$START" ] && continue
-    # Ignora sector 0 (MBR/GPT meta)
     START_DEC=$(echo "$START" | sed 's/^0*//' | tr -d ' ')
     [ -z "$START_DEC" ] && continue
     [ "$START_DEC" = "0" ] && continue
@@ -110,14 +112,8 @@ while IFS= read -r line; do
     MOUNT_POINT="$FINAL_MOUNT/part$PART_NUM"
     mkdir -p "$MOUNT_POINT"
 
-    # Encontra próximo loop device livre
-    LOOP_DEV=""
-    for i in $(seq 2 8); do
-        if ! losetup /dev/loop$i > /dev/null 2>&1; then
-            LOOP_DEV="/dev/loop$i"
-            break
-        fi
-    done
+    # Usa losetup --find --show para obter e configurar loop device automaticamente
+    LOOP_DEV=$(losetup --find --show -o "$OFFSET_BYTES" --sizelimit "$SIZE_BYTES" --read-only "$RAW_DEVICE" 2>/dev/null)
 
     if [ -z "$LOOP_DEV" ]; then
         echo "[!] Partição $PART_NUM: sem loop devices disponíveis"
@@ -126,29 +122,19 @@ while IFS= read -r line; do
         continue
     fi
 
-    # Associa loop device com offset e tamanho
-    losetup -o "$OFFSET_BYTES" --sizelimit "$SIZE_BYTES" "$LOOP_DEV" "$RAW_DEVICE" 2>/dev/null
-
-    if [ $? -eq 0 ]; then
-        # Tenta NTFS (kernel driver, não FUSE)
-        if mount -t ntfs -o ro "$LOOP_DEV" "$MOUNT_POINT" 2>/dev/null; then
-            echo "[+] Partição $PART_NUM montada em $MOUNT_POINT (NTFS via $LOOP_DEV)"
-            echo "PART_${PART_NUM}_MOUNT=$MOUNT_POINT" >> "$INFO_FILE"
-            echo "PART_${PART_NUM}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
-            MOUNTED=$((MOUNTED + 1))
-        elif mount -o ro "$LOOP_DEV" "$MOUNT_POINT" 2>/dev/null; then
-            echo "[+] Partição $PART_NUM montada em $MOUNT_POINT (auto via $LOOP_DEV)"
-            echo "PART_${PART_NUM}_MOUNT=$MOUNT_POINT" >> "$INFO_FILE"
-            echo "PART_${PART_NUM}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
-            MOUNTED=$((MOUNTED + 1))
-        else
-            echo "[!] Partição $PART_NUM: loop device criado mas mount falhou ($LOOP_DEV)"
-            losetup -d "$LOOP_DEV" 2>/dev/null
-            echo "PART_${PART_NUM}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
-            rmdir "$MOUNT_POINT" 2>/dev/null
-        fi
+    if mount -t ntfs -o ro "$LOOP_DEV" "$MOUNT_POINT" 2>/dev/null; then
+        echo "[+] Partição $PART_NUM montada em $MOUNT_POINT (NTFS via $LOOP_DEV)"
+        echo "PART_${PART_NUM}_MOUNT=$MOUNT_POINT" >> "$INFO_FILE"
+        echo "PART_${PART_NUM}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
+        MOUNTED=$((MOUNTED + 1))
+    elif mount -o ro "$LOOP_DEV" "$MOUNT_POINT" 2>/dev/null; then
+        echo "[+] Partição $PART_NUM montada em $MOUNT_POINT (auto via $LOOP_DEV)"
+        echo "PART_${PART_NUM}_MOUNT=$MOUNT_POINT" >> "$INFO_FILE"
+        echo "PART_${PART_NUM}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
+        MOUNTED=$((MOUNTED + 1))
     else
-        echo "[!] Partição $PART_NUM: falhou losetup em $LOOP_DEV"
+        echo "[!] Partição $PART_NUM: loop device criado mas mount falhou ($LOOP_DEV)"
+        losetup -d "$LOOP_DEV" 2>/dev/null
         echo "PART_${PART_NUM}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
         rmdir "$MOUNT_POINT" 2>/dev/null
     fi

@@ -1,9 +1,9 @@
 # AIAgent@forensics
 
-**Politécnico de Leiria — ESTG | Licenciatura em Engenharia Informática**  
+**Politécnico de Leiria — ESTG | Licenciatura em Engenharia Informática**
 Projecto Final 2025–2026
 
-Agente LLM com paradigma **ReAct (Reason + Act)** para investigação forense digital.  
+Agente LLM com paradigma **ReAct (Reason + Act)** para investigação forense digital.
 O agente raciocina autonomamente e executa comandos forenses dentro de um container Docker isolado.
 
 ---
@@ -14,13 +14,13 @@ O agente raciocina autonomamente e executa comandos forenses dentro de um contai
 Windows (máquina local)
 ├── Ollama  ← modelo LLM corre aqui
 ├── Python/LangChain  ← agente corre aqui
-├── forensics_image/  ← coloca aqui a imagem forense
+├── evidence/  ← coloca aqui a imagem forense
 └── Container Docker (sandbox isolada)
     ├── --network none      (sem internet)
     ├── --privileged        (para montagens)
     ├── /forensics_raw/     (imagem original, read-only)
-    ├── /forensics_ewf/     (mount ewf para E01)
-    └── /forensics/partN/   (partições acessíveis)
+    ├── /forensics_ewf/     (mount ewf para E01 → ewf1)
+    └── /forensics/partN/   (partições NTFS montadas)
 ```
 
 ---
@@ -39,57 +39,51 @@ Windows (máquina local)
 
 ## Instalação
 
-### 1. Pré-requisitos
-- [Docker Desktop](https://www.docker.com/products/docker-desktop)
-- [Ollama](https://ollama.com/download) com `ollama pull llama3`
+### Pré-requisitos
+- [Docker Desktop](https://www.docker.com/products/docker-desktop) (actualizado)
+- [Ollama](https://ollama.com/download) com `ollama pull llama3.1:8b`
 - Python 3.11+
 
-### 2. Construir a imagem Docker
+### 1. Construir a imagem Docker
 ```bash
-# No VSCode: Ctrl+Shift+P → Tasks: Run Task → 🐳 Build Docker Image
-# Ou no terminal:
+cd alternativa/aiagent-forensics
 docker build -t forensics-sandbox ./docker
 ```
 
-### 3. Instalar dependências Python
+> Na primeira execução demora alguns minutos (instala ferramentas forenses).
+
+### 2. Instalar dependências Python
 ```bash
-# No VSCode: Ctrl+Shift+P → Tasks: Run Task → 📦 Install Python Dependencies
-# Ou:
 pip install -r agent/requirements.txt
 ```
 
-### 4. Configurar o `.env`
-Edita `agent/.env` e ajusta o caminho para a tua imagem forense:
+### 3. Colocar a imagem forense
 ```
-FORENSICS_IMAGE_PATH=C:\forensics-agent\forensics_image
-OLLAMA_MODEL=llama3
+evidence/
+└── imagem.E01   ← coloca aqui (ou .dd, .vhd, .vmdk)
 ```
 
-### 5. Colocar a imagem forense
-```
-forensics_image/
-└── imagem.E01   ← coloca aqui (ou .dd, .vhd, etc.)
-```
+O caminho é detectado automaticamente — não é necessário configurar `.env`.
 
 ---
 
 ## Utilização
 
 ```bash
-# No VSCode: F5  (usa launch.json)
-# Ou:
-cd agent && python main.py
+cd alternativa/aiagent-forensics
+python agent/main.py
 ```
 
 ### Exemplos de perguntas ao agente
 
 ```
-Tu: Quantos utilizadores existem neste sistema?
-Tu: Encontra todos os ficheiros PDF modificados em Fevereiro de 2014
-Tu: Qual é o MD5 do ficheiro pdf.pdf?
-Tu: Há algum email suspeito nos documentos do utilizador?
-Tu: Procura por flags no formato CTF{...}
+Tu: Quais são os utilizadores existentes?
+Tu: Quantos utilizadores existem?
+Tu: Lista os ficheiros do desktop de Jimmy Wilson
+Tu: Encontra todos os ficheiros PDF
+Tu: Qual é o MD5 do ficheiro report.pdf?
 Tu: Qual é o esquema de partições do disco?
+Tu: Mostra os event logs do sistema
 ```
 
 ### Comandos especiais
@@ -104,19 +98,26 @@ Tu: Qual é o esquema de partições do disco?
 ```
 aiagent-forensics/
 ├── agent/
-│   ├── main.py          ← agente principal (chatbot)
+│   ├── main.py          ← agente principal (chatbot ReAct)
 │   ├── tools.py         ← execução de comandos no container
-│   ├── requirements.txt
-│   └── .env             ← configuração (não commitar)
+│   └── requirements.txt
 ├── docker/
 │   ├── Dockerfile       ← imagem Docker com ferramentas forenses
 │   └── entrypoint.sh    ← auto-detecção e montagem da imagem
-├── forensics_image/     ← coloca aqui a imagem forense (não commitar)
-├── .vscode/
-│   ├── launch.json      ← F5 para correr
-│   └── tasks.json       ← tarefas rápidas (build, test, stop)
-└── README.md
+├── evidence/            ← coloca aqui a imagem forense (não commitar)
+└── .vscode/
+    ├── launch.json      ← F5 para correr
+    └── tasks.json       ← tarefas rápidas (build, stop)
 ```
+
+---
+
+## Notas técnicas
+
+- O `entrypoint.sh` detecta automaticamente o tipo de imagem, monta o E01 via `ewfmount`, identifica as partições com `mmls` e monta cada partição NTFS via `losetup` + kernel NTFS driver
+- O `docker exec` usa `bash -c` para preservar espaços em paths (ex: `Jimmy Wilson`)
+- O agente tem um fallback que detecta tool calls em formato JSON ou Python-like gerados pelo modelo e executa-as automaticamente
+- Loop devices são limpos com `losetup -D` a cada arranque para evitar conflitos com execuções anteriores
 
 ---
 

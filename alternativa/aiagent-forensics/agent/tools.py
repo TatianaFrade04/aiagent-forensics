@@ -52,6 +52,8 @@ def ensure_container_running() -> bool:
         pass
 
     print("[*] A iniciar container forense...")
+    # Remove container anterior se existir (estado quebrado ou parado)
+    subprocess.run(["docker", "rm", "-f", CONTAINER_NAME], capture_output=True)
     try:
         # O entrypoint.sh corre automaticamente e faz ewfmount
         # "sleep infinity" é o CMD que mantém o container vivo depois do entrypoint
@@ -62,6 +64,8 @@ def ensure_container_running() -> bool:
             "--network", "none",
             "--memory", "512m",
             "--cpus", "1.0",
+            "--security-opt", "seccomp=unconfined",
+            "--security-opt", "apparmor=unconfined",
             "-v", f"{FORENSICS_IMAGE_PATH}:/forensics_raw:ro",
             "forensics-sandbox",
             "sleep", "infinity"
@@ -126,7 +130,8 @@ def run_in_sandbox(command: str) -> str:
     if not ensure_container_running():
         return "Erro: nao foi possivel iniciar o container."
 
-    docker_cmd = ["docker", "exec", CONTAINER_NAME] + parts
+    # Usa bash -c para preservar espaços em paths (ex: "Jimmy Wilson")
+    docker_cmd = ["docker", "exec", CONTAINER_NAME, "bash", "-c", command]
 
     try:
         result = subprocess.run(
