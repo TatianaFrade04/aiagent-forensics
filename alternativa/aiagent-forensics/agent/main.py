@@ -14,7 +14,7 @@ from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
-from tools import run_in_sandbox, stop_container
+from tools import run_in_sandbox, stop_container, ensure_container_running
 
 # ─── Configuração ─────────────────────────────────────────────────────────────
 
@@ -78,9 +78,11 @@ agent = create_react_agent(
     prompt=(
     "You are a digital forensics expert agent. "
     "You have ONE tool: run_forensics_command(command='...'). "
-    "CRITICAL: Paths with spaces MUST use single quotes: cat '/forensics/part006/USERS/Jimmy Wilson/Desktop/file.txt'. "
-    "NEVER write: cat /forensics/part006/USERS/Jimmy Wilson/... (unquoted spaces break the command). "
-    "ALWAYS write: cat '/forensics/part006/USERS/Jimmy Wilson/...' (single-quoted). "
+    "The command parameter MUST be a complete shell command, e.g.: run_forensics_command(command='ls /forensics/part006/USERS'). "
+    "NEVER pass only a path: run_forensics_command(command='/forensics/...') is WRONG. "
+    "NEVER invent filenames like 'file.txt' — use ls to list a directory first, then cat to read a specific file. "
+    "ALWAYS include the shell command: cat, ls, find, grep, etc. "
+    "Paths with spaces MUST use single quotes: cat '/forensics/part006/USERS/Jimmy Wilson/file.txt'. "
     "NEVER output JSON. ALWAYS call run_forensics_command directly.\n"
     "RULES:\n"
     "1. Every answer requires calling run_forensics_command first to get real data.\n"
@@ -113,7 +115,7 @@ def cmd_estrutura():
 def main():
     print(BANNER)
     print(f"[*] Modelo: {OLLAMA_MODEL} via {OLLAMA_URL}")
-    print("[*] A verificar container...\n")
+    ensure_container_running()
 
     messages = []
 
@@ -168,12 +170,23 @@ def main():
                     cmd = m.group(1)
                     break
 
-            # Fallback 1b: formato {"name": "ls", "parameters": {"path": "..."}}
+            # Fallback 1b: formato {"name": "ls", "parameters": {"path/file/...": "..."}}
             if not cmd:
                 name_m = re.search(r'"name"\s*:\s*"(\w+)"', resposta)
-                path_m = re.search(r'"path"\s*:\s*"([^"]+)"', resposta)
-                if name_m and path_m:
-                    cmd = f"{name_m.group(1)} '{path_m.group(1)}'"
+                arg_m  = re.search(r'"(?:path|file|target|query)"\s*:\s*"([^"]+)"', resposta)
+                if name_m and arg_m:
+                    cmd = f"{name_m.group(1)} '{arg_m.group(1)}'"
+            # Se cmd é apenas um path (sem comando), infere o comando
+            if cmd and cmd.startswith("/"):
+                import os as _os
+                has_ext = bool(_os.path.splitext(cmd)[1])
+                user_lower = user_input.lower()
+                wants_content = any(w in user_lower for w in ("content", "conteudo", "mostra", "show", "read", "le", "lê", "cat"))
+                if has_ext and wants_content:
+                    cmd = f"cat '{cmd}'"
+                else:
+                    cmd = f"ls '{cmd}'"
+
             if cmd:
                 output = run_in_sandbox(cmd)
                 resposta = f"$ {cmd}\n{output}"
