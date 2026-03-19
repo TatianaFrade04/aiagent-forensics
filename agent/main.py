@@ -6,8 +6,6 @@ Politécnico de Leiria — ESTG | Licenciatura em Engenharia Informática
 
 import atexit
 import os
-import json
-import re
 from dotenv import load_dotenv
 
 from langchain_ollama import ChatOllama
@@ -146,6 +144,19 @@ def main():
             messages = result.get("messages", messages)
             new_msgs = messages[n_before:]  # apenas mensagens do turno actual
 
+            # Output em bruto do agente (todas as mensagens do turno actual)
+            print(f"\n{'─'*60}")
+            print("[RAW AGENT OUTPUT]")
+            for msg in new_msgs:
+                cls = msg.__class__.__name__
+                content = msg.content if hasattr(msg, "content") else ""
+                tool_calls = getattr(msg, "tool_calls", [])
+                print(f"  [{cls}] content={content!r}")
+                if tool_calls:
+                    for tc in tool_calls:
+                        print(f"    tool_call: {tc}")
+            print(f"{'─'*60}\n")
+
             resposta = ""
             for msg in reversed(messages):
                 if msg.__class__.__name__ == "AIMessage" and msg.content:
@@ -154,35 +165,6 @@ def main():
 
             if not resposta:
                 resposta = "(sem resposta)"
-
-            # Fallback: se o modelo não chamou ferramentas neste turno
-            if not any(msg.__class__.__name__ == "ToolMessage" for msg in new_msgs):
-                cmd = None
-                for pattern in [
-                    r'"command"\s*:\s*"([^"]+)"',
-                    r"run_forensics_command\(command='([^']+)'",
-                    r'run_forensics_command\(command="([^"]+)"',
-                ]:
-                    m = re.search(pattern, resposta)
-                    if m:
-                        cmd = m.group(1)
-                        break
-                if not cmd:
-                    name_m = re.search(r'"name"\s*:\s*"(\w+)"', resposta)
-                    arg_m  = re.search(r'"(?:path|file|filename|target|query|directory|dir)"\s*:\s*"([^"]+)"', resposta)
-                    if name_m and arg_m:
-                        cmd = f"{name_m.group(1)} '{arg_m.group(1)}'"
-                if not cmd:
-                    file_match = re.search(
-                        r'([\w][\w\s.-]*\.(?:txt|pdf|doc|docx|exe|url|lnk|log|evtx|ini|jpg|png|zip|csv|xls|xlsx))\b',
-                        user_input, re.IGNORECASE
-                    )
-                    if file_match:
-                        fname = file_match.group(1).strip()
-                        cmd = f"find /forensics/part006 -iname '{fname}'"
-                if cmd:
-                    output = run_in_sandbox(cmd)
-                    resposta = f"$ {cmd}\n{output}"
 
             print(f"\n{'='*60}")
             print(f"Agente: {resposta}")
