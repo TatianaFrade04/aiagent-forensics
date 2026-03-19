@@ -6,6 +6,7 @@ Executa comandos dentro do container Docker de forma segura e controlada.
 import subprocess
 import shlex
 import os
+import re
 import time
 
 # ─── Configuração ─────────────────────────────────────────────────────────────
@@ -120,6 +121,14 @@ def run_in_sandbox(command: str) -> str:
     if not parts:
         return "Erro: comando vazio."
 
+    # Heurística: se parece que o path /forensics foi partido por espaços não-escapados,
+    # rejunta os fragmentos (ex: ["cat", "/forensics/.../Jimmy", "Wilson/file"] → ["cat", "/forensics/.../Jimmy Wilson/file"])
+    if len(parts) > 2 and parts[1].startswith("/forensics") and not parts[2].startswith("-"):
+        parts = [parts[0], " ".join(parts[1:])]
+
+    # Remove backslash-escapes dos argumentos (ex: O\ Death.txt → O Death.txt)
+    parts = [parts[0]] + [re.sub(r'\\(.)', r'\1', p) for p in parts[1:]]
+
     base_cmd = parts[0]
     if base_cmd not in ALLOWED_COMMANDS:
         return (
@@ -130,25 +139,57 @@ def run_in_sandbox(command: str) -> str:
     if not ensure_container_running():
         return "Erro: nao foi possivel iniciar o container."
 
-    # Usa bash -c para preservar espaços em paths (ex: "Jimmy Wilson")
-    docker_cmd = ["docker", "exec", CONTAINER_NAME, "bash", "-c", command]
+    # Reconstrói o comando com quoting correcto para preservar espaços em paths
+    safe_cmd = " ".join(shlex.quote(p) for p in parts)
+    docker_cmd = ["docker", "exec", CONTAINER_NAME, "bash", "-c", safe_cmd]
 
-    try:
-        result = subprocess.run(
-            docker_cmd,
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        output = result.stdout + result.stderr
+    for attempt in range(2):
+        try:
+            result = subprocess.run(
+                docker_cmd,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            output = result.stdout + result.stderr
 
-        MAX_CHARS = 4000
-        if len(output) > MAX_CHARS:
-            output = output[:MAX_CHARS] + f"\n\n[... output truncado ...]"
+            # Detecta erro setns (Docker Desktop perde exec após mounts FUSE+loop)
+            if "setns" in output and attempt == 0:
+                print("[!] Erro setns detectado — a reiniciar container...")
+                stop_container()
+                time.sleep(2)
+                if not ensure_container_running():
+                    return "Erro: nao foi possivel reiniciar o container."
+                continue
 
-        return output if output.strip() else "(comando executado sem output)"
+            # Auto-recovery: se cat falha com "No such file", tenta find + cat
+            if base_cmd == "cat" and "No such file or directory" in output and len(parts) >= 2:
+                filename = os.path.basename(parts[-1])
+                if filename and os.path.splitext(filename)[1]:
+                    find_result = subprocess.run(
+                        ["docker", "exec", CONTAINER_NAME, "bash", "-c",
+                         f"find /forensics/part006 -iname {shlex.quote(filename)} 2>/dev/null | head -1"],
+                        capture_output=True, text=True, timeout=30
+                    ).stdout.strip()
+                    if find_result:
+                        cat_result = subprocess.run(
+                            ["docker", "exec", CONTAINER_NAME, "bash", "-c",
+                             f"cat {shlex.quote(find_result)}"],
+                            capture_output=True, text=True, timeout=30
+                        )
+                        out = cat_result.stdout + cat_result.stderr
+                        if out.strip():
+                            return f"[{find_result}]\n{out}"
 
-    except subprocess.TimeoutExpired:
-        return "Erro: timeout — o comando demorou mais de 60 segundos."
-    except Exception as e:
-        return f"Erro inesperado: {str(e)}"
+            MAX_CHARS = 4000
+            if len(output) > MAX_CHARS:
+                output = output[:MAX_CHARS] + "\n\n[... output truncado ...]"
+
+            return output if output.strip() else "(comando executado sem output)"
+
+        except subprocess.TimeoutExpired:
+            return "Erro: timeout — o comando demorou mais de 60 segundos."
+        except Exception as e:
+            return f"Erro inesperado: {str(e)}"
+
+    return "Erro: nao foi possivel executar o comando apos reiniciar o container."
