@@ -27,4 +27,14 @@ RUN sed -i 's/\r//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 WORKDIR /root
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/bin/bash"]
+CMD ["/bin/sleep", "infinity"]
+
+
+
+
+
+#how to run our project
+
+#cd C:\AIAgentForensics
+#./build.ps1  -> apenas uma vez ao inicio
+#py agent\main.py
