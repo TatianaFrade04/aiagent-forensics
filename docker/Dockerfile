@@ -1,3 +1,6 @@
+# Build: docker build -t forensics-sandbox ./docker
+#**Windows (PowerShell): .\build.ps1
+#**Linux / macOS (bash): bash build.sh
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -27,4 +30,4 @@ RUN sed -i 's/\r//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 WORKDIR /root
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/bin/bash"]
+CMD ["/bin/sleep", "infinity"]
