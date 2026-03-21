@@ -12,7 +12,7 @@ from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
-from tools import run_in_sandbox, stop_container, ensure_container_running, list_directory_names
+from tools import run_in_sandbox, stop_container, start_container, list_directory_names
 
 # ─── Configuração ─────────────────────────────────────────────────────────────
 
