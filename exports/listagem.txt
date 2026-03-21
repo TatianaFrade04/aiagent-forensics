@@ -1,0 +1,4 @@
+$RECYCLE.BIN
+Documents and Settings
+USERS
+Windows
