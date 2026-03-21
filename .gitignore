@@ -19,8 +19,5 @@ forensics_image/
 *.vhd
 *.vmdk
 
-# VSCode
-.vscode/settings.json
-
-
+# Ficheiros criados durante a análise forense (nunca commitar)
 exports/

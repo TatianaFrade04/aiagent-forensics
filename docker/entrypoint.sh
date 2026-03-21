@@ -122,12 +122,12 @@ while IFS= read -r line; do
         continue
     fi
 
-    if mount -t ntfs -o ro "$LOOP_DEV" "$MOUNT_POINT" 2>/dev/null; then
+    if mount -t ntfs -o ro "$LOOP_DEV" "$MOUNT_POINT"; then
         echo "[+] Partição $PART_NUM montada em $MOUNT_POINT (NTFS via $LOOP_DEV)"
         echo "PART_${PART_NUM}_MOUNT=$MOUNT_POINT" >> "$INFO_FILE"
         echo "PART_${PART_NUM}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
         MOUNTED=$((MOUNTED + 1))
-    elif mount -o ro "$LOOP_DEV" "$MOUNT_POINT" 2>/dev/null; then
+    elif mount -o ro "$LOOP_DEV" "$MOUNT_POINT"; then
         echo "[+] Partição $PART_NUM montada em $MOUNT_POINT (auto via $LOOP_DEV)"
         echo "PART_${PART_NUM}_MOUNT=$MOUNT_POINT" >> "$INFO_FILE"
         echo "PART_${PART_NUM}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
