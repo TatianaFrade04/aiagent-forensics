@@ -21,3 +21,6 @@ forensics_image/
 
 # VSCode
 .vscode/settings.json
+
+
+exports/
