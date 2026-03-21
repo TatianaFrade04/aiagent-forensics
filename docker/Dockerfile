@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y \
     chntpw \
     qemu-utils \
     ntfs-3g \
+    fuse \
     python3 \
     python3-pip \
     md5deep \

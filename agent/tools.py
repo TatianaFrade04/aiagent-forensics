@@ -52,7 +52,7 @@ def start_container() -> bool:
         time.sleep(1)
     print("[*] A iniciar container forense...")
     try:
-        subprocess.run([
+        docker_run_args = [
             "docker", "run", "-d",
             "--name", CONTAINER_NAME,
             "--privileged",
@@ -62,9 +62,13 @@ def start_container() -> bool:
             "--security-opt", "seccomp=unconfined",
             "--security-opt", "apparmor=unconfined",
             "-v", f"{FORENSICS_IMAGE_PATH}:/forensics_raw:ro",
-            "forensics-sandbox",
-            "sleep", "infinity"
-        ], check=True, capture_output=True)
+        ]
+        # No Linux o FUSE( Filesystem in Userspace) precisa de acesso explícito ao dispositivo /dev/fuse.
+        # No Windows (Docker Desktop) este dispositivo não existe no host — ignorar.
+        if os.path.exists("/dev/fuse"):
+            docker_run_args += ["--device", "/dev/fuse"]
+        docker_run_args += ["forensics-sandbox", "sleep", "infinity"]
+        subprocess.run(docker_run_args, check=True, capture_output=True)
 
         print("[*] A aguardar montagem da imagem forense...")
         time.sleep(10)
@@ -105,7 +109,7 @@ def stop_container():
     """Para e remove o container (chamado no fecho do programa)."""
     print("\n[*] A parar container...")
     # Desmonta os filesystems antes de parar o container.
-    # Sem esta etapa, os mounts FUSE (ewfmount) e NTFS (losetup+mount) ficam
+    # Sem esta etapa, os mounts FUSE(nivel 2) (ewfmount) e NTFS(nivel3) (losetup+mount) ficam
     # activos no kernel, impedindo o SIGKILL de terminar o container — deixando-o
     # em estado zombie e impossível de remover na próxima execução.
     # -l (lazy): desliga o mount do directório imediatamente, sem forçar processos.
@@ -171,6 +175,7 @@ def run_in_sandbox(command: str) -> str:
             output = result.stdout + result.stderr
 
             # Detecta erro setns (Docker Desktop perde exec após mounts FUSE+loop)
+            #setns = set namespace — é uma syscall do Linux kernel.
             if "setns" in output and attempt == 0:
                 print("[!] Erro setns detectado — a reiniciar container...")
                 stop_container()
