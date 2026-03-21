@@ -28,6 +28,14 @@ def _load_env_path():
 
 FORENSICS_IMAGE_PATH = _load_env_path()
 
+# Pasta de exportações — dentro do container é sempre /exports (bind mount).
+# No host usa ./exports/ relativo à raiz do projecto.
+EXPORTS_PATH = os.getenv(
+    "EXPORTS_PATH",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "exports"))
+)
+os.makedirs(EXPORTS_PATH, exist_ok=True)
+
 # Comandos permitidos (whitelist de segurança)
 ALLOWED_COMMANDS = [
     "ls", "find", "stat", "file",
@@ -68,6 +76,7 @@ def ensure_container_running() -> bool:
             "--security-opt", "seccomp=unconfined",
             "--security-opt", "apparmor=unconfined",
             "-v", f"{FORENSICS_IMAGE_PATH}:/forensics_raw:ro",
+            "-v", f"{EXPORTS_PATH}:/exports",
             "forensics-sandbox",
             "sleep", "infinity"
         ], check=True, capture_output=True)
@@ -193,3 +202,92 @@ def run_in_sandbox(command: str) -> str:
             return f"Erro inesperado: {str(e)}"
 
     return "Erro: nao foi possivel executar o comando apos reiniciar o container."
+
+
+# ─── Funções forenses estruturadas ───────────────────────────────────────────
+
+def list_directory_names(dir_path: str, export_filename: str = "listagem.txt") -> str:
+    """
+    Lista apenas os nomes (sem metadados) dos ficheiros e pastas imediatamente
+    dentro de dir_path, um nome por linha, e guarda em EXPORTS_PATH/<export_filename>.
+
+    Usa: find <dir_path> -maxdepth 1 -mindepth 1 -printf '%f\\n'
+    O output é escrito directamente em Python no host via o bind mount —
+    nunca através de redirection gerada pelo agente.
+    """
+    # Validações de segurança
+    dir_path = dir_path.rstrip("/")
+    if not dir_path.startswith("/forensics"):
+        return "[!] BLOCKED: dir_path must be under /forensics."
+    export_filename = os.path.basename(export_filename)  # impede path traversal
+    if not export_filename:
+        return "[!] export_filename must not be empty."
+
+    if not ensure_container_running():
+        return "[!] Erro: nao foi possivel iniciar o container."
+
+    # Verifica que o path existe e é uma directoria
+    kind_result = subprocess.run(
+        ["docker", "exec", CONTAINER_NAME, "bash", "-c",
+         f"if [ -d {shlex.quote(dir_path)} ]; then echo dir; "
+         f"elif [ -e {shlex.quote(dir_path)} ]; then echo file; "
+         f"else echo missing; fi"],
+        capture_output=True, text=True, timeout=10,
+    )
+    kind = kind_result.stdout.strip()
+    if kind == "missing":
+        return f"[!] ERROR: '{dir_path}' does not exist inside the container."
+    if kind == "file":
+        return (
+            f"[!] ERROR: '{dir_path}' is a file, not a directory. "
+            "Provide a directory path."
+        )
+
+    # Executa find dentro do container com -printf '%f\n' → apenas nome base
+    find_result = subprocess.run(
+        ["docker", "exec", CONTAINER_NAME, "bash", "-c",
+         f"find {shlex.quote(dir_path)} -maxdepth 1 -mindepth 1 -printf '%f\\n' "
+         f"| sort 2>/dev/null"],
+        capture_output=True, text=True, timeout=30,
+    )
+    names = find_result.stdout.strip()
+
+    if not names:
+        stderr = find_result.stderr.strip()
+        return (
+            f"[!] No entries found in '{dir_path}'."
+            + (f"\nstderr: {stderr}" if stderr else "")
+        )
+
+    # Valida que o output não contém metadados (permissões, datas, tamanhos)
+    suspicious = [
+        line for line in names.splitlines()
+        if re.match(r'^[-drwx]{9}\s', line)   # ls -l style permissions
+        or re.match(r'^\d{4}-\d{2}-\d{2}', line)  # timestamps
+        or line.startswith("/")               # caminhos absolutos
+    ]
+    if suspicious:
+        return (
+            "[!] VALIDATION FAILED: output contains metadata or absolute paths.\n"
+            f"  Unexpected lines: {suspicious[:3]}\n"
+            "  This is a bug — report it instead of saving the file."
+        )
+
+    # Escreve directamente em Python no host (sem shell redirection)
+    dest = os.path.join(EXPORTS_PATH, export_filename)
+    try:
+        with open(dest, "w", encoding="utf-8") as fh:
+            fh.write(names + "\n")
+    except OSError as e:
+        return f"[!] Erro ao escrever ficheiro de exportação: {e}"
+
+    # Verificação final
+    size = os.path.getsize(dest)
+    line_count = names.count("\n") + 1
+    return (
+        f"[\u2713] Export verified: '/exports/{export_filename}' "
+        f"({size} bytes, {line_count} entries).\n"
+        f"First entries:\n"
+        + "\n".join(names.splitlines()[:10])
+        + ("\n[...]" if line_count > 10 else "")
+    )

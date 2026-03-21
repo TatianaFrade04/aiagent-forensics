@@ -12,7 +12,7 @@ from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
-from tools import run_in_sandbox, stop_container, ensure_container_running
+from tools import run_in_sandbox, stop_container, ensure_container_running, list_directory_names
 
 # ─── Configuração ─────────────────────────────────────────────────────────────
 
@@ -60,6 +60,40 @@ def run_forensics_command(command: str) -> str:
     return run_in_sandbox(command)
 
 
+@tool
+def forensic_list_names(dir_path: str,
+                         export_filename: str = "listagem.txt") -> str:
+    """
+    Lists ONLY the base names (no metadata, no full paths) of files and folders
+    directly inside dir_path, one name per line, and saves them to
+    /exports/<export_filename> on the host.
+
+    Use this tool whenever the user asks to list, enumerate or export filenames
+    from a directory in the forensic image.
+
+    PARAMETERS:
+      dir_path        — absolute path inside /forensics, e.g.
+                        /forensics/part006/USERS
+                        /forensics/part006/Windows/System32/winevt/Logs
+                        '/forensics/part006/USERS/Jimmy Wilson/Desktop'
+      export_filename — output filename in /exports/ (default: listagem.txt)
+
+    OUTPUT: one bare filename per line, no permissions, dates, sizes or paths.
+
+    RULES:
+    - ALWAYS use this tool before answering a listing/enumeration request.
+    - Read the [\u2713] or [!] prefix in the result before reporting success.
+    - Only report success when the result starts with [\u2713].
+    - If the result starts with [!], do NOT declare success — report the error.
+
+    EXAMPLES:
+      forensic_list_names('/forensics/part006/USERS')
+      forensic_list_names('/forensics/part006/USERS/Jimmy Wilson/Desktop',
+                          'desktop_files.txt')
+    """
+    return list_directory_names(dir_path, export_filename)
+
+
 # ─── Modelo LLM ───────────────────────────────────────────────────────────────
 
 llm = ChatOllama(
@@ -72,16 +106,35 @@ llm = ChatOllama(
 
 agent = create_react_agent(
     model=llm,
-    tools=[run_forensics_command],
+    tools=[run_forensics_command, forensic_list_names],
     prompt=(
-    "You are a digital forensics expert agent. "
-    "You are a digital forensics expert. Use run_forensics_command to execute shell commands inside the forensic container.\n"
-    "RULES:\n"
-    "1. ALWAYS call run_forensics_command before answering — never invent results.\n"
-    "2. ALL files are under /forensics/part006/.\n"
-    "3. Paths with spaces need single quotes: ls '/forensics/part006/USERS/Jimmy Wilson/Desktop'\n"
-    "4. If unsure of a path, use find first: find /forensics/part006 -iname 'filename'\n"
-    "5. One command at a time.\n"
+        "You are a digital forensics expert agent operating in READ-ONLY forensic mode.\n"
+        "\n"
+        "FILESYSTEM LAYOUT:\n"
+        "  /forensics/part006/ — Windows NTFS partition (READ-ONLY evidence)\n"
+        "  /exports/           — the ONLY writable directory\n"
+        "\n"
+        "TOOLS:\n"
+        "  forensic_list_names(dir_path, export_filename) — list bare filenames → /exports/\n"
+        "  run_forensics_command(command) — run a shell command for all other tasks\n"
+        "\n"
+        "══ LISTING FILES (use forensic_list_names) ═════════════════════\n"
+        "1. ALWAYS use forensic_list_names to list or enumerate files in a directory.\n"
+        "   NEVER use run_forensics_command for listing tasks.\n"
+        "2. The tool returns only bare names (no permissions, dates, sizes or paths).\n"
+        "3. Only report success when the result starts with [✓].\n"
+        "4. If the result starts with [!], report the error to the user and stop.\n"
+        "\n"
+        "══ USING run_forensics_command ═════════════════════════════\n"
+        "5. ALWAYS call a tool before answering — never invent or hallucinate results.\n"
+        "6. Paths with spaces MUST use single quotes:\n"
+        "     ls '/forensics/part006/USERS/Jimmy Wilson/Desktop'\n"
+        "7. /forensics is READ-ONLY. NEVER redirect or write to any path under /forensics.\n"
+        "8. NEVER use: rm, mv, dd, shred, find -delete, sed -i.\n"
+        "9. NEVER chain commands with ; && ||. One command per call.\n"
+        "10. To export output: command > /exports/file.txt\n"
+        "    Then verify: ls -lh /exports/file.txt\n"
+        "    Only report success after seeing a non-zero file size.\n"
     ),
 )
 
