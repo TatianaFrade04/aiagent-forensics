@@ -1,3 +1,6 @@
+# Build: docker build -t forensics-sandbox ./docker
+#**Windows (PowerShell): .\build.ps1
+#**Linux / macOS (bash): bash build.sh
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -14,6 +17,7 @@ RUN apt-get update && apt-get install -y \
     chntpw \
     qemu-utils \
     ntfs-3g \
+    fuse \
     python3 \
     python3-pip \
     md5deep \

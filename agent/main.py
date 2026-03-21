@@ -161,7 +161,7 @@ def cmd_estrutura():
 def main():
     print(BANNER)
     print(f"[*] Modelo: {OLLAMA_MODEL} via {OLLAMA_URL}")
-    ensure_container_running()
+    start_container()
 
     messages = []
 
@@ -193,7 +193,7 @@ def main():
         print()
         try:
             n_before = len(messages)
-            result = agent.invoke({"messages": messages})
+            result = agent.invoke({"messages": messages}, config={"recursion_limit": MAX_ITERATIONS})
             messages = result.get("messages", messages)
             new_msgs = messages[n_before:]  # apenas mensagens do turno actual
 

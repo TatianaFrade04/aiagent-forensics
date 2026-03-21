@@ -48,25 +48,19 @@ ALLOWED_COMMANDS = [
 
 # ─── Gestão do container ──────────────────────────────────────────────────────
 
-def ensure_container_running() -> bool:
-    """Garante que o container está activo com a imagem montada."""
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", "-f", "{{.State.Running}}", CONTAINER_NAME],
-            capture_output=True, text=True
-        )
-        if result.stdout.strip() == "true":
-            return True
-    except Exception:
-        pass
-
+def start_container() -> bool:
+    """Destrói qualquer container existente e cria um novo de raiz."""
+    rm_result = subprocess.run(["docker", "rm", "-f", CONTAINER_NAME], capture_output=True, text=True)
+    if rm_result.returncode != 0 and rm_result.stderr.strip():
+        print(f"[!] Aviso rm: {rm_result.stderr.strip()}")
+    for _ in range(5):
+        check = subprocess.run(["docker", "inspect", CONTAINER_NAME], capture_output=True)
+        if check.returncode != 0:
+            break
+        time.sleep(1)
     print("[*] A iniciar container forense...")
-    # Remove container anterior se existir (estado quebrado ou parado)
-    subprocess.run(["docker", "rm", "-f", CONTAINER_NAME], capture_output=True)
     try:
-        # O entrypoint.sh corre automaticamente e faz ewfmount
-        # "sleep infinity" é o CMD que mantém o container vivo depois do entrypoint
-        subprocess.run([
+        docker_run_args = [
             "docker", "run", "-d",
             "--name", CONTAINER_NAME,
             "--privileged",
@@ -77,15 +71,17 @@ def ensure_container_running() -> bool:
             "--security-opt", "apparmor=unconfined",
             "-v", f"{FORENSICS_IMAGE_PATH}:/forensics_raw:ro",
             "-v", f"{EXPORTS_PATH}:/exports",
-            "forensics-sandbox",
-            "sleep", "infinity"
-        ], check=True, capture_output=True)
+        ]
+        # No Linux o FUSE( Filesystem in Userspace) precisa de acesso explícito ao dispositivo /dev/fuse.
+        # No Windows (Docker Desktop) este dispositivo não existe no host — ignorar.
+        if os.path.exists("/dev/fuse"):
+            docker_run_args += ["--device", "/dev/fuse"]
+        docker_run_args += ["forensics-sandbox", "sleep", "infinity"]
+        subprocess.run(docker_run_args, check=True, capture_output=True)
 
-        # Aguarda o entrypoint terminar (ewfmount pode demorar alguns segundos)
         print("[*] A aguardar montagem da imagem forense...")
         time.sleep(10)
 
-        # Confirma que o ewfmount correu
         check = subprocess.run(
             ["docker", "exec", CONTAINER_NAME, "ls", "/forensics_ewf"],
             capture_output=True, text=True
@@ -103,9 +99,34 @@ def ensure_container_running() -> bool:
         return False
 
 
+def ensure_container_running() -> bool:
+    """Verifica se o container está activo. Se não, inicia-o."""
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", CONTAINER_NAME],
+            capture_output=True, text=True
+        )
+        if result.stdout.strip() == "true":
+            return True
+    except Exception:
+        pass
+
+    return start_container()
+
+
 def stop_container():
     """Para e remove o container (chamado no fecho do programa)."""
     print("\n[*] A parar container...")
+    # Desmonta os filesystems antes de parar o container.
+    # Sem esta etapa, os mounts FUSE(nivel 2) (ewfmount) e NTFS(nivel3) (losetup+mount) ficam
+    # activos no kernel, impedindo o SIGKILL de terminar o container — deixando-o
+    # em estado zombie e impossível de remover na próxima execução.
+    # -l (lazy): desliga o mount do directório imediatamente, sem forçar processos.
+    subprocess.run(
+        ["docker", "exec", CONTAINER_NAME, "bash", "-c",
+         "umount -l /forensics/part* 2>/dev/null; losetup -D 2>/dev/null; umount -l /forensics_ewf 2>/dev/null; true"],
+        capture_output=True, timeout=15
+    )
     subprocess.run(["docker", "stop", CONTAINER_NAME], capture_output=True)
     subprocess.run(["docker", "rm",   CONTAINER_NAME], capture_output=True)
     print("[+] Container removido.")
@@ -163,6 +184,7 @@ def run_in_sandbox(command: str) -> str:
             output = result.stdout + result.stderr
 
             # Detecta erro setns (Docker Desktop perde exec após mounts FUSE+loop)
+            #setns = set namespace — é uma syscall do Linux kernel.
             if "setns" in output and attempt == 0:
                 print("[!] Erro setns detectado — a reiniciar container...")
                 stop_container()

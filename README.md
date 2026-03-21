@@ -45,8 +45,19 @@ Windows (máquina local)
 - Python 3.11+
 
 ### 1. Construir a imagem Docker
+
+**Linux / macOS (bash):**
 ```bash
-cd alternativa/aiagent-forensics
+bash build.sh
+```
+
+**Windows (PowerShell):**
+```powershell
+.\build.ps1
+```
+
+**Ou directamente:**
+```bash
 docker build -t forensics-sandbox ./docker
 ```
 
@@ -105,6 +116,8 @@ aiagent-forensics/
 │   ├── Dockerfile       ← imagem Docker com ferramentas forenses
 │   └── entrypoint.sh    ← auto-detecção e montagem da imagem
 ├── evidence/            ← coloca aqui a imagem forense (não commitar)
+├── build.sh             ← script de build (Linux/macOS)
+├── build.ps1            ← script de build (Windows PowerShell)
 └── .vscode/
     ├── launch.json      ← F5 para correr
     └── tasks.json       ← tarefas rápidas (build, stop)
@@ -125,3 +138,4 @@ aiagent-forensics/
 - Miguel Negrão — miguel.negrao@ipleiria.pt
 - Miguel Frade — miguel.frade@ipleiria.pt
 - Patrício Domingues — patricio.domingues@ipleiria.pt
+
