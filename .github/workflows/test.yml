@@ -1,0 +1,45 @@
+name: Testar entrypoint em Linux real
+
+on: [push]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Buscar código
+        uses: actions/checkout@v4
+
+      - name: Criar imagem de teste NTFS
+        run: |
+          sudo apt-get install -y sleuthkit ntfs-3g parted
+          dd if=/dev/zero of=test.img bs=1M count=50
+          parted test.img --script mklabel msdos
+          parted test.img --script mkpart primary ntfs 2048s 100%
+          sudo mkntfs -F -Q -p 0 -H 0 -S 0 test.img
+          mkdir -p forensics_raw
+          mv test.img forensics_raw/
+
+      - name: Build da imagem Docker
+        run: docker build -t forensics-test .
+
+      - name: Correr o container
+        run: |
+          docker run --rm \
+            --cap-add SYS_ADMIN \
+            --cap-add MKNOD \
+            --device /dev/loop-control \
+            --security-opt apparmor:unconfined \
+            -v "$PWD/forensics_raw:/forensics_raw" \
+            forensics-test
+
+      - name: Verificar que montou
+        run: |
+          docker run --rm \
+            --cap-add SYS_ADMIN \
+            --cap-add MKNOD \
+            --device /dev/loop-control \
+            --security-opt apparmor:unconfined \
+            -v "$PWD/forensics_raw:/forensics_raw" \
+            forensics-test \
+            cat /forensics_info.txt
