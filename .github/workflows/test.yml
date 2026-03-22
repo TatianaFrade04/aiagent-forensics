@@ -14,9 +14,12 @@ jobs:
         run: |
           sudo apt-get install -y sleuthkit ntfs-3g parted
           dd if=/dev/zero of=test.img bs=1M count=50
-          parted test.img --script mklabel msdos
-          parted test.img --script mkpart primary ntfs 2048s 100%
-          sudo mkntfs -F -Q -p 0 -H 0 -S 0 test.img
+          LOOP=$(sudo losetup --find --show test.img)
+          sudo parted "$LOOP" --script mklabel msdos
+          sudo parted "$LOOP" --script mkpart primary ntfs 2048s 100%
+          sudo partprobe "$LOOP"
+          sudo mkntfs -F -Q "${LOOP}p1"
+          sudo losetup -d "$LOOP"
           mkdir -p forensics_raw
           mv test.img forensics_raw/
 
