@@ -3,4 +3,4 @@
 
 
 
-docker exec -it forensics_sandbox /bin/bash
+docker exec -it forensics /bin/bash

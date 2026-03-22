@@ -11,7 +11,7 @@ import time
 
 # ─── Configuração ─────────────────────────────────────────────────────────────
 
-CONTAINER_NAME = "forensics_sandbox"
+CONTAINER_NAME = "forensics"
 
 # Carrega o .env manualmente para evitar problemas com backslashes
 def _load_env_path():
@@ -63,19 +63,17 @@ def start_container() -> bool:
         docker_run_args = [
             "docker", "run", "-d",
             "--name", CONTAINER_NAME,
-            "--privileged",
+            "--cap-add", "SYS_ADMIN",
             "--network", "none",
             "--memory", "512m",
             "--cpus", "1.0",
             "--security-opt", "seccomp=unconfined",
             "--security-opt", "apparmor=unconfined",
+            "--device", "/dev/loop-control",
+            "--device", "/dev/fuse",
             "-v", f"{FORENSICS_IMAGE_PATH}:/forensics_raw:ro",
             "-v", f"{EXPORTS_PATH}:/exports",
         ]
-        # No Linux o FUSE( Filesystem in Userspace) precisa de acesso explícito ao dispositivo /dev/fuse.
-        # No Windows (Docker Desktop) este dispositivo não existe no host — ignorar.
-        if os.path.exists("/dev/fuse"):
-            docker_run_args += ["--device", "/dev/fuse"]
         docker_run_args += ["forensics-sandbox", "sleep", "infinity"]
         subprocess.run(docker_run_args, check=True, capture_output=True)
 
@@ -312,4 +310,63 @@ def list_directory_names(dir_path: str, export_filename: str = "listagem.txt") -
         f"First entries:\n"
         + "\n".join(names.splitlines()[:10])
         + ("\n[...]" if line_count > 10 else "")
+    )
+
+
+def export_file_content(file_path: str, export_filename: str) -> str:
+    """
+    Reads the content of a single file from inside the container and writes
+    it to EXPORTS_PATH/<export_filename> on the host via the bind mount.
+    """
+    file_path = file_path.rstrip("/")
+    if not file_path.startswith("/forensics"):
+        return "[!] BLOCKED: file_path must be under /forensics."
+    export_filename = os.path.basename(export_filename)  # impede path traversal
+    if not export_filename:
+        return "[!] export_filename must not be empty."
+
+    if not ensure_container_running():
+        return "[!] Erro: nao foi possivel iniciar o container."
+
+    # Verifica que o path existe e é um ficheiro
+    kind_result = subprocess.run(
+        ["docker", "exec", CONTAINER_NAME, "bash", "-c",
+         f"if [ -f {shlex.quote(file_path)} ]; then echo file; "
+         f"elif [ -e {shlex.quote(file_path)} ]; then echo other; "
+         f"else echo missing; fi"],
+        capture_output=True, text=True, timeout=10,
+    )
+    kind = kind_result.stdout.strip()
+    if kind == "missing":
+        return f"[!] ERROR: '{file_path}' does not exist inside the container."
+    if kind == "other":
+        return f"[!] ERROR: '{file_path}' is not a regular file."
+
+    # Lê o conteúdo do ficheiro via docker exec (binário-safe via base64)
+    read_result = subprocess.run(
+        ["docker", "exec", CONTAINER_NAME, "bash", "-c",
+         f"cat {shlex.quote(file_path)} | base64"],
+        capture_output=True, timeout=60,
+    )
+    if read_result.returncode != 0:
+        err = read_result.stderr.decode(errors="replace").strip()
+        return f"[!] ERROR reading file: {err}"
+
+    import base64
+    try:
+        raw_bytes = base64.b64decode(read_result.stdout)
+    except Exception as e:
+        return f"[!] ERROR decoding file content: {e}"
+
+    dest = os.path.join(EXPORTS_PATH, export_filename)
+    try:
+        with open(dest, "wb") as fh:
+            fh.write(raw_bytes)
+    except OSError as e:
+        return f"[!] Erro ao escrever ficheiro de exportação: {e}"
+
+    size = os.path.getsize(dest)
+    return (
+        f"[\u2713] Export verified: '/exports/{export_filename}' ({size} bytes).\n"
+        f"Source: {file_path}"
     )

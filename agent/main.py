@@ -12,7 +12,7 @@ from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
-from tools import run_in_sandbox, stop_container, start_container, list_directory_names
+from tools import run_in_sandbox, stop_container, start_container, list_directory_names, export_file_content
 
 # ─── Configuração ─────────────────────────────────────────────────────────────
 
@@ -94,6 +94,33 @@ def forensic_list_names(dir_path: str,
     return list_directory_names(dir_path, export_filename)
 
 
+@tool
+def forensic_export_file(file_path: str, export_filename: str) -> str:
+    """
+    Exports the full content of a single file from the forensic image to
+    /exports/<export_filename> on the host. Works with text and binary files.
+
+    Use this tool whenever the user asks to export, copy, save or extract the
+    content of a specific file from the forensic image.
+
+    PARAMETERS:
+      file_path       — absolute path to the file inside /forensics, e.g.
+                        '/forensics/part006/USERS/Jimmy Wilson/Documents/O Death.txt'
+      export_filename — output filename in /exports/ (e.g. 'death.txt')
+
+    RULES:
+    - Only report success when the result starts with [\u2713].
+    - If the result starts with [!], report the error to the user and stop.
+
+    EXAMPLES:
+      forensic_export_file(
+          '/forensics/part006/USERS/Jimmy Wilson/Documents/O Death.txt',
+          'death.txt'
+      )
+    """
+    return export_file_content(file_path, export_filename)
+
+
 # ─── Modelo LLM ───────────────────────────────────────────────────────────────
 
 llm = ChatOllama(
@@ -106,7 +133,7 @@ llm = ChatOllama(
 
 agent = create_react_agent(
     model=llm,
-    tools=[run_forensics_command, forensic_list_names],
+    tools=[run_forensics_command, forensic_list_names, forensic_export_file],
     prompt=(
         "You are a digital forensics expert agent operating in READ-ONLY forensic mode.\n"
         "\n"
@@ -116,7 +143,12 @@ agent = create_react_agent(
         "\n"
         "TOOLS:\n"
         "  forensic_list_names(dir_path, export_filename) — list bare filenames → /exports/\n"
+        "  forensic_export_file(file_path, export_filename) — export a file's content → /exports/\n"
         "  run_forensics_command(command) — run a shell command for all other tasks\n"
+        "\n"
+        "══ EXPORTING FILES (use forensic_export_file) ══════════════════\n"
+        "0. ALWAYS use forensic_export_file to export/copy/save a file's content.\n"
+        "   NEVER use run_forensics_command with cp or redirection for this.\n"
         "\n"
         "══ LISTING FILES (use forensic_list_names) ═════════════════════\n"
         "1. ALWAYS use forensic_list_names to list or enumerate files in a directory.\n"

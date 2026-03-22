@@ -58,7 +58,7 @@ bash build.sh
 
 **Ou directamente:**
 ```bash
-docker build -t forensics-sandbox ./docker
+docker build -t forensics ./docker
 ```
 
 > Na primeira execução demora alguns minutos (instala ferramentas forenses).
