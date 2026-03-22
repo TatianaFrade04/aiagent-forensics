@@ -13,18 +13,23 @@ jobs:
       - name: Criar imagem de teste NTFS
         run: |
           sudo apt-get install -y sleuthkit ntfs-3g parted
+          # Cria ficheiro de 50MB
           dd if=/dev/zero of=test.img bs=1M count=50
+          # Associa a um loop device para poder criar partição correctamente
           LOOP=$(sudo losetup --find --show test.img)
+          # Cria tabela de partições e partição NTFS
           sudo parted "$LOOP" --script mklabel msdos
           sudo parted "$LOOP" --script mkpart primary ntfs 2048s 100%
           sudo partprobe "$LOOP"
+          # Formata só a partição (loop0p1), não o disco inteiro
           sudo mkntfs -F -Q "${LOOP}p1"
+          # Liberta o loop device
           sudo losetup -d "$LOOP"
           mkdir -p forensics_raw
           mv test.img forensics_raw/
 
       - name: Build da imagem Docker
-        run: docker build -t forensics-test ./docker
+        run: docker build -t forensics-test .
 
       - name: Correr o container
         run: |
