@@ -63,14 +63,12 @@ def start_container() -> bool:
         docker_run_args = [
             "docker", "run", "-d",
             "--name", CONTAINER_NAME,
-            "--cap-add", "SYS_ADMIN",
+            "--privileged",
             "--network", "none",
             "--memory", "512m",
             "--cpus", "1.0",
             "--security-opt", "seccomp=unconfined",
             "--security-opt", "apparmor=unconfined",
-            "--device", "/dev/loop-control",
-            "--device", "/dev/fuse",
             "-v", f"{FORENSICS_IMAGE_PATH}:/forensics_raw:ro",
             "-v", f"{EXPORTS_PATH}:/exports",
         ]
