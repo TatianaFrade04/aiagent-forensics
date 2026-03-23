@@ -145,10 +145,10 @@ while IFS= read -r line; do
     LOOP_DEV=$(losetup --find --show \
         -o "$OFFSET_BYTES" \
         --sizelimit "$SIZE_BYTES" \
-        --read-only "$RAW_DEVICE" 2>/dev/null)
+        --read-only "$RAW_DEVICE" 2>/tmp/losetup_err.txt)
 
     if [ -z "$LOOP_DEV" ]; then
-        echo "[!] Partição $SLOT: não foi possível criar loop device"
+        echo "[!] Partição $SLOT: não foi possível criar loop device: $(cat /tmp/losetup_err.txt)"
         rmdir "$MOUNT_POINT" 2>/dev/null
         continue
     fi

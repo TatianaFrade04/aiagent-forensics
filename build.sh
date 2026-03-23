@@ -1,6 +1,6 @@
 # Build script for AIAgentForensics Docker image
 
-$IMAGE_NAME = "forensics"
+$IMAGE_NAME = "forensics-sandbox"
 $TAG = "latest"
 $DOCKERFILE = "docker\Dockerfile"
 

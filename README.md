@@ -58,7 +58,7 @@ bash build.sh
 
 **Ou directamente:**
 ```bash
-docker build -t forensics ./docker
+docker build -t forensics-sandbox ./docker
 ```
 
 > Na primeira execução demora alguns minutos (instala ferramentas forenses).
@@ -81,7 +81,6 @@ O caminho é detectado automaticamente — não é necessário configurar `.env`
 ## Utilização
 
 ```bash
-cd alternativa/aiagent-forensics
 python agent/main.py
 ```
 
@@ -116,8 +115,11 @@ aiagent-forensics/
 │   ├── Dockerfile       ← imagem Docker com ferramentas forenses
 │   └── entrypoint.sh    ← auto-detecção e montagem da imagem
 ├── evidence/            ← coloca aqui a imagem forense (não commitar)
+├── exports/             ← ficheiros exportados pelo agente (não commitar)
 ├── build.sh             ← script de build (Linux/macOS)
 ├── build.ps1            ← script de build (Windows PowerShell)
+├── start_container.ps1  ← inicia o container manualmente (para testes)
+├── bash_in_container.ps1← abre bash interativo no container (para testes)
 └── .vscode/
     ├── launch.json      ← F5 para correr
     └── tasks.json       ← tarefas rápidas (build, stop)
