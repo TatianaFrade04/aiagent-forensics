@@ -63,7 +63,11 @@ def start_container() -> bool:
         docker_run_args = [
             "docker", "run", "-d",
             "--name", CONTAINER_NAME,
-            "--privileged",
+            "--cap-add", "SYS_ADMIN",
+            "--cap-add", "MKNOD",
+            "--device", "/dev/loop-control",
+            "--device", "/dev/fuse",
+            "--device-cgroup-rule", "b 7:* rmw",
             "--network", "none",
             "--memory", "512m",
             "--cpus", "1.0",

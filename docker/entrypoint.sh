@@ -18,12 +18,26 @@ echo "╚═══════════════════════�
 echo ""
 
 # ─── Verifica capabilities necessárias ───────────────────────────────────────
-# mount e losetup precisam de SYS_ADMIN; sem --privileged tem de ser declarado
-# explicitamente via --cap-add SYS_ADMIN --cap-add MKNOD no docker run/compose.
-if ! capsh --print 2>/dev/null | grep -q "cap_sys_admin"; then
-    echo "[!] AVISO: cap_sys_admin não detectada."
-    echo "[!] Adiciona ao docker run: --cap-add SYS_ADMIN --cap-add MKNOD --device /dev/loop-control"
-    echo "[!] O agente continuará mas a montagem directa pode falhar."
+# CAP_SYS_ADMIN = bit 21 = 0x200000; lê directamente de /proc/self/status (sem capsh)
+CAP_EFF=$(grep '^CapEff:' /proc/self/status | awk '{print $2}')
+if [ $(( 16#${CAP_EFF} & 16#200000 )) -eq 0 ]; then
+    echo "[!] ERRO FATAL: cap_sys_admin não detectada — mount e losetup vão falhar."
+    echo "[!] Adiciona ao docker run: --cap-add SYS_ADMIN --cap-add MKNOD --device /dev/loop-control --device /dev/fuse --device-cgroup-rule 'b 7:* rmw'"
+    exit 1
+fi
+
+# Verifica /dev/fuse (necessário para ewfmount)
+if [ ! -c /dev/fuse ]; then
+    echo "[!] ERRO FATAL: /dev/fuse não encontrado — ewfmount vai falhar."
+    echo "[!] Adiciona ao docker run: --device /dev/fuse"
+    exit 1
+fi
+
+# Verifica /dev/loop-control (necessário para losetup --find)
+if [ ! -c /dev/loop-control ]; then
+    echo "[!] ERRO FATAL: /dev/loop-control não encontrado — losetup vai falhar."
+    echo "[!] Adiciona ao docker run: --device /dev/loop-control --device-cgroup-rule 'b 7:* rmw'"
+    exit 1
 fi
 
 echo "[*] A procurar imagens forenses em $FORENSICS_RAW..."
@@ -206,4 +220,10 @@ echo ""
 echo "[+] Container pronto. Info em $INFO_FILE"
 echo ""
 
-exec "$@"
+# Executa o CMD passado (por omissão: /bin/sleep infinity)
+# Garante que o container não termina mesmo que CMD seja omitido.
+if [ $# -gt 0 ]; then
+    exec "$@"
+else
+    exec /bin/sleep infinity
+fi

@@ -17,7 +17,6 @@ Windows (máquina local)
 ├── evidence/  ← coloca aqui a imagem forense
 └── Container Docker (sandbox isolada)
     ├── --network none      (sem internet)
-    ├── --privileged        (para montagens)
     ├── /forensics_raw/     (imagem original, read-only)
     ├── /forensics_ewf/     (mount ewf para E01 → ewf1)
     └── /forensics/partN/   (partições NTFS montadas)
