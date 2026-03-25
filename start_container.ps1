@@ -6,3 +6,5 @@ docker run -it --rm --cap-add SYS_ADMIN --cap-add MKNOD --device /dev/loop-contr
 
 #container: forensics
 #imagem: forensics-sandbox
+
+#corre o entrypoint

@@ -51,13 +51,13 @@ VMDK_FILE=$(find "$FORENSICS_RAW" -maxdepth 2 -iname "*.vmdk" | sort | head -1)
 
 RAW_DEVICE=""
 
-# ─── Monta conforme o tipo ────────────────────────────────────────────────────
+# ─── Monta conforme o tipo  (nivel 1)────────────────────────────────────────────────────
 
 if [ -n "$E01_FILE" ]; then
     echo "[*] Encontrado E01: $E01_FILE"
     SEGMENT_COUNT=$(find "$FORENSICS_RAW" -maxdepth 2 \( -iname "*.E??" -o -iname "*.Ex??" \) | wc -l)
     [ "$SEGMENT_COUNT" -gt 1 ] && echo "[*] Imagem multi-part detectada ($SEGMENT_COUNT segmentos)"
-    EWFMOUNT_ERR=$(ewfmount "$E01_FILE" "$EWF_MOUNT" 2>&1)
+    EWFMOUNT_ERR=$(ewfmount "$E01_FILE" "$EWF_MOUNT" 2>&1) #captura o erro
     if [ $? -ne 0 ]; then
         echo "[!] Erro ao montar E01 com ewfmount: $EWFMOUNT_ERR"
         exit 1
@@ -86,7 +86,7 @@ else
     exec "$@"
 fi
 
-# ─── Tabela de partições ──────────────────────────────────────────────────────
+# ─── ler Tabela de partições (nivel 2)─────────────────────────────────────────────────────
 
 echo ""
 echo "=== Tabela de partições ==="
@@ -113,7 +113,7 @@ done
 # Liberta loop devices stale
 losetup -D 2>/dev/null
 
-# ─── Monta partições ─────────────────────────────────────────────────────────
+# ─── Monta cada uma das partições (nivel 3)────────────────────────────────────────────────────────
 
 echo ""
 echo "[*] A tentar montar partições..."

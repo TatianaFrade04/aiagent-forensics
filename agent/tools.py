@@ -63,14 +63,14 @@ def start_container() -> bool:
         docker_run_args = [
             "docker", "run", "-d",
             "--name", CONTAINER_NAME,
-            "--cap-add", "SYS_ADMIN",
-            "--cap-add", "MKNOD",
-            "--device", "/dev/loop-control",
-            "--device", "/dev/fuse",
-            "--device-cgroup-rule", "b 7:* rmw",
-            "--network", "none",
-            "--memory", "512m",
-            "--cpus", "1.0",
+            "--cap-add", "SYS_ADMIN",       # permite fazer mount
+            "--cap-add", "MKNOD",           # permite criar dispositivos
+            "--device", "/dev/loop-control", # acesso a loop devices
+            "--device", "/dev/fuse",         # acesso ao sistema FUSE (para ewfmount)
+            "--device-cgroup-rule", "b 7:* rmw",  # permissão para loop devices
+            "--network", "none",             # sem acesso à internet (segurança)
+            "--memory", "512m",              # limite de memória
+            "--cpus", "1.0",                 # limite de CPU
             "--security-opt", "seccomp=unconfined",
             "--security-opt", "apparmor=unconfined",
             "-v", f"{FORENSICS_IMAGE_PATH}:/forensics_raw:ro",
