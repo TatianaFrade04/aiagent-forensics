@@ -1,0 +1,59 @@
+name: Testar entrypoint em Linux real
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Buscar código
+        uses: actions/checkout@v4
+
+      - name: Criar imagem de teste NTFS
+        run: |
+          sudo apt-get install -y sleuthkit ntfs-3g parted
+          dd if=/dev/zero of=test.img bs=1M count=50
+          LOOP=$(sudo losetup --find --show test.img)
+          sudo parted "$LOOP" --script mklabel msdos
+          sudo parted "$LOOP" --script mkpart primary ntfs 2048s 100%
+          sudo partprobe "$LOOP"
+          sudo mkntfs -F -Q "${LOOP}p1"
+          sudo losetup -d "$LOOP"
+          mkdir -p forensics_raw
+          mv test.img forensics_raw/
+
+      - name: Build da imagem Docker
+        run: docker build -t forensics-test ./docker
+
+      - name: Preparar loop device no host
+        run: |
+          LOOP=$(sudo losetup --find --show "$PWD/forensics_raw/test.img")
+          echo "LOOP=$LOOP" >> $GITHUB_ENV
+          echo "[+] Loop device criado no host: $LOOP"
+
+      - name: Correr o container
+        run: |
+          docker run --rm \
+            --cap-add SYS_ADMIN \
+            --cap-add MKNOD \
+            --device /dev/loop-control \
+            --device /dev/fuse \
+            --device ${{ env.LOOP }} \
+            --security-opt apparmor:unconfined \
+            -v "$PWD/forensics_raw:/forensics_raw" \
+            forensics-test
+
+      - name: Verificar que montou
+        run: |
+          docker run --rm \
+            --cap-add SYS_ADMIN \
+            --cap-add MKNOD \
+            --device /dev/loop-control \
+            --device /dev/fuse \
+            --device ${{ env.LOOP }} \
+            --security-opt apparmor:unconfined \
+            -v "$PWD/forensics_raw:/forensics_raw" \
+            forensics-test \
+            cat /forensics_info.txt
+
+      - name: Limpar loop device do host
+        if: always()
+        run: sudo losetup -d ${{ env.LOOP }} 2>/dev/null || true

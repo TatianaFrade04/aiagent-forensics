@@ -1,6 +1,6 @@
-# Container Linux isolado apenas com ferramentas forenses (sleuthkit)
-# O código Python corre no Windows — este container expõe só os binários forenses
-
+# Build: docker build -t forensics-sandbox ./docker
+#**Windows (PowerShell): .\build.ps1
+#**Linux / macOS (bash): bash build.sh
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y \
     chntpw \
     qemu-utils \
     ntfs-3g \
+    fuse3 \
     python3 \
     python3-pip \
     md5deep \
@@ -26,10 +27,18 @@ RUN apt-get update && apt-get install -y \
 RUN mkdir -p /forensics_raw /forensics_ewf /forensics
 
 COPY entrypoint.sh /entrypoint.sh
-RUN apt-get update && apt-get install -y dos2unix \
-    && dos2unix /entrypoint.sh \
-    && chmod +x /entrypoint.sh
+RUN sed -i 's/\r//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 WORKDIR /root
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/bin/bash"]
+CMD ["/bin/sleep", "infinity"]
+
+
+
+
+
+#how to run our project
+
+#cd C:\AIAgentForensics
+#./build.ps1  -> apenas uma vez ao inicio
+#py agent\main.py
