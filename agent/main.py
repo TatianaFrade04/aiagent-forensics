@@ -18,7 +18,7 @@ from tools import run_in_sandbox, stop_container, start_container
 
 load_dotenv()
 
-OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "llama3.1:8b")
+OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "qwen3:8b")
 OLLAMA_URL     = os.getenv("OLLAMA_URL",     "http://localhost:11434")
 MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "15"))
 
