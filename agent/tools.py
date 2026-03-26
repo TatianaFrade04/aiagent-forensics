@@ -37,7 +37,7 @@ os.makedirs(EXPORTS_PATH, exist_ok=True)
 # Comandos permitidos (whitelist de segurança)
 ALLOWED_COMMANDS = [
     "ls", "find", "stat", "file",
-    "grep", "strings", "cat", "xxd", "hexdump",
+    "grep", "strings", "cat","tail", "xxd", "hexdump",
     "md5sum", "sha1sum", "sha256sum",
     "chntpw",
     "mmls", "fsstat", "fls", "icat", "ffind",
