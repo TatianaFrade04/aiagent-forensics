@@ -40,8 +40,9 @@ def run_forensics_command(command: str) -> str:
       /forensics/part006/Windows/System32/winevt/Logs/         - event logs (.evtx)
 
     AVAILABLE COMMANDS:
-      ls, find, stat, file, grep, strings, cat, xxd, hexdump,
-      md5sum, sha1sum, sha256sum, chntpw, mmls, fsstat, fls, icat, evtx_dump
+      ls, find, stat, file, grep, strings, cat, tail, head, wc, sort, uniq, cut, xxd, hexdump,
+      md5sum, sha1sum, sha256sum, chntpw, mmls, fsstat, fls, icat, evtx_dump,
+      sqlite3, exiftool
 
     EXAMPLES (use /forensics/part006 directly):
       ls /forensics/part006/USERS
