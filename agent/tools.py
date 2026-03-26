@@ -37,11 +37,12 @@ os.makedirs(EXPORTS_PATH, exist_ok=True)
 # Comandos permitidos (whitelist de segurança)
 ALLOWED_COMMANDS = [
     "ls", "find", "stat", "file",
-    "grep", "strings", "cat","tail", "xxd", "hexdump",
+    "grep", "strings", "cat", "tail", "head", "wc", "sort", "uniq", "cut", "xxd", "hexdump",
     "md5sum", "sha1sum", "sha256sum",
     "chntpw",
     "mmls", "fsstat", "fls", "icat", "ffind",
     "evtx_dump",
+    "sqlite3", "exiftool",
 ]
 
 # ─── Gestão do container ──────────────────────────────────────────────────────
