@@ -21,6 +21,8 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     md5deep \
+    sqlite3 \
+    libimage-exiftool-perl \
     && pip3 install --break-system-packages python-evtx evtx \
     && rm -rf /var/lib/apt/lists/*
 
