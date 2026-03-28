@@ -107,11 +107,12 @@ fi
 
 # ─── Garante loop devices disponíveis ────────────────────────────────────────
 
-for i in $(seq 0 30); do
-    [ -e /dev/loop$i ] || mknod /dev/loop$i b 7 $i 2>/dev/null
-done
-# Liberta loop devices stale
-losetup -D 2>/dev/null
+# Descobre o próximo loop livre e garante que o device node existe
+NEXT_LOOP=$(losetup -f 2>/dev/null)
+if [ -n "$NEXT_LOOP" ]; then
+    LOOP_NUM=${NEXT_LOOP##/dev/loop}
+    [ -e "$NEXT_LOOP" ] || mknod "$NEXT_LOOP" b 7 "$LOOP_NUM" 2>/dev/null
+fi
 
 # ─── Monta cada uma das partições (nivel 3)────────────────────────────────────────────────────────
 
