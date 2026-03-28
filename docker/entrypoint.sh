@@ -107,7 +107,7 @@ fi
 
 # ─── Garante loop devices disponíveis ────────────────────────────────────────
 
-for i in $(seq 0 15); do
+for i in $(seq 0 30); do
     [ -e /dev/loop$i ] || mknod /dev/loop$i b 7 $i 2>/dev/null
 done
 # Liberta loop devices stale
