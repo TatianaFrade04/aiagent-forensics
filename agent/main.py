@@ -66,8 +66,8 @@ def run_forensics_command(command: str) -> str:
 llm = ChatOllama(
     model=OLLAMA_MODEL,
     base_url=OLLAMA_URL,
-    temperature=0.5,
-    num_ctx=8192,
+    temperature=0.3,
+    num_ctx=4096,
 )
 
 # ─── Agente ReAct ─────────────────────────────────────────────────────────────
@@ -90,8 +90,7 @@ agent = create_react_agent(
         "     ls '/forensics/part006/USERS/Jimmy Wilson/Desktop'\n"
         "3. /forensics is READ-ONLY. NEVER redirect or write to any path under /forensics.\n"
         "4. NEVER use: rm, mv, dd, shred, find -delete, sed -i.\n"
-        "5. NEVER chain commands with ; && ||. One command per call.\n"
-        "6. To save output to a file: command > /exports/file.txt\n"
+        "5. To save output to a file: command > /exports/file.txt\n"
         "   Then verify: ls -lh /exports/file.txt\n"
         "   Only report success after seeing a non-zero file size.\n"
     ),
