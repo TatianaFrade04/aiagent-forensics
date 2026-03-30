@@ -36,7 +36,7 @@ os.makedirs(EXPORTS_PATH, exist_ok=True)
 
 # Comandos permitidos (whitelist de segurança)
 ALLOWED_COMMANDS = [
-    "ls", "find", "stat", "file",
+    "ls", "find", "stat", "file","cp",
     "grep", "strings", "cat", "tail", "head", "wc", "sort", "uniq", "cut", "xxd", "hexdump",
     "md5sum", "sha1sum", "sha256sum",
     "chntpw",
@@ -169,8 +169,8 @@ def run_in_sandbox(command: str) -> str:
         return "Erro: nao foi possivel iniciar o container."
 
     # Reconstrói o comando com quoting correcto para preservar espaços em paths
-    safe_cmd = " ".join(shlex.quote(p) for p in parts)
-    docker_cmd = ["docker", "exec", CONTAINER_NAME, "bash", "-c", safe_cmd]
+
+    docker_cmd = ["docker", "exec", CONTAINER_NAME, "bash", "-c", command]
 
     for attempt in range(2):
         try:

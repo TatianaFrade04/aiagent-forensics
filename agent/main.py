@@ -18,7 +18,7 @@ from tools import run_in_sandbox, stop_container, start_container
 
 load_dotenv()
 
-OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "qwen3:8b")
+OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "qwen2.5:14b")
 OLLAMA_URL     = os.getenv("OLLAMA_URL",     "http://localhost:11434")
 MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "15"))
 
@@ -40,7 +40,7 @@ def run_forensics_command(command: str) -> str:
       /forensics/part006/Windows/System32/winevt/Logs/         - event logs (.evtx)
 
     AVAILABLE COMMANDS:
-      ls, find, stat, file, grep, strings, cat, tail, head, wc, sort, uniq, cut, xxd, hexdump,
+      ls, find, stat, cp, file, grep, strings, cat, tail, head, wc, sort, uniq, cut, xxd, hexdump,
       md5sum, sha1sum, sha256sum, chntpw, mmls, fsstat, fls, icat, evtx_dump,
       sqlite3, exiftool
 
@@ -66,8 +66,8 @@ def run_forensics_command(command: str) -> str:
 llm = ChatOllama(
     model=OLLAMA_MODEL,
     base_url=OLLAMA_URL,
-    temperature=0.3,
-    num_ctx=4096,
+    temperature=0.5,
+    num_ctx=8192,
 )
 
 # ─── Agente ReAct ─────────────────────────────────────────────────────────────
