@@ -7,6 +7,8 @@ import subprocess
 import os
 import time
 
+from langchain_core.tools import tool
+
 # ─── Configuração ─────────────────────────────────────────────────────────────
 
 CONTAINER_NAME = "forensics"
@@ -186,3 +188,31 @@ def run_in_sandbox(command: str) -> str:
             return f"Erro inesperado: {str(e)}"
 
     return "Erro: nao foi possivel executar o comando apos reiniciar o container."
+
+
+# ─── Tool exposta ao agente ───────────────────────────────────────────────────
+
+@tool
+def bash(command: str) -> str:
+    """
+    Execute any bash command inside the forensic Linux container and return stdout and stderr.
+
+    FILESYSTEM LAYOUT:
+      /forensics/part006/  — Windows NTFS partition (READ-ONLY evidence)
+      /exports/            — writable directory for saving output files
+      /tmp/                — writable, used for intermediate files
+
+    LARGE OUTPUT:
+      If output exceeds 100 lines it is automatically saved to /tmp/cmd_output_<ts>.txt
+      and you will receive the path. Use grep, head or tail to analyse it.
+
+    EXAMPLES:
+      ls -la /forensics/part006/USERS
+      find /forensics/part006 -name "*.pdf"
+      cat '/forensics/part006/USERS/Jimmy Wilson/Documents/file.txt'
+
+    NOTES:
+      - Paths with spaces MUST use single quotes
+      - /forensics is READ-ONLY — never redirect or write there
+    """
+    return run_in_sandbox(command)
