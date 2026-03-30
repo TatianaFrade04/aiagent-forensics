@@ -1,12 +1,10 @@
 """
 tools.py — Ferramentas do agente forense
-Executa comandos dentro do container Docker de forma segura e controlada.
+Executa comandos bash arbitrários dentro do container Docker.
 """
 
 import subprocess
-import shlex
 import os
-import re
 import time
 
 # ─── Configuração ─────────────────────────────────────────────────────────────
@@ -22,7 +20,6 @@ def _load_env_path():
                 line = line.strip()
                 if line.startswith("FORENSICS_IMAGE_PATH="):
                     return line.split("=", 1)[1].strip()
-    # Default: pasta evidence/ relativa a este ficheiro (../evidence)
     default = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "evidence"))
     return os.getenv("FORENSICS_IMAGE_PATH", default)
 
@@ -33,17 +30,6 @@ EXPORTS_PATH = os.getenv(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "exports"))
 )
 os.makedirs(EXPORTS_PATH, exist_ok=True)
-
-# Comandos permitidos (whitelist de segurança)
-ALLOWED_COMMANDS = [
-    "ls", "find", "stat", "file","cp",
-    "grep", "strings", "cat", "tail", "head", "wc", "sort", "uniq", "cut", "xxd", "hexdump",
-    "md5sum", "sha1sum", "sha256sum",
-    "chntpw",
-    "mmls", "fsstat", "fls", "icat", "ffind",
-    "evtx_dump",
-    "sqlite3", "exiftool",
-]
 
 # ─── Gestão do container ──────────────────────────────────────────────────────
 
@@ -62,14 +48,14 @@ def start_container() -> bool:
         docker_run_args = [
             "docker", "run", "-d",
             "--name", CONTAINER_NAME,
-            "--cap-add", "SYS_ADMIN",       # permite fazer mount
-            "--cap-add", "MKNOD",           # permite criar dispositivos
-            "--device", "/dev/loop-control", # acesso a loop devices
-            "--device", "/dev/fuse",         # acesso ao sistema FUSE (para ewfmount)
-            "--device-cgroup-rule", "b 7:* rmw",  # permissão para loop devices
-            "--network", "none",             # sem acesso à internet (segurança)
-            "--memory", "512m",              # limite de memória
-            "--cpus", "1.0",                 # limite de CPU
+            "--cap-add", "SYS_ADMIN",
+            "--cap-add", "MKNOD",
+            "--device", "/dev/loop-control",
+            "--device", "/dev/fuse",
+            "--device-cgroup-rule", "b 7:* rmw",
+            "--network", "none",
+            "--memory", "512m",
+            "--cpus", "1.0",
             "--security-opt", "seccomp=unconfined",
             "--security-opt", "apparmor=unconfined",
             "-v", f"{FORENSICS_IMAGE_PATH}:/forensics_raw:ro",
@@ -109,18 +95,12 @@ def ensure_container_running() -> bool:
             return True
     except Exception:
         pass
-
     return start_container()
 
 
 def stop_container():
     """Para e remove o container (chamado no fecho do programa)."""
     print("\n[*] A parar container...")
-    # Desmonta os filesystems antes de parar o container.
-    # Sem esta etapa, os mounts FUSE(nivel 2) (ewfmount) e NTFS(nivel3) (losetup+mount) ficam
-    # activos no kernel, impedindo o SIGKILL de terminar o container — deixando-o
-    # em estado zombie e impossível de remover na próxima execução.
-    # -l (lazy): desliga o mount do directório imediatamente, sem forçar processos.
     subprocess.run(
         ["docker", "exec", CONTAINER_NAME, "bash", "-c",
          "umount -l /forensics/part* 2>/dev/null; losetup -D 2>/dev/null; umount -l /forensics_ewf 2>/dev/null; true"],
@@ -133,8 +113,10 @@ def stop_container():
 
 # ─── Execução de comandos ─────────────────────────────────────────────────────
 
+MAX_LINES = 100  # Linhas acima deste limite → guarda em ficheiro no container
+
 def run_in_sandbox(command: str) -> str:
-    """Executa um comando forense dentro do container Docker."""
+    """Executa um comando bash arbitrário dentro do container Docker."""
     command = command.strip()
 
     # Remove blocos markdown se o LLM os incluir
@@ -142,33 +124,11 @@ def run_in_sandbox(command: str) -> str:
         lines = command.split("\n")
         command = "\n".join(l for l in lines if not l.startswith("```")).strip()
 
-    try:
-        parts = shlex.split(command)
-    except ValueError as e:
-        return f"Erro ao interpretar comando: {e}"
-
-    if not parts:
+    if not command:
         return "Erro: comando vazio."
-
-    # Heurística: se parece que o path /forensics foi partido por espaços não-escapados,
-    # rejunta os fragmentos (ex: ["cat", "/forensics/.../Jimmy", "Wilson/file"] → ["cat", "/forensics/.../Jimmy Wilson/file"])
-    if len(parts) > 2 and parts[1].startswith("/forensics") and not parts[2].startswith("-"):
-        parts = [parts[0], " ".join(parts[1:])]
-
-    # Remove backslash-escapes dos argumentos (ex: O\ Death.txt → O Death.txt)
-    parts = [parts[0]] + [re.sub(r'\\(.)', r'\1', p) for p in parts[1:]]
-
-    base_cmd = parts[0]
-    if base_cmd not in ALLOWED_COMMANDS:
-        return (
-            f"Erro: comando '{base_cmd}' nao permitido.\n"
-            f"Comandos disponiveis: {', '.join(ALLOWED_COMMANDS)}"
-        )
 
     if not ensure_container_running():
         return "Erro: nao foi possivel iniciar o container."
-
-    # Reconstrói o comando com quoting correcto para preservar espaços em paths
 
     docker_cmd = ["docker", "exec", CONTAINER_NAME, "bash", "-c", command]
 
@@ -180,11 +140,11 @@ def run_in_sandbox(command: str) -> str:
                 text=True,
                 timeout=60
             )
-            output = result.stdout + result.stderr
+            stdout = result.stdout
+            stderr = result.stderr
 
-            # Detecta erro setns (Docker Desktop perde exec após mounts FUSE+loop)
-            #setns = set namespace — é uma syscall do Linux kernel.
-            if "setns" in output and attempt == 0:
+            # Detecta erro setns (Docker perde exec após mounts FUSE+loop)
+            if "setns" in (stdout + stderr) and attempt == 0:
                 print("[!] Erro setns detectado — a reiniciar container...")
                 stop_container()
                 time.sleep(2)
@@ -192,30 +152,33 @@ def run_in_sandbox(command: str) -> str:
                     return "Erro: nao foi possivel reiniciar o container."
                 continue
 
-            # Auto-recovery: se cat falha com "No such file", tenta find + cat
-            if base_cmd == "cat" and "No such file or directory" in output and len(parts) >= 2:
-                filename = os.path.basename(parts[-1])
-                if filename and os.path.splitext(filename)[1]:
-                    find_result = subprocess.run(
-                        ["docker", "exec", CONTAINER_NAME, "bash", "-c",
-                         f"find /forensics/part006 -iname {shlex.quote(filename)} 2>/dev/null | head -1"],
-                        capture_output=True, text=True, timeout=30
-                    ).stdout.strip()
-                    if find_result:
-                        cat_result = subprocess.run(
-                            ["docker", "exec", CONTAINER_NAME, "bash", "-c",
-                             f"cat {shlex.quote(find_result)}"],
-                            capture_output=True, text=True, timeout=30
-                        )
-                        out = cat_result.stdout + cat_result.stderr
-                        if out.strip():
-                            return f"[{find_result}]\n{out}"
+            # Constrói output combinado
+            output = stdout
+            if stderr.strip():
+                output += f"\n[stderr]\n{stderr}" if stdout.strip() else stderr
 
-            MAX_CHARS = 4000
-            if len(output) > MAX_CHARS:
-                output = output[:MAX_CHARS] + "\n\n[... output truncado ...]"
+            if not output.strip():
+                return "(comando executado sem output)"
 
-            return output if output.strip() else "(comando executado sem output)"
+            # Output grande: guarda em ficheiro dentro do container
+            lines = output.splitlines()
+            if len(lines) > MAX_LINES:
+                ts = int(time.time())
+                out_file = f"/tmp/cmd_output_{ts}.txt"
+                subprocess.run(
+                    ["docker", "exec", "-i", CONTAINER_NAME, "bash", "-c", f"cat > {out_file}"],
+                    input=output,
+                    capture_output=True, text=True, timeout=15
+                )
+                return (
+                    f"[Output grande: {len(lines)} linhas — guardado em {out_file}]\n"
+                    f"Usa grep, head ou tail para analisar:\n"
+                    f"  grep 'keyword' {out_file}\n"
+                    f"  head -50 {out_file}\n\n"
+                    f"Primeiras {MAX_LINES} linhas:\n" + "\n".join(lines[:MAX_LINES])
+                )
+
+            return output
 
         except subprocess.TimeoutExpired:
             return "Erro: timeout — o comando demorou mais de 60 segundos."
@@ -223,6 +186,3 @@ def run_in_sandbox(command: str) -> str:
             return f"Erro inesperado: {str(e)}"
 
     return "Erro: nao foi possivel executar o comando apos reiniciar o container."
-
-
-

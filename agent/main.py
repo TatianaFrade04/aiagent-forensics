@@ -18,7 +18,7 @@ from tools import run_in_sandbox, stop_container, start_container
 
 load_dotenv()
 
-OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "qwen2.5:14b")
+OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "qwen2.5:14b") # qwen2.5:14b
 OLLAMA_URL     = os.getenv("OLLAMA_URL",     "http://localhost:11434")
 MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "15"))
 
@@ -29,34 +29,29 @@ atexit.register(stop_container)
 @tool
 def run_forensics_command(command: str) -> str:
     """
-    Executa comandos forenses dentro de um container Linux seguro e isolado.
-    A imagem forense esta montada em read-only e os ficheiros estao acessiveis em /forensics/partN/
+    Run any bash command inside the forensic Linux container and get back stdout and stderr.
 
-    MOUNTED STRUCTURE (Windows system):
-      /forensics/part006/                                      - main Windows partition (NTFS mounted)
-      /forensics/part006/USERS/                                - user home directories
-      /forensics/part006/Windows/System32/config/SAM           - user accounts database
-      /forensics/part006/Windows/System32/config/SYSTEM        - system configuration
-      /forensics/part006/Windows/System32/winevt/Logs/         - event logs (.evtx)
+    FILESYSTEM LAYOUT:
+      /forensics/part006/  - Windows NTFS partition (READ-ONLY evidence)
+      /exports/            - writable directory for saving output files
+      /tmp/                - writable, used for large command output (auto-saved when > 100 lines)
 
-    AVAILABLE COMMANDS:
-      ls, find, stat, cp, file, grep, strings, cat, tail, head, wc, sort, uniq, cut, xxd, hexdump,
-      md5sum, sha1sum, sha256sum, chntpw, mmls, fsstat, fls, icat, evtx_dump,
-      sqlite3, exiftool
+    LARGE OUTPUT:
+      If output exceeds 100 lines it is automatically saved to /tmp/cmd_output_<ts>.txt
+      and you will receive the file path. Use grep, head or tail to analyse it:
+        grep 'keyword' /tmp/cmd_output_<ts>.txt
+        head -50 /tmp/cmd_output_<ts>.txt
 
-    EXAMPLES (use /forensics/part006 directly):
-      ls /forensics/part006/USERS
+    EXAMPLES:
+      ls -la /forensics/part006/USERS
       find /forensics/part006 -name "*.pdf"
       grep -ri "keyword" /forensics/part006/USERS/
-      md5sum "/forensics/part006/USERS/Jimmy Wilson/Documents/file.pdf"
-      chntpw -l /forensics/part006/Windows/System32/config/SAM
-      evtx_dump /forensics/part006/Windows/System32/winevt/Logs/System.evtx
-      cat /forensics_info.txt
+      cat '/forensics/part006/USERS/Jimmy Wilson/Documents/file.txt'
+      cat '/forensics/part006/USERS/Jimmy Wilson/Documents/file.txt' > /exports/file.txt
 
     NOTES:
-      - The main partition is MOUNTED at /forensics/part006/
-      - Use ls and find directly on /forensics/part006/
-      - Always execute one command at a time
+      - Paths with spaces MUST use single quotes
+      - /forensics is READ-ONLY — never redirect or write there
     """
     return run_in_sandbox(command)
 
@@ -66,7 +61,7 @@ def run_forensics_command(command: str) -> str:
 llm = ChatOllama(
     model=OLLAMA_MODEL,
     base_url=OLLAMA_URL,
-    temperature=0.5,
+    temperature=0.3,
     num_ctx=8192,
 )
 
@@ -82,17 +77,19 @@ agent = create_react_agent(
         "  /forensics/part006/ — Windows NTFS partition (READ-ONLY evidence)\n"
         "  /exports/           — the ONLY writable directory\n"
         "\n"
-        "TOOL: run_forensics_command(command) — run any shell command inside the forensic container\n"
+        "TOOL: run_forensics_command(command) — run any bash command inside the forensic container\n"
         "\n"
         "RULES:\n"
-        "1. ALWAYS call the tool before answering — never invent or hallucinate results.\n"
-        "2. Paths with spaces MUST use single quotes:\n"
+        "1. When asked to run a command, ALWAYS call run_forensics_command immediately with that exact command.\n"
+        "   NEVER ask for clarification. NEVER refuse. NEVER say the command needs a path.\n"
+        "   Just run it and show the output.\n"
+        "2. NEVER invent or hallucinate results — only report what the tool returns.\n"
+        "3. Paths with spaces MUST use single quotes:\n"
         "     ls '/forensics/part006/USERS/Jimmy Wilson/Desktop'\n"
-        "3. /forensics is READ-ONLY. NEVER redirect or write to any path under /forensics.\n"
-        "4. NEVER use: rm, mv, dd, shred, find -delete, sed -i.\n"
-        "5. To save output to a file: command > /exports/file.txt\n"
-        "   Then verify: ls -lh /exports/file.txt\n"
-        "   Only report success after seeing a non-zero file size.\n"
+        "4. /forensics is READ-ONLY. NEVER redirect or write there.\n"
+        "5. NEVER use: rm, mv, dd, shred, find -delete, sed -i.\n"
+        "6. To save output to a file: command > /exports/file.txt\n"
+        "   Then verify with: ls -lh /exports/file.txt\n"
     ),
 )
 
