@@ -70,7 +70,7 @@ SYSTEM_PROMPT = (
 llm = ChatOllama(
     model=OLLAMA_MODEL,
     base_url=OLLAMA_URL,
-    temperature=0,
+    temperature=0.5,
     num_ctx=8192,
 ).bind_tools([bash])
 
