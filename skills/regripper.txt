@@ -1,0 +1,64 @@
+SKILL: regripper
+DESCRIPTION: Parse Windows Registry hives with plugins. The command is rip.pl (NOT regripper). Usage: rip.pl -r '/path/to/hive' -a (run ALL plugins) or rip.pl -r '/path/to/hive' -p pluginname (where pluginname is a plugin like: run, userassist, recentdocs, usbstor, samparse). Use rip.pl -l to list plugins. Hives at /forensics/part006/WINDOWS/system32/config/ (SAM, SYSTEM, SOFTWARE) and /forensics/part006/USERS/<name>/NTUSER.DAT
+KEYWORDS: regripper, rip.pl, registry, registo, hive, SAM, SYSTEM, SOFTWARE, NTUSER, NTUSER.DAT, UsrClass, usrclass.dat, windows registry, user activity, atividade utilizador, USB, devices, dispositivos, installed programs, programas instalados, network, rede, autorun, startup, arranque, MRU, recent files, ficheiros recentes, shellbags, userassist, user accounts, contas utilizador, last login, ultimo login, plugin
+---
+
+## What is RegRipper?
+RegRipper is a Perl-based tool that extracts and parses specific forensic artifacts from Windows Registry hive files. It uses plugins to target specific registry keys, making it far more efficient than manual registry browsing.
+
+## Forensic use cases
+- List user accounts and last login times (SAM hive)
+- Find installed software and versions (SOFTWARE hive)
+- Identify USB devices that were connected (SYSTEM hive)
+- Discover recently opened files and programs (NTUSER.DAT)
+- Extract network connection history
+- Identify autorun/startup programs
+- Extract shellbags (folder access history)
+- Find UserAssist data (program execution counts)
+
+## Registry hive locations on Windows NTFS
+- SAM: /WINDOWS/system32/config/SAM
+- SYSTEM: /WINDOWS/system32/config/SYSTEM
+- SOFTWARE: /WINDOWS/system32/config/SOFTWARE
+- SECURITY: /WINDOWS/system32/config/SECURITY
+- NTUSER.DAT: /USERS/<username>/NTUSER.DAT
+- UsrClass.dat: /USERS/<username>/AppData/Local/Microsoft/Windows/UsrClass.dat
+
+## Key flags
+- `-r <hive>`     — Path to the registry hive file
+- `-p <plugin>`   — Run a specific plugin
+- `-a`            — Run all plugins applicable to the hive type
+- `-l`            — List all available plugins
+
+## Usage examples
+```bash
+# List all available plugins
+rip.pl -l
+
+# Run all plugins on the SAM hive (user accounts)
+rip.pl -r '/forensics/part006/WINDOWS/system32/config/SAM' -a
+
+# Run all plugins on the SOFTWARE hive (installed programs)
+rip.pl -r '/forensics/part006/WINDOWS/system32/config/SOFTWARE' -a
+
+# Run all plugins on NTUSER.DAT (user activity)
+rip.pl -r '/forensics/part006/USERS/Jimmy Wilson/NTUSER.DAT' -a
+
+# Run a specific plugin (e.g., userassist for program execution)
+rip.pl -r '/forensics/part006/USERS/Jimmy Wilson/NTUSER.DAT' -p userassist
+
+# Run a specific plugin (e.g., recentdocs for recently opened files)
+rip.pl -r '/forensics/part006/USERS/Jimmy Wilson/NTUSER.DAT' -p recentdocs
+
+# USB device history from SYSTEM hive
+rip.pl -r '/forensics/part006/WINDOWS/system32/config/SYSTEM' -p usbstor
+
+# Save output to exports
+rip.pl -r '/forensics/part006/WINDOWS/system32/config/SAM' -a > /exports/sam_report.txt
+```
+
+## Tips
+- Always use single quotes around hive paths
+- Use `-a` for a full audit of a hive, or `-p <plugin>` for targeted extraction
+- NTUSER.DAT contains the most user-specific forensic artifacts
+- Combine SAM + SYSTEM + SOFTWARE for a complete system profile

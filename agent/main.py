@@ -16,6 +16,7 @@ from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from tools import run_in_sandbox, stop_container, start_container
+from skills import load_skills, select_skills, format_skills_context
 
 # ─── Configuração ─────────────────────────────────────────────────────────────
 
@@ -80,8 +81,12 @@ SYSTEM_PROMPT = (
     "   whenever you need to inspect the filesystem, search files, or run any shell operation.\n"
     "   Do NOT ask for clarification before running a command — just run it.\n"
     "2. NEVER invent or hallucinate results — only report what the tool returns.\n"
-    "3. Paths with spaces MUST use single quotes:\n"
-    "     ls '/forensics/part006/USERS/Jimmy Wilson/Desktop'\n"
+    "3. CRITICAL — EVERY path under /forensics/ MUST be wrapped in single quotes. No exceptions.\n"
+    "   WRONG: stat /forensics/part006/USERS/Jimmy Wilson/file.txt\n"
+    "   WRONG: stat /forensics/part006/USERS/Jimmy\\ Wilson/file.txt\n"
+    "   RIGHT: stat '/forensics/part006/USERS/Jimmy Wilson/file.txt'\n"
+    "   RIGHT: find '/forensics/part006' -name '*.pdf'\n"
+    "   RIGHT: exiftool '/forensics/part006/USERS/Jimmy Wilson/Documents/photo.jpg'\n"
     "4. /forensics is READ-ONLY. NEVER redirect or write there.\n"
     "5. NEVER use: rm, mv, dd, shred, find -delete, sed -i.\n"
     "6. To save output to a file: command > /exports/file.txt\n"
@@ -169,6 +174,10 @@ def main():
     print(f"[*] Modelo: {OLLAMA_MODEL} via {OLLAMA_URL}")
     start_container()
 
+    # Carregar skills forenses
+    all_skills = load_skills()
+    print(f"[*] Skills carregadas: {len(all_skills)} ({', '.join(s.name for s in all_skills)})")
+
     conversation = [SystemMessage(content=SYSTEM_PROMPT)]
 
     while True:
@@ -194,16 +203,45 @@ def main():
             cmd_estrutura()
             continue
 
+        # Selecionar skills relevantes
+        selected = select_skills(user_input, all_skills)
+        skills_context = format_skills_context(selected)
+        if selected:
+            print(f"[*] Skills selecionadas: {', '.join(s.name for s in selected)}")
+
+        # Injetar skills no system prompt (posição 0)
+        if skills_context:
+            conversation[0] = SystemMessage(
+                content=SYSTEM_PROMPT
+                + "\nThe following commands are installed and available in the container:\n"
+                + skills_context + "\n"
+            )
+        else:
+            conversation[0] = SystemMessage(content=SYSTEM_PROMPT)
+
         conversation.append(HumanMessage(content=user_input))
 
         print()
         try:
             for iteration in range(MAX_ITERATIONS):
                 response = llm.invoke(conversation)
-                conversation.append(response)
 
                 tool_calls = _extract_tool_calls(response)
                 content = _render_message_text(response)
+
+                # Se resposta vazia (sem tool calls nem texto), não poluir a conversa
+                if not tool_calls and not content.strip():
+                    print(f"\n{'─'*60}")
+                    print(f"[AVISO — iteração {iteration + 1}: resposta vazia, a tentar de novo]")
+                    print(f"{'─'*60}")
+                    if iteration < 2:
+                        continue
+                    # Remover HumanMessage órfã após retries falhados
+                    if conversation and isinstance(conversation[-1], HumanMessage):
+                        conversation.pop()
+                    break
+
+                conversation.append(response)
 
                 # Debug: output em bruto
                 print(f"\n{'─'*60}")

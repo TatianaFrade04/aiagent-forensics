@@ -1,0 +1,53 @@
+SKILL: exiftool
+DESCRIPTION: Read and analyze metadata from files (images, documents, PDFs, videos, audio)
+KEYWORDS: exiftool, metadata, metadados, EXIF, GPS, geolocation, geolocalizacao, coordinates, coordenadas, camera, photo, foto, fotografia, image, imagem, JPEG, JPG, PNG, PDF, document metadata, creation date, modification date, data criacao, data modificacao, author, autor, timestamp, IPTC, XMP, tags, properties, propriedades, origin, origem, location, localizacao, latitude, longitude
+---
+
+## What is `exiftool`?
+ExifTool is a powerful command-line utility for reading, writing, and editing metadata in a wide variety of file formats including images, PDFs, Office documents, audio, and video files.
+
+## Forensic use cases
+- Determine when a photo was taken (original creation timestamp)
+- Extract GPS coordinates to determine where a photo was taken
+- Identify the camera or device used to capture an image
+- Find the author or creator of a document
+- Detect metadata inconsistencies that suggest tampering
+- Extract hidden metadata from PDFs or Office files
+- Build timelines from file metadata
+
+## Key flags
+- `-a`           — Show duplicate tags
+- `-G`           — Show tag group names (e.g., EXIF, IPTC, XMP)
+- `-s`           — Show tag names instead of descriptions
+- `-r`           — Process directories recursively
+- `-json`        — Output in JSON format
+- `-time:all`    — Show all time-related tags
+- `-gps:all`     — Show all GPS-related tags
+- `-csv`         — Output in CSV format (useful for timelines)
+
+## Usage examples
+```bash
+# Show all metadata of a file
+exiftool '/forensics/part006/USERS/Jimmy Wilson/Pictures/photo.jpg'
+
+# Extract only GPS coordinates
+exiftool -gps:all '/forensics/part006/USERS/Jimmy Wilson/Pictures/photo.jpg'
+
+# Extract all timestamps
+exiftool -time:all '/forensics/part006/USERS/Jimmy Wilson/Documents/report.pdf'
+
+# Show metadata for all JPEG files recursively
+exiftool -r '/forensics/part006/USERS/Jimmy Wilson/Pictures/'
+
+# Export metadata of all images to CSV
+exiftool -csv -r '/forensics/part006/USERS/Jimmy Wilson/Pictures/' > /exports/metadata.csv
+
+# Show author and creation date of Office documents
+find '/forensics/part006/USERS/Jimmy Wilson/Documents' -iname '*.docx' -exec exiftool -Author -CreateDate -ModifyDate {} +
+```
+
+## Tips
+- GPS coordinates can place a suspect at a specific location
+- Compare CreateDate vs ModifyDate to detect potential tampering
+- Camera serial numbers can link photos to a specific device
+- Many file formats embed metadata that users are unaware of

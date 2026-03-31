@@ -1,0 +1,51 @@
+SKILL: reglookup
+DESCRIPTION: Query specific Windows Registry keys by path. Usage: reglookup '/path/to/hive' (dump all) or reglookup -p '/registry/key/path' '/path/to/hive' (filter by registry key path, e.g. -p '/Microsoft/Windows/CurrentVersion/Run'). Best for looking up specific keys. Hives at /forensics/part006/WINDOWS/system32/config/ (SAM, SYSTEM, SOFTWARE) and /forensics/part006/USERS/<name>/NTUSER.DAT
+KEYWORDS: reglookup, registry, registo, hive, SAM, SYSTEM, SOFTWARE, NTUSER, NTUSER.DAT, windows registry, key, chave, value, valor, query, consulta, search registry, pesquisar registo, path, type, data, security, SID, filter, filtrar, export, timeline
+---
+
+## What is reglookup?
+reglookup is a command-line utility for reading and querying Windows Registry hive files. Unlike RegRipper (plugin-based), reglookup provides raw access to any registry key/value, making it ideal for targeted searches and custom queries.
+
+## Forensic use cases
+- Search for a specific registry key path
+- Extract all values under a key (e.g., Run keys for persistence)
+- Filter registry data by value type (SZ, DWORD, BINARY, etc.)
+- Export registry data for timeline analysis
+- Investigate specific keys not covered by RegRipper plugins
+- Find evidence of program execution, file associations, user settings
+
+## Key flags
+- `-p <path>`     — Filter output to keys matching this path prefix
+- `-t <type>`     — Filter by value type (SZ, EXPAND_SZ, DWORD, BINARY, MULTI_SZ, etc.)
+- `-H`            — Do not print the header row
+- `-s`            — Print security descriptors
+- `-v`            — Verbose output
+
+## Usage examples
+```bash
+# List all keys and values in the SOFTWARE hive
+reglookup '/forensics/part006/WINDOWS/system32/config/SOFTWARE'
+
+# Search for Run keys (autostart programs)
+reglookup -p '/Microsoft/Windows/CurrentVersion/Run' '/forensics/part006/WINDOWS/system32/config/SOFTWARE'
+
+# Search for uninstall entries (installed programs)
+reglookup -p '/Microsoft/Windows/CurrentVersion/Uninstall' '/forensics/part006/WINDOWS/system32/config/SOFTWARE'
+
+# Query NTUSER.DAT for recent documents
+reglookup -p '/Software/Microsoft/Windows/CurrentVersion/Explorer/RecentDocs' '/forensics/part006/USERS/Jimmy Wilson/NTUSER.DAT'
+
+# Filter for only string values
+reglookup -t SZ '/forensics/part006/WINDOWS/system32/config/SOFTWARE'
+
+# Extract all values from SAM hive
+reglookup '/forensics/part006/WINDOWS/system32/config/SAM'
+
+# Save filtered output
+reglookup -p '/Microsoft/Windows/CurrentVersion' '/forensics/part006/WINDOWS/system32/config/SOFTWARE' > /exports/registry_run.txt
+```
+
+## Tips
+- Use `-p` to narrow results to a specific key path
+- Combine with `grep` for further filtering: `reglookup hive | grep -i 'keyword'`
+- Use reglookup for targeted queries; use regripper for broad forensic audits

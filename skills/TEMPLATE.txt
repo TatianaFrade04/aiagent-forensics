@@ -1,0 +1,29 @@
+SKILL: <tool name>
+DESCRIPTION: <one-line description of what the tool does and when to use it>
+KEYWORDS: <comma-separated list of keywords that trigger this skill — include tool name, related actions, file types, forensic terms>
+---
+
+## What is `<tool name>`?
+<Brief explanation of the tool — 2-3 sentences.>
+
+## Forensic use cases
+- <Use case 1>
+- <Use case 2>
+- <Use case 3>
+
+## Key flags
+- `<flag>`    — <description>
+- `<flag>`    — <description>
+
+## Usage examples
+```bash
+# <Description of example>
+<command> /forensics/part006/path/to/target
+
+# <Description of example>
+<command> <flags> /forensics/part006/path/to/target
+```
+
+## Tips
+- <Tip 1>
+- <Tip 2>
