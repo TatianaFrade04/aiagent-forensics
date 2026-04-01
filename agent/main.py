@@ -73,6 +73,9 @@ SYSTEM_PROMPT = (
     "FILESYSTEM LAYOUT:\n"
     "  /forensics/part006/ — Windows NTFS partition (READ-ONLY evidence)\n"
     "  /exports/           — the ONLY writable directory\n"
+    "  NOTE: Windows directory names (Windows, System32, etc.) are case-sensitive\n"
+    "  when mounted on Linux. ALWAYS use find with -iname to discover exact paths\n"
+    "  before passing them to forensic tools. Never assume casing.\n"
     "\n"
     "TOOL: run_forensics_command(command) — run any bash command inside the forensic container\n"
     "\n"
@@ -91,6 +94,10 @@ SYSTEM_PROMPT = (
     "5. NEVER use: rm, mv, dd, shred, find -delete, sed -i.\n"
     "6. To save output to a file: command > /exports/file.txt\n"
     "   Then verify with: ls -lh /exports/file.txt\n"
+    "7. If a tool call returns an error (e.g. wrong path, wrong hive, file not found),\n"
+    "   NEVER conclude failure immediately. Analyse the error, correct the command\n"
+    "   (try different paths, alternative hives, or case variations) and try again.\n"
+    "   Only report failure after at least two distinct attempts.\n"
 )
 
 # ─── Helpers para extracção de tool calls ─────────────────────────────────────
@@ -235,10 +242,23 @@ def main():
                     print(f"[AVISO — iteração {iteration + 1}: resposta vazia, a tentar de novo]")
                     print(f"{'─'*60}")
                     if iteration < 2:
+                        # Nudge: relembrar o modelo do workflow correcto
+                        conversation.append(HumanMessage(
+                            content=(
+                                "Your previous response was empty. You must call run_forensics_command to answer the question.\n"
+                                "IMPORTANT: Do NOT guess file paths. Before running any forensic tool, "
+                                "always discover the exact path first using find, for example:\n"
+                                "  find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' 2>/dev/null | head -3\n"
+                                "Then use the exact path returned by find in your next command."
+                            )
+                        ))
                         continue
-                    # Remover HumanMessage órfã após retries falhados
-                    if conversation and isinstance(conversation[-1], HumanMessage):
+                    # Remover HumanMessages adicionadas (nudges + mensagem original)
+                    while len(conversation) > 1 and isinstance(conversation[-1], HumanMessage):
                         conversation.pop()
+                    print(f"\n{'='*60}")
+                    print("Agente: Não foi possível obter resposta do modelo após várias tentativas. Reformule a pergunta ou verifique se o modelo está a funcionar correctamente.")
+                    print(f"{'='*60}\n")
                     break
 
                 conversation.append(response)

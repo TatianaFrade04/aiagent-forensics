@@ -202,12 +202,17 @@ def _extract_examples(content: str, max_commands: int = 2) -> str:
 
 def format_skills_context(skills: list[Skill]) -> str:
     """Formata as skills como lista compacta para o system prompt.
-    
-    Apenas nome + descrição. Sem exemplos inline — evita quebrar
-    o tool calling template do qwen2.5:7b.
+
+    Inclui nome, descrição e até 2 exemplos de comandos reais.
     """
     if not skills:
         return ""
 
-    lines = [f"- {skill.name}: {skill.description}" for skill in skills]
+    lines = []
+    for skill in skills:
+        examples = _extract_examples(skill.content, max_commands=2)
+        entry = f"- {skill.name}: {skill.description}"
+        if examples:
+            entry += f"\n  EXAMPLES: {examples}"
+        lines.append(entry)
     return "\n".join(lines)

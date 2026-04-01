@@ -1,7 +1,23 @@
 SKILL: reglookup
-DESCRIPTION: Query specific Windows Registry keys by path. Usage: reglookup '/path/to/hive' (dump all) or reglookup -p '/registry/key/path' '/path/to/hive' (filter by registry key path, e.g. -p '/Microsoft/Windows/CurrentVersion/Run'). Best for looking up specific keys. Hives at /forensics/part006/WINDOWS/system32/config/ (SAM, SYSTEM, SOFTWARE) and /forensics/part006/USERS/<name>/NTUSER.DAT
+DESCRIPTION: Query Windows Registry keys. Syntax: reglookup -p '/Key/Path' '/path/to/hive' (flags MUST come before the hive file). The -p filter uses FORWARD SLASHES (/) not backslashes — e.g. '/Microsoft/Windows/CurrentVersion/Run'. Hive paths are case-sensitive on Linux; ALWAYS discover them first with find -iname.
 KEYWORDS: reglookup, registry, registo, hive, SAM, SYSTEM, SOFTWARE, NTUSER, NTUSER.DAT, windows registry, key, chave, value, valor, query, consulta, search registry, pesquisar registo, path, type, data, security, SID, filter, filtrar, export, timeline
 ---
+
+## CRITICAL: Always follow this two-step pattern
+1. Discover the exact hive path (case-sensitive filesystem).
+2. Run reglookup with flags BEFORE the hive file; use FORWARD SLASHES in -p (never backslashes).
+
+COMPLETE EXAMPLE (both steps in sequence):
+```bash
+find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' 2>/dev/null | head -1
+reglookup -p '/Microsoft/Windows/CurrentVersion/Run' '/forensics/part006/Windows/System32/config/SOFTWARE'
+```
+Replace the hive path in the second command with whatever `find` returned.
+
+NTUSER.DAT discovery:
+```bash
+find /forensics/part006 -iname 'NTUSER.DAT' 2>/dev/null
+```
 
 ## What is reglookup?
 reglookup is a command-line utility for reading and querying Windows Registry hive files. Unlike RegRipper (plugin-based), reglookup provides raw access to any registry key/value, making it ideal for targeted searches and custom queries.
@@ -23,26 +39,24 @@ reglookup is a command-line utility for reading and querying Windows Registry hi
 
 ## Usage examples
 ```bash
-# List all keys and values in the SOFTWARE hive
-reglookup '/forensics/part006/WINDOWS/system32/config/SOFTWARE'
+# Step 1: discover the real hive path (case-insensitive search)
+find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' 2>/dev/null | head -3
+
+# Step 2: use the exact path returned above, e.g.:
+SOFTWARE_HIVE=$(find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' 2>/dev/null | head -1)
 
 # Search for Run keys (autostart programs)
-reglookup -p '/Microsoft/Windows/CurrentVersion/Run' '/forensics/part006/WINDOWS/system32/config/SOFTWARE'
+reglookup -p '/Microsoft/Windows/CurrentVersion/Run' "$SOFTWARE_HIVE"
 
 # Search for uninstall entries (installed programs)
-reglookup -p '/Microsoft/Windows/CurrentVersion/Uninstall' '/forensics/part006/WINDOWS/system32/config/SOFTWARE'
+reglookup -p '/Microsoft/Windows/CurrentVersion/Uninstall' "$SOFTWARE_HIVE"
 
 # Query NTUSER.DAT for recent documents
-reglookup -p '/Software/Microsoft/Windows/CurrentVersion/Explorer/RecentDocs' '/forensics/part006/USERS/Jimmy Wilson/NTUSER.DAT'
-
-# Filter for only string values
-reglookup -t SZ '/forensics/part006/WINDOWS/system32/config/SOFTWARE'
-
-# Extract all values from SAM hive
-reglookup '/forensics/part006/WINDOWS/system32/config/SAM'
+NTUSER=$(find /forensics/part006 -iname 'NTUSER.DAT' 2>/dev/null | grep -i 'Jimmy' | head -1)
+reglookup -p '/Software/Microsoft/Windows/CurrentVersion/Explorer/RecentDocs' "$NTUSER"
 
 # Save filtered output
-reglookup -p '/Microsoft/Windows/CurrentVersion' '/forensics/part006/WINDOWS/system32/config/SOFTWARE' > /exports/registry_run.txt
+reglookup -p '/Microsoft/Windows/CurrentVersion/Run' "$SOFTWARE_HIVE" > /exports/run_keys.txt
 ```
 
 ## Tips
