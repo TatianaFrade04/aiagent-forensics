@@ -1,5 +1,5 @@
 SKILL: regripper
-DESCRIPTION: Parse Windows Registry hives with plugins. The command is rip.pl (NOT regripper). Usage: rip.pl -r '/path/to/hive' -a (run ALL plugins) or rip.pl -r '/path/to/hive' -p pluginname (where pluginname is a plugin like: run, userassist, recentdocs, usbstor, samparse). Use rip.pl -l to list plugins. Hives at /forensics/part006/WINDOWS/system32/config/ (SAM, SYSTEM, SOFTWARE) and /forensics/part006/USERS/<name>/NTUSER.DAT
+DESCRIPTION: Parse Windows Registry hives with plugins. The apt package installs the binary as 'regripper' (NOT rip.pl). Usage: regripper -r '/path/to/hive' -a (all plugins) or regripper -r '/path/to/hive' -p pluginname. Useful plugins: run, userassist, recentdocs, usbstor, samparse. Hive paths are case-sensitive on Linux — ALWAYS discover them first with find -iname before running regripper.
 KEYWORDS: regripper, rip.pl, registry, registo, hive, SAM, SYSTEM, SOFTWARE, NTUSER, NTUSER.DAT, UsrClass, usrclass.dat, windows registry, user activity, atividade utilizador, USB, devices, dispositivos, installed programs, programas instalados, network, rede, autorun, startup, arranque, MRU, recent files, ficheiros recentes, shellbags, userassist, user accounts, contas utilizador, last login, ultimo login, plugin
 ---
 
@@ -17,12 +17,18 @@ RegRipper is a Perl-based tool that extracts and parses specific forensic artifa
 - Find UserAssist data (program execution counts)
 
 ## Registry hive locations on Windows NTFS
-- SAM: /WINDOWS/system32/config/SAM
-- SYSTEM: /WINDOWS/system32/config/SYSTEM
-- SOFTWARE: /WINDOWS/system32/config/SOFTWARE
-- SECURITY: /WINDOWS/system32/config/SECURITY
-- NTUSER.DAT: /USERS/<username>/NTUSER.DAT
-- UsrClass.dat: /USERS/<username>/AppData/Local/Microsoft/Windows/UsrClass.dat
+NOTE: Windows directory names are case-sensitive when mounted on Linux (ntfs-3g). The real path may be `Windows/System32` or `WINDOWS/system32` etc. ALWAYS use find -iname to discover the exact path before running regripper.
+
+```bash
+SYSTEM_HIVE=$(find /forensics/part006 -iname 'SYSTEM' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1)
+regripper -r "$SYSTEM_HIVE" -p usbstor
+```
+
+Hive discovery commands:
+- `find /forensics/part006 -iname 'SAM'     -not -path '*/Users/*' 2>/dev/null | head -1`
+- `find /forensics/part006 -iname 'SYSTEM'  -not -path '*/Users/*' 2>/dev/null | head -1`
+- `find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' 2>/dev/null | head -1`
+- `find /forensics/part006 -iname 'NTUSER.DAT' 2>/dev/null`
 
 ## Key flags
 - `-r <hive>`     — Path to the registry hive file
@@ -32,29 +38,34 @@ RegRipper is a Perl-based tool that extracts and parses specific forensic artifa
 
 ## Usage examples
 ```bash
-# List all available plugins
-rip.pl -l
+# Step 1: discover hive paths (case-sensitive; exclude non-hive dirs like diagnostics)
+SYSTEM_HIVE=$(find /forensics/part006 -iname 'SYSTEM' -not -path '*/Users/*' -not -path '*/diagnostics/*' 2>/dev/null | head -1)
+regripper -r "$SYSTEM_HIVE" -p usbstor
+
+SAM_HIVE=$(find /forensics/part006 -iname 'SAM' -not -path '*/Users/*' 2>/dev/null | head -1)
+SOFTWARE_HIVE=$(find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' 2>/dev/null | head -1)
+NTUSER=$(find /forensics/part006 -iname 'NTUSER.DAT' 2>/dev/null | grep -i 'Jimmy' | head -1)
+
+# Run all plugins on the SYSTEM hive
+regripper -r "$SYSTEM_HIVE" -a
 
 # Run all plugins on the SAM hive (user accounts)
-rip.pl -r '/forensics/part006/WINDOWS/system32/config/SAM' -a
+regripper -r "$SAM_HIVE" -a
 
 # Run all plugins on the SOFTWARE hive (installed programs)
-rip.pl -r '/forensics/part006/WINDOWS/system32/config/SOFTWARE' -a
+regripper -r "$SOFTWARE_HIVE" -a
 
 # Run all plugins on NTUSER.DAT (user activity)
-rip.pl -r '/forensics/part006/USERS/Jimmy Wilson/NTUSER.DAT' -a
+regripper -r "$NTUSER" -a
 
 # Run a specific plugin (e.g., userassist for program execution)
-rip.pl -r '/forensics/part006/USERS/Jimmy Wilson/NTUSER.DAT' -p userassist
+regripper -r "$NTUSER" -p userassist
 
-# Run a specific plugin (e.g., recentdocs for recently opened files)
-rip.pl -r '/forensics/part006/USERS/Jimmy Wilson/NTUSER.DAT' -p recentdocs
-
-# USB device history from SYSTEM hive
-rip.pl -r '/forensics/part006/WINDOWS/system32/config/SYSTEM' -p usbstor
+# List all available plugins
+regripper -l
 
 # Save output to exports
-rip.pl -r '/forensics/part006/WINDOWS/system32/config/SAM' -a > /exports/sam_report.txt
+regripper -r "$SAM_HIVE" -a > /exports/sam_report.txt
 ```
 
 ## Tips

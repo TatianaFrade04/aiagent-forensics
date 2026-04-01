@@ -9,8 +9,8 @@ KEYWORDS: reglookup, registry, registo, hive, SAM, SYSTEM, SOFTWARE, NTUSER, NTU
 
 COMPLETE EXAMPLE (both steps in sequence):
 ```bash
-find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' 2>/dev/null | head -1
-reglookup -p '/Microsoft/Windows/CurrentVersion/Run' '/forensics/part006/Windows/System32/config/SOFTWARE'
+SOFTWARE_HIVE=$(find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1)
+reglookup -p '/Microsoft/Windows/CurrentVersion/Run' "$SOFTWARE_HIVE"
 ```
 Replace the hive path in the second command with whatever `find` returned.
 

@@ -197,7 +197,7 @@ def _extract_examples(content: str, max_commands: int = 2) -> str:
                 commands.append(stripped)
                 if len(commands) >= max_commands:
                     break
-    return "  |  ".join(commands)
+    return " ; ".join(commands)
 
 
 def format_skills_context(skills: list[Skill]) -> str:
