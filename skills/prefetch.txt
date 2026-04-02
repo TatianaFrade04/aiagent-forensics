@@ -1,0 +1,61 @@
+SKILL: prefetch
+DESCRIPTION: Analyze Windows Prefetch files (.pf) to determine which programs were executed and when, even if the executables were later deleted
+KEYWORDS: prefetch, execucao, execution, executed, executado, ran, correu, program, programa, executable, executavel, when, quando, prefetch file, .pf, windows prefetch, pecmd, application execution, ran program, last run, ultima execucao, evidence of execution
+---
+
+## What is Windows Prefetch?
+Windows Prefetch files (`.pf`) are created by Windows to speed up application loading. Each `.pf` file records the name of the executable, a hash of its path, how many times it was run, and the last 8 execution timestamps. Prefetch is a key source of evidence for program execution — even if the executable was deleted.
+
+## Forensic use cases
+- Prove that a specific program was executed (malware, hacking tools, data wipers)
+- Determine when a program was last run (up to 8 timestamps)
+- Find execution of programs from USB drives or temporary locations
+- Detect anti-forensic tools (e.g., evidence wipers) being run
+- Correlate program execution with other timeline events
+
+## Evidence location
+- `/forensics/part006/Windows/Prefetch/`
+- Files named: `<EXECNAME>-<HASH>.pf` (e.g., `CMD.EXE-089F261A.pf`)
+- The hash is derived from the executable's full path
+
+## Available tools
+- `pecmd` — dedicated prefetch parser (preferred if installed)
+- `strings` — fallback to extract readable text from binary .pf files
+- `ls -lh` — shows last modification time = last execution time (approximately)
+
+## Usage examples
+```bash
+# List all prefetch files with last-modified timestamps (proxy for last run time)
+ls -lht '/forensics/part006/Windows/Prefetch/'
+
+# Check if Prefetch directory exists
+ls /forensics/part006/Windows/Prefetch/ 2>/dev/null | head -20
+
+# Check if pecmd is available
+which pecmd 2>/dev/null || echo "pecmd not found"
+
+# Parse all prefetch files with pecmd (if available)
+pecmd '/forensics/part006/Windows/Prefetch/'
+
+# Parse a single prefetch file with pecmd
+pecmd '/forensics/part006/Windows/Prefetch/CMD.EXE-089F261A.pf'
+
+# Fallback: extract readable strings from a prefetch file
+strings '/forensics/part006/Windows/Prefetch/CMD.EXE-089F261A.pf'
+
+# Search for a specific program in prefetch files
+ls '/forensics/part006/Windows/Prefetch/' | grep -i 'powershell'
+
+# Save full prefetch listing
+ls -lht '/forensics/part006/Windows/Prefetch/' > /exports/prefetch_list.txt
+
+# Save parsed output if pecmd available
+pecmd '/forensics/part006/Windows/Prefetch/' > /exports/prefetch_parsed.txt 2>&1
+```
+
+## Tips
+- The `ls -lht` modification time is approximately the last execution time
+- File names reveal the executable name and path hash — search by program name with `grep -i`
+- If Prefetch is empty or disabled, check registry: `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters`
+- Executables run from USB drives will have hashes reflecting the USB path — look for `\REMOVABLE` or drive letters other than C:
+- `strings` output includes referenced file paths, DLLs loaded, and the executable path

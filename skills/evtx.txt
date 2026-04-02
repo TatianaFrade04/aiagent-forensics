@@ -1,0 +1,74 @@
+SKILL: evtx
+DESCRIPTION: Parse Windows Event Logs using evtxexport (NOT evtx_dump or evtxdump — those do not exist). Use evtxexport to investigate logins, failed authentications, and system events
+KEYWORDS: evtx, event log, log de eventos, winevt, Security.evtx, System.evtx, Application.evtx, login, logon, logoff, failed login, autenticacao, authentication, shutdown, desligamento, service, servico, 4624, 4625, 4634, 4648, 4720, 6006, 7036, event id, windows logs, audit
+---
+
+## What is `evtx`?
+Windows Event Logs (`.evtx` files) record system, security, and application events. They are a primary source of evidence for login activity, authentication failures, service changes, and user actions on a Windows system.
+
+## Forensic use cases
+- Identify successful and failed login attempts (who, when, from where)
+- Detect brute-force or unauthorized access attempts
+- Determine when the system was shut down or restarted
+- Track service installation and execution
+- Find evidence of user account creation or privilege escalation
+- Build a timeline of system activity
+
+## Key Event IDs
+- `4624` — Successful login
+- `4625` — Failed login attempt
+- `4634` — Logoff
+- `4648` — Login using explicit credentials (runas)
+- `4720` — User account created
+- `7036` — Service started or stopped
+- `6006` — Event log service stopped (clean shutdown)
+
+## CRITICAL: Correct commands
+The ONLY available commands are `evtxexport` and `evtxinfo`.
+Do NOT use: evtx_dump, evtx_dump.py, evtxdump, evtxtools — these do NOT exist.
+
+- `evtxexport` — exports records from an .evtx file as text or XML
+- `evtxinfo`   — shows metadata about an .evtx file (number of records, dates)
+
+## Key flags (evtxexport)
+- `-f xml`  — XML output (structured, easier to grep)
+- `-f text` — human-readable text output (default)
+- `-t security|system|application` — specify log type explicitly
+- No filter flag — pipe to `grep` to filter by EventID or keyword
+
+## Usage examples
+```bash
+# Export Security log and show first 100 lines (evtxexport is the correct command)
+evtxexport '/forensics/part006/Windows/System32/winevt/Logs/Security.evtx' | head -100
+
+# Filter for successful logins using XML mode
+evtxexport -f xml '/forensics/part006/Windows/System32/winevt/Logs/Security.evtx' | grep -B2 -A30 'EventID.*4624'
+
+# List all available event log files
+ls /forensics/part006/Windows/System32/winevt/Logs/
+
+# Show metadata about the Security log
+evtxinfo '/forensics/part006/Windows/System32/winevt/Logs/Security.evtx'
+
+# Filter for successful logins (EventID 4624)
+evtxexport -f xml '/forensics/part006/Windows/System32/winevt/Logs/Security.evtx' | grep -B2 -A30 '<EventID>4624</EventID>'
+
+# Filter for failed logins (EventID 4625)
+evtxexport -f xml '/forensics/part006/Windows/System32/winevt/Logs/Security.evtx' | grep -B2 -A30 '<EventID>4625</EventID>'
+
+# Dump System log and filter for service events (EventID 7036)
+evtxexport -f xml '/forensics/part006/Windows/System32/winevt/Logs/System.evtx' | grep -B2 -A30 '<EventID>7036</EventID>'
+
+# Save full Security log to exports
+evtxexport '/forensics/part006/Windows/System32/winevt/Logs/Security.evtx' > /exports/security_log.txt
+
+# Save System log to exports
+evtxexport '/forensics/part006/Windows/System32/winevt/Logs/System.evtx' > /exports/system_log.txt
+```
+
+## Tips
+- Always start by listing files in `winevt/Logs/` — the path may differ slightly by Windows version
+- Security.evtx is the most forensically valuable log
+- Combine EventID 4624 with username and IP fields to build a login timeline
+- EventID 4625 with many entries from the same source suggests brute-force
+- If the log is missing or very small, it may have been cleared — that itself is suspicious

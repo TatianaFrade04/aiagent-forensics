@@ -1,0 +1,63 @@
+SKILL: browser_history
+DESCRIPTION: Extract and analyze browser history, visited URLs, searches, and downloads from Chrome, Firefox, and Edge using sqlite3
+KEYWORDS: browser, history, historico, chrome, firefox, edge, sqlite, sqlite3, url, visited, visitado, downloads, transferencias, search, pesquisa, web, navegacao, navegador, bookmark, marcadores, cookies, cache, browsing, internet, sites, passwords, senhas
+---
+
+## What is browser history forensics?
+Modern browsers store history, downloads, bookmarks, and search queries in SQLite database files. These can be queried directly with `sqlite3` to reconstruct a user's web activity, even after the browser was closed.
+
+## Forensic use cases
+- Reconstruct websites visited by the suspect
+- Find search queries that reveal intent or knowledge
+- Identify downloaded files (target path, source URL, time)
+- Detect visits to file-sharing, cloud storage, or illicit sites
+- Correlate browsing timestamps with other events in the investigation
+- Find saved bookmarks and cached credentials
+
+## Browser database locations
+- **Chrome:** `/forensics/part006/Users/<name>/AppData/Local/Google/Chrome/User Data/Default/History`
+- **Firefox:** `/forensics/part006/Users/<name>/AppData/Roaming/Mozilla/Firefox/Profiles/<profile>/places.sqlite`
+- **Edge:** `/forensics/part006/Users/<name>/AppData/Local/Microsoft/Edge/User Data/Default/History`
+
+## CRITICAL: Copy before querying
+SQLite files on `/forensics` are READ-ONLY. Copy to `/exports/` first:
+```bash
+cp '<source_path>' /exports/browser.db
+sqlite3 /exports/browser.db "<query>"
+```
+
+## Usage examples
+```bash
+# Discover Chrome history files
+find /forensics/part006 -iname 'History' -path '*/Chrome/*' 2>/dev/null
+
+# Discover Firefox history files
+find /forensics/part006 -iname 'places.sqlite' 2>/dev/null
+
+# Discover Edge history files
+find /forensics/part006 -iname 'History' -path '*/Edge/*' 2>/dev/null
+
+# Copy Chrome history to exports and query
+cp '/forensics/part006/Users/Jimmy Wilson/AppData/Local/Google/Chrome/User Data/Default/History' /exports/chrome_history.db
+sqlite3 /exports/chrome_history.db "SELECT url, title, visit_count, datetime(last_visit_time/1000000-11644473600,'unixepoch') as last_visit FROM urls ORDER BY last_visit_time DESC LIMIT 50;"
+
+# Query Chrome downloads
+sqlite3 /exports/chrome_history.db "SELECT target_path, tab_url, datetime(start_time/1000000-11644473600,'unixepoch') as download_time FROM downloads ORDER BY start_time DESC LIMIT 30;"
+
+# Copy and query Firefox history
+cp '/forensics/part006/Users/Jimmy Wilson/AppData/Roaming/Mozilla/Firefox/Profiles/abc123.default/places.sqlite' /exports/firefox_history.db
+sqlite3 /exports/firefox_history.db "SELECT url, title, visit_count, datetime(last_visit_date/1000000,'unixepoch') as last_visit FROM moz_places ORDER BY last_visit_date DESC LIMIT 50;"
+
+# List tables in a SQLite database
+sqlite3 /exports/chrome_history.db ".tables"
+
+# Search for a specific keyword in URLs
+sqlite3 /exports/chrome_history.db "SELECT url, title FROM urls WHERE url LIKE '%keyword%' OR title LIKE '%keyword%';"
+```
+
+## Tips
+- Chrome and Edge share the same database schema (Chromium-based)
+- Firefox uses `moz_places` table with timestamps in microseconds since Unix epoch
+- Chrome timestamps are microseconds since Jan 1, 1601 — subtract 11644473600 to convert to Unix
+- Check the `downloads` table for files the user downloaded and their source URLs
+- Empty or missing history files may indicate deliberate deletion

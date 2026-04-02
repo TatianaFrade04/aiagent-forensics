@@ -22,7 +22,7 @@ from skills import load_skills, select_skills, format_skills_context
 
 load_dotenv()
 
-OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "qwen2.5:7b")
+OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "qwen2.5:14b")
 OLLAMA_URL     = os.getenv("OLLAMA_URL",     "http://localhost:11434")
 MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "15"))
 
@@ -94,6 +94,8 @@ SYSTEM_PROMPT = (
     "5. NEVER use: rm, mv, dd, shred, find -delete, sed -i.\n"
     "6. To save output to a file: command > /exports/file.txt\n"
     "   Then verify with: ls -lh /exports/file.txt\n"
+    "   '(comando executado sem output)' means the command ran successfully with no stdout —\n"
+    "   this is NORMAL for redirect commands (>). Do NOT treat it as an error.\n"
     "7. If a tool call returns an error (e.g. wrong path, wrong hive, file not found),\n"
     "   NEVER conclude failure immediately. Analyse the error, correct the command\n"
     "   (try different paths, alternative hives, or case variations) and try again.\n"
