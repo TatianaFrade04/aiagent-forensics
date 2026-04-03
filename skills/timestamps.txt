@@ -1,0 +1,53 @@
+SKILL: timestamps
+DESCRIPTION: Analyze file creation, modification, and access timestamps on NTFS to build timelines and detect timestomping (deliberate timestamp manipulation)
+KEYWORDS: timestamp, timestamps, data, date, created, criado, modified, modificado, accessed, acedido, mtime, atime, ctime, $MFT, timeline, cronologia, ntfs, metadata, stat, fls, istat, sleuthkit, mactime, timestomping, manipulacao, chronology, recent files, ficheiros recentes, newer, mais recentes, when was, quando foi, last modified, last accessed
+---
+
+## What is timestamp analysis?
+Every file on NTFS has four timestamps: Created, Modified, Accessed, and MFT Entry Changed ($MACE). Forensic timestamp analysis helps build a timeline of events, identify recently created or modified files, and detect timestomping — where an attacker deliberately changes timestamps to hide activity.
+
+## Forensic use cases
+- Build a chronological timeline of file activity
+- Find files created or modified during a specific time window
+- Identify recently accessed documents or executables
+- Detect timestomping (e.g., file created after its "modification" date)
+- Correlate file activity with login events and program execution
+- Find files dropped by malware (unusual creation times)
+
+## Tools
+- `stat` — show all timestamps for a specific file
+- `find` with `-newer` or `-printf` — search by time range
+- `fls` (sleuthkit) — list files with NTFS MFT timestamps (including deleted)
+- `istat` (sleuthkit) — detailed metadata for a specific inode
+- `mactime` (sleuthkit) — generate a timeline from fls output
+
+## Usage examples
+```bash
+# Get all timestamps for a specific file
+stat '/forensics/part006/Users/Jimmy Wilson/Documents/file.txt'
+
+# List files modified after a reference file (e.g., after OS install)
+find /forensics/part006/Users -type f -newer /forensics/part006/Windows/System32/config/SAM 2>/dev/null | head -50
+
+# Find files with timestamps and sort chronologically
+find /forensics/part006/Users -type f -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort | tail -50
+
+# Find files accessed in the last phase of activity (newest first)
+find /forensics/part006/Users -type f -printf '%AY-%Am-%Ad %AH:%AM %p\n' 2>/dev/null | sort -r | head -30
+
+# Search for files created within a specific date range
+find /forensics/part006 -type f -newer /forensics/part006/Windows -not -newer /forensics/part006/Windows/System32 2>/dev/null | head -30
+
+# Use sleuthkit fls to list files with NTFS MFT timestamps (if available)
+fls -r -l '/forensics/part006' 2>/dev/null | head -50
+
+# Save a full timestamp listing of user files
+find /forensics/part006/Users -type f -printf '%TY-%Tm-%Td %TH:%TM\t%p\n' 2>/dev/null | sort > /exports/file_timeline.txt
+```
+
+## Tips
+- NTFS stores two sets of timestamps: `$STANDARD_INFORMATION` (shown by stat/Windows) and `$FILE_NAME` (harder to modify). Differences between them can indicate timestomping
+- If a file's Modified time is BEFORE its Created time, that is a strong indicator of timestomping
+- `find -printf '%TY-%Tm-%Td'` uses modification time; use `%AY` for access time, `%CY` for inode change time
+- `fls` with `-l` shows both $STANDARD_INFORMATION and $FILE_NAME timestamps when available
+- Always correlate timestamps with other artefacts (event logs, prefetch) to validate findings

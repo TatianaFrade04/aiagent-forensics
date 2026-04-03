@@ -22,7 +22,7 @@ from skills import load_skills, select_skills, format_skills_context
 
 load_dotenv()
 
-OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "qwen2.5:7b")
+OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "qwen2.5:14b")
 OLLAMA_URL     = os.getenv("OLLAMA_URL",     "http://localhost:11434")
 MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "15"))
 

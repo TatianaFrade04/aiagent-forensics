@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y \
     libimage-exiftool-perl \
     regripper \
     reglookup \
-    && pip3 install --break-system-packages python-evtx evtx \
+    libevtx-utils \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /forensics_raw /forensics_ewf /forensics
