@@ -16,6 +16,24 @@ RegRipper is a Perl-based tool that extracts and parses specific forensic artifa
 - Extract shellbags (folder access history)
 - Find UserAssist data (program execution counts)
 
+## REGISTRY HIVE MAP — always use the correct hive for the key path
+
+| Key path / artifact                          | Hive file   | Useful plugin        |
+|----------------------------------------------|-------------|----------------------|
+| CurrentVersion/Run (machine-wide)            | SOFTWARE    | run                  |
+| CurrentVersion/Uninstall (installed apps)    | SOFTWARE    | installedprograms    |
+| Windows NT/CurrentVersion (OS info)          | SOFTWARE    | winnt_cv             |
+| ControlSet001/Enum/USBSTOR (USB devices)     | SYSTEM      | usbstor              |
+| ControlSet001/Control/ComputerName           | SYSTEM      | compname             |
+| ControlSet001/Services                       | SYSTEM      | services             |
+| SAM/Domains/Account/Users (accounts)         | SAM         | samparse             |
+| Software/.../CurrentVersion/Run (per-user)   | NTUSER.DAT  | run                  |
+| Software/.../Explorer/RecentDocs             | NTUSER.DAT  | recentdocs           |
+| Software/.../Explorer/UserAssist             | NTUSER.DAT  | userassist           |
+
+NOTE: CurrentVersion/Run exists in BOTH SOFTWARE (machine-wide) AND NTUSER.DAT (per-user).
+ALWAYS query both hives when asked about Run/startup keys.
+
 ## Registry hive locations on Windows NTFS
 NOTE: Windows directory names are case-sensitive when mounted on Linux (ntfs-3g). The real path may be `Windows/System32` or `WINDOWS/system32` etc. ALWAYS use find -iname to discover the exact path before running regripper.
 

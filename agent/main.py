@@ -77,12 +77,29 @@ SYSTEM_PROMPT = (
     "  when mounted on Linux. ALWAYS use find with -iname to discover exact paths\n"
     "  before passing them to forensic tools. Never assume casing.\n"
     "\n"
+    "REGISTRY HIVES — Windows registry hive files have NO file extension.\n"
+    "  The hive files are named: SOFTWARE, SYSTEM, SAM, SECURITY, NTUSER.DAT\n"
+    "  Main hives location: /forensics/part006/Windows/System32/config/\n"
+    "  Per-user hive:        /forensics/part006/USERS/<username>/NTUSER.DAT\n"
+    "  NEVER search for *.reg or *.hive — those are not hive files.\n"
+    "  ALWAYS resolve hive paths with find in the SAME command string:\n"
+    "    HIVE=$(find '/forensics/part006' -iname 'SOFTWARE' -not -path '*/Users/*'\n"
+    "      -not -path '*/RegBack/*' 2>/dev/null | head -1); reglookup -p '/...' \"$HIVE\"\n"
+    "  NEVER use bare shell variables like $SOFTWARE_HIVE or $SYSTEM_HIVE — they are\n"
+    "  not defined and will always cause 'No such file or directory' errors.\n"
+    "  To find the Windows version: reglookup -p '/Microsoft/Windows NT/CurrentVersion'\n"
+    "  on the SOFTWARE hive.\n"
+    "\n"
     "TOOL: run_forensics_command(command) — run any bash command inside the forensic container\n"
     "\n"
     "RULES:\n"
-    "1. Use run_forensics_command to execute bash commands in the forensic container\n"
-    "   whenever you need to inspect the filesystem, search files, or run any shell operation.\n"
-    "   Do NOT ask for clarification before running a command — just run it.\n"
+    "1. ALWAYS call run_forensics_command immediately — never write commands as text.\n"
+    "   WRONG: writing ```bash command``` in your reply without a tool call.\n"
+    "   WRONG: saying 'I will run ...' or 'Let me execute ...' without calling the tool.\n"
+    "   WRONG: emitting JSON like {\"name\": \"run_forensics_command\", ...} in text.\n"
+    "   RIGHT: call run_forensics_command(command) as your very first action, with no preamble.\n"
+    "   Your response must contain ONLY a tool call — zero words of introduction or explanation.\n"
+    "   Do NOT announce what you are about to do. Do NOT ask for clarification. Just call the tool.\n"
     "2. NEVER invent or hallucinate results — only report what the tool returns.\n"
     "3. CRITICAL — EVERY path under /forensics/ MUST be wrapped in single quotes. No exceptions.\n"
     "   WRONG: stat /forensics/part006/USERS/Jimmy Wilson/file.txt\n"
@@ -94,10 +111,23 @@ SYSTEM_PROMPT = (
     "5. NEVER use: rm, mv, dd, shred, find -delete, sed -i.\n"
     "6. To save output to a file: command > /exports/file.txt\n"
     "   Then verify with: ls -lh /exports/file.txt\n"
-    "7. If a tool call returns an error (e.g. wrong path, wrong hive, file not found),\n"
+    "7. If a tool call returns an error (e.g. wrong path, file not found, command not found),\n"
     "   NEVER conclude failure immediately. Analyse the error, correct the command\n"
-    "   (try different paths, alternative hives, or case variations) and try again.\n"
+    "   (try different paths or case variations) and try again.\n"
     "   Only report failure after at least two distinct attempts.\n"
+    "8. Every new question requires a new tool call — no exceptions.\n"
+    "   NEVER answer from memory or from results seen earlier in this conversation.\n"
+    "   Even if the exact same question was just asked, call run_forensics_command again\n"
+    "   to get a fresh result. Reusing cached output is treated the same as hallucination.\n"
+    "9. If command output is truncated, use grep, head, or tail to extract the needed\n"
+    "   information before answering. NEVER assume or invent content that was cut off.\n"
+    "10. When the user provides an absolute path in a command, run it EXACTLY as given.\n"
+    "   NEVER modify, rewrite, or prefix it with /forensics/part006/.\n"
+    "   WRONG (user said 'cat /etc/hosts'): cat '/forensics/part006/etc/hosts'\n"
+    "   RIGHT: cat /etc/hosts\n"
+    "11. To list Windows users on the evidence image, ALWAYS use:\n"
+    "   find '/forensics/part006/USERS' -mindepth 1 -maxdepth 1 -type d\n"
+    "   NEVER use registry hives (SAM, regripper, reglookup) for this operation.\n"
 )
 
 # ─── Helpers para extracção de tool calls ─────────────────────────────────────
@@ -273,6 +303,27 @@ def main():
                 print(f"{'─'*60}")
 
                 if not tool_calls:
+                    # Nudge: model wrote text but no tool call, and no tool was used yet this turn
+                    last_human_idx = max(
+                        (i for i, m in enumerate(conversation) if isinstance(m, HumanMessage)),
+                        default=0,
+                    )
+                    tool_used_this_turn = any(
+                        isinstance(m, ToolMessage) for m in conversation[last_human_idx:]
+                    )
+                    if not tool_used_this_turn and iteration < 2:
+                        print(f"\n{'─'*60}")
+                        print(f"[AVISO — iteração {iteration + 1}: modelo descreveu comando sem executar, a forçar tool call]")
+                        print(f"{'─'*60}")
+                        conversation.append(HumanMessage(
+                            content=(
+                                "You wrote a command in your text response but did NOT call run_forensics_command. "
+                                "Writing bash or JSON in text is NOT execution. "
+                                "You MUST call run_forensics_command now with the exact command. "
+                                "Do not write any text — just call the tool immediately."
+                            )
+                        ))
+                        continue
                     print(f"\n{'='*60}")
                     print(f"Agente: {content}")
                     print(f"{'='*60}\n")

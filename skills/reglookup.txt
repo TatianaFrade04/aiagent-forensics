@@ -1,7 +1,20 @@
 SKILL: reglookup
-DESCRIPTION: Query Windows Registry keys. Syntax: reglookup -p '/Key/Path' '/path/to/hive' (flags MUST come before the hive file). The -p filter uses FORWARD SLASHES (/) not backslashes — e.g. '/Microsoft/Windows/CurrentVersion/Run'. Hive paths are case-sensitive on Linux; ALWAYS discover them first with find -iname.
+DESCRIPTION: Query Windows Registry keys with reglookup. HIVE SELECTION IS MANDATORY: CurrentVersion/Run and CurrentVersion/RunOnce → SOFTWARE hive; ControlSet001/* → SYSTEM hive; SAM/Domains/* → SAM hive; per-user Run/RecentDocs/UserAssist → NTUSER.DAT. Syntax: reglookup -p '/Key/Path' "$HIVE" (flags BEFORE hive). Forward slashes in -p. ALWAYS discover hive path with find -iname before running.
 KEYWORDS: reglookup, registry, registo, hive, SAM, SYSTEM, SOFTWARE, NTUSER, NTUSER.DAT, windows registry, key, chave, value, valor, query, consulta, search registry, pesquisar registo, path, type, data, security, SID, filter, filtrar, export, timeline
 ---
+
+## !! HIVE SELECTION — READ BEFORE ANYTHING ELSE !!
+
+The hive argument to reglookup must be an ON-DISK FILE PATH, not a registry key name.
+The on-disk filename is one of: SOFTWARE, SYSTEM, SAM, NTUSER.DAT
+NEVER pass a registry key component (like 'CurrentVersion', 'Run', 'HKLM') as the hive.
+
+/Microsoft/Windows/CurrentVersion/Run    →  use the FILE named SOFTWARE
+/Microsoft/Windows/CurrentVersion/RunOnce  →  use the FILE named SOFTWARE
+All ControlSet001/* keys                 →  use the FILE named SYSTEM
+Per-user Run / RecentDocs / UserAssist   →  use the FILE named NTUSER.DAT
+
+If you pass the wrong file you will get: ERROR: Failed to open hive.
 
 ## CRITICAL: Always follow this two-step pattern
 1. Discover the exact hive path (case-sensitive filesystem).
@@ -18,6 +31,25 @@ NTUSER.DAT discovery:
 ```bash
 find /forensics/part006 -iname 'NTUSER.DAT' 2>/dev/null
 ```
+
+## REGISTRY HIVE MAP — always use the correct hive for the key path
+
+| Key path prefix                                        | Hive file   |
+|--------------------------------------------------------|-------------|
+| /Microsoft/Windows/CurrentVersion/Run                  | SOFTWARE    |
+| /Microsoft/Windows/CurrentVersion/RunOnce              | SOFTWARE    |
+| /Microsoft/Windows/CurrentVersion/Uninstall            | SOFTWARE    |
+| /Microsoft/Windows NT/CurrentVersion                   | SOFTWARE    |
+| /Microsoft/Windows/CurrentVersion/policies             | SOFTWARE    |
+| /ControlSet001/Services                                | SYSTEM      |
+| /ControlSet001/Control/ComputerName                    | SYSTEM      |
+| /ControlSet001/Enum/USBSTOR                            | SYSTEM      |
+| /SAM/Domains/Account/Users                             | SAM         |
+| /Software/Microsoft/Windows/CurrentVersion/Run         | NTUSER.DAT  |
+| /Software/Microsoft/Windows/CurrentVersion/Explorer/.. | NTUSER.DAT  |
+
+NOTE: CurrentVersion/Run exists in BOTH SOFTWARE (machine-wide) AND NTUSER.DAT (per-user).
+ALWAYS query both hives when asked about Run/startup keys.
 
 ## What is reglookup?
 reglookup is a command-line utility for reading and querying Windows Registry hive files. Unlike RegRipper (plugin-based), reglookup provides raw access to any registry key/value, making it ideal for targeted searches and custom queries.
