@@ -118,7 +118,7 @@ def select_skills(
     query: str,
     skills: list[Skill],
     max_skills: int = 1,
-    min_score: float = 0.05,
+    min_score: float = 0.10,
 ) -> list[Skill]:
     """
     Seleciona as skills mais relevantes para uma query do utilizador.

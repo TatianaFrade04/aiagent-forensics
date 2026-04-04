@@ -40,29 +40,25 @@ Windows (máquina local)
 
 ### Pré-requisitos
 - [Docker Desktop](https://www.docker.com/products/docker-desktop) (actualizado)
-- [Ollama](https://ollama.com/download) com `ollama pull llama3.1:8b`
-- Python 3.11+
+- [Ollama](https://ollama.com/download) com `ollama pull qwen2.5:7b`
+- [uv](https://docs.astral.sh/uv/) (gestor de pacotes Python recomendado)
 
 ### 1. Construir a imagem Docker
 
-**Linux / macOS (bash):**
 ```bash
-bash build.sh
-```
-
-**Windows (PowerShell):**
-```powershell
-.\build.ps1
-```
-
-**Ou directamente:**
-```bash
-docker build -t forensics ./docker
+docker build -t forensics-sandbox ./docker
 ```
 
 > Na primeira execução demora alguns minutos (instala ferramentas forenses).
 
 ### 2. Instalar dependências Python
+
+Com `uv` (recomendado):
+```bash
+uv sync
+```
+
+Com `pip`:
 ```bash
 pip install -r agent/requirements.txt
 ```
@@ -73,14 +69,26 @@ evidence/
 └── imagem.E01   ← coloca aqui (ou .dd, .vhd, .vmdk)
 ```
 
-O caminho é detectado automaticamente — não é necessário configurar `.env`.
+### 4. Configurar o modelo (opcional)
+
+Criar ficheiro `.env` na raiz (ou em `agent/`):
+```
+OLLAMA_MODEL=qwen2.5:7b
+OLLAMA_URL=http://localhost:11434
+MAX_ITERATIONS=15
+```
 
 ---
 
 ## Utilização
 
+Com `uv` (recomendado):
 ```bash
-cd alternativa/aiagent-forensics
+uv run agent/main.py
+```
+
+Com Python directamente:
+```bash
 python agent/main.py
 ```
 
@@ -94,6 +102,10 @@ Tu: Encontra todos os ficheiros PDF
 Tu: Qual é o MD5 do ficheiro report.pdf?
 Tu: Qual é o esquema de partições do disco?
 Tu: Mostra os event logs do sistema
+Tu: Mostra os metadados EXIF de uma fotografia
+Tu: Que chaves de registo estão configuradas para auto-arranque?
+Tu: Mostra os ficheiros modificados entre 25 e 27 de maio de 2015
+Tu: Que versão do Windows está instalada?
 ```
 
 ### Comandos especiais
@@ -103,23 +115,43 @@ Tu: Mostra os event logs do sistema
 
 ---
 
+## Sistema de Skills
+
+O agente usa um sistema de **skills modulares** para injetar conhecimento forense específico no contexto, apenas quando relevante para a pergunta do utilizador. Isto poupa contexto e foca o modelo na ferramenta certa.
+
+As skills estão em `skills/*.txt` e são carregadas automaticamente no arranque. Para cada pergunta, o sistema seleciona a skill mais relevante por keyword matching e injeta os exemplos de uso no system prompt.
+
+| Skill | Ferramenta | Casos de uso |
+|-------|-----------|--------------|
+| `exiftool` | ExifTool | Metadados EXIF de imagens e documentos |
+| `reglookup` | reglookup | Consulta directa a hives do registo Windows |
+| `regripper` | RegRipper | Análise forense automatizada do registo |
+| `timestamps` | find / stat | Timestamps de ficheiros, intervalos de datas, timelines |
+
+Para adicionar uma nova skill, basta criar um ficheiro `skills/nome.txt` seguindo o formato de `skills/TEMPLATE.txt`. Nenhuma alteração de código é necessária.
+
+---
+
 ## Estrutura do projecto
 
 ```
 aiagent-forensics/
 ├── agent/
 │   ├── main.py          ← agente principal (chatbot ReAct)
+│   ├── skills.py        ← carregamento e selecção de skills
 │   ├── tools.py         ← execução de comandos no container
 │   └── requirements.txt
 ├── docker/
 │   ├── Dockerfile       ← imagem Docker com ferramentas forenses
 │   └── entrypoint.sh    ← auto-detecção e montagem da imagem
+├── skills/
+│   ├── TEMPLATE.txt     ← template para novas skills
+│   ├── exiftool.txt
+│   ├── reglookup.txt
+│   ├── regripper.txt
+│   └── timestamps.txt
 ├── evidence/            ← coloca aqui a imagem forense (não commitar)
-├── build.sh             ← script de build (Linux/macOS)
-├── build.ps1            ← script de build (Windows PowerShell)
-└── .vscode/
-    ├── launch.json      ← F5 para correr
-    └── tasks.json       ← tarefas rápidas (build, stop)
+└── exports/             ← ficheiros de output gerados pelo agente
 ```
 
 ---
@@ -127,9 +159,10 @@ aiagent-forensics/
 ## Notas técnicas
 
 - O `entrypoint.sh` detecta automaticamente o tipo de imagem, monta o E01 via `ewfmount`, identifica as partições com `mmls` e monta cada partição NTFS via `losetup` + kernel NTFS driver
+- O agente implementa um loop ReAct manual: invoca o LLM, extrai tool calls (nativo ou fallback JSON), executa no container, injeta o resultado como `ToolMessage` e repete até o modelo responder sem tool calls
+- Inclui detecção de loops: se o modelo repetir o mesmo comando consecutivamente, é injectado um nudge para forçar uma abordagem diferente
 - O `docker exec` usa `bash -c` para preservar espaços em paths (ex: `Jimmy Wilson`)
-- O agente tem um fallback que detecta tool calls em formato JSON ou Python-like gerados pelo modelo e executa-as automaticamente
-- Loop devices são limpos com `losetup -D` a cada arranque para evitar conflitos com execuções anteriores
+- Output acima de 100 linhas é guardado em `/tmp/` dentro do container; o modelo recebe as primeiras 100 linhas e instruções para usar `grep`/`head`
 
 ---
 
@@ -137,4 +170,3 @@ aiagent-forensics/
 - Miguel Negrão — miguel.negrao@ipleiria.pt
 - Miguel Frade — miguel.frade@ipleiria.pt
 - Patrício Domingues — patricio.domingues@ipleiria.pt
-

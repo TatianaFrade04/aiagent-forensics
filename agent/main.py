@@ -161,9 +161,9 @@ def _extract_json_object(text: str) -> dict | None:
                     if depth == 0:
                         candidates.append(text[i:j+1])
                         break
-    for m in reversed(candidates):
+    for m in sorted(candidates, key=len, reverse=True):
         try:
-            obj = json.loads(m)
+            obj = json.loads(m.replace("\\'", "'"))
             if isinstance(obj, dict):
                 return obj
         except json.JSONDecodeError:
@@ -260,6 +260,7 @@ def main():
 
         print()
         try:
+            last_tool_command = None  # loop detection per turn
             for iteration in range(MAX_ITERATIONS):
                 response = llm.invoke(conversation)
 
@@ -329,6 +330,7 @@ def main():
                     print(f"{'='*60}\n")
                     break
 
+                loop_detected = False
                 for tool_call in tool_calls:
                     tool_name = tool_call.get("name", "")
                     tool_args = tool_call.get("args", {})
@@ -345,6 +347,29 @@ def main():
                         content=json.dumps({"result": tool_output}),
                         tool_call_id=tool_id,
                     ))
+
+                    # Loop detection: same command repeated → inject break-out nudge
+                    cmd = tool_args.get("command", "")
+                    if cmd and cmd == last_tool_command:
+                        loop_detected = True
+                        print(f"\n{'─'*60}")
+                        print(f"[AVISO — iteração {iteration + 1}: loop detectado, mesmo comando repetido]")
+                        print(f"{'─'*60}")
+                        conversation.append(HumanMessage(
+                            content=(
+                                "STOP — you just repeated the exact same command and got the same result. "
+                                "Do NOT call this command again.\n"
+                                "If a previous find/ls command already returned a list of file paths saved in a temp file, "
+                                "those paths ARE the answer. Use 'head -100 <tempfile>' to read them and report to the user.\n"
+                                "Do NOT grep for date strings inside a list of file paths — dates are not in the paths.\n"
+                                "Try a completely different approach or report the results you already have."
+                            )
+                        ))
+                        break
+                    last_tool_command = cmd or last_tool_command
+
+                if loop_detected:
+                    continue
 
         except Exception as e:
             print(f"\n[!] Erro: {str(e)}\n")
