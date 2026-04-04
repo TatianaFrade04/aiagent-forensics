@@ -114,6 +114,17 @@ def _tokenize(text: str) -> set[str]:
     return {w for w in words if w not in _STOP_WORDS and len(w) > 1}
 
 
+# Padrões que indicam inequivocamente uma query sobre conteúdo de PDF (RAG)
+_RAG_PATTERNS = re.compile(
+    r"com base no ficheiro|no documento|no pdf|segundo o relat[oó]rio"
+    r"|de acordo com o|o que (diz|indica|refere) o"
+    r"|\bpdf\b|\brelatório\b|\brelatorio\b|\bautopsia\b|\bautopsy\b"
+    r"|causa da morte|cause of death|conteúdo do|conteudo do"
+    r"|what does the (pdf|report|document|file)",
+    re.IGNORECASE,
+)
+
+
 def select_skills(
     query: str,
     skills: list[Skill],
@@ -134,6 +145,12 @@ def select_skills(
 
     if not query_tokens:
         return []
+
+    # ── Detecção prioritária: queries sobre conteúdo de PDF → skill rag ──────
+    if _RAG_PATTERNS.search(query):
+        rag_skill = next((s for s in skills if s.name.lower() == "rag"), None)
+        if rag_skill:
+            return [rag_skill]
 
     scored: list[tuple[float, Skill]] = []
 

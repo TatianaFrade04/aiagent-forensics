@@ -1,0 +1,28 @@
+SKILL: rag
+DESCRIPTION: Query the content of indexed PDF documents (autopsy reports, forensic reports, investigation summaries) using the RAG pipeline
+KEYWORDS: rag, pdf, documento, document, relatorio, relatório, autopsia, autopsy, causa da morte, cause of death, vitima, vitima, sexo, idade, age, sex, forensic report, conteudo, conteúdo, com base no ficheiro, no documento, no pdf, segundo o relatorio, segundo o relatório, de acordo com, what does, o que diz, ingestao, indexar, indexar pdf
+---
+
+## What is `rag`?
+The RAG (Retrieval-Augmented Generation) pipeline allows querying the textual content of PDF documents indexed in the ChromaDB vector store. Use it whenever the user asks about the **content** of a document rather than its filesystem metadata.
+
+## Forensic use cases
+- Answer questions about autopsy report findings (cause of death, injuries, toxicology)
+- Retrieve information about victim demographics (age, sex, identity)
+- Summarise sections of forensic investigation reports
+- Cross-reference document content with other evidence
+
+## Workflow
+1. Call `ingest_pdf_document(filename)` to index the PDF (only needed once per file).
+2. Call `query_rag_documents(query, top_k=5)` to answer questions from indexed content.
+
+## Usage examples
+```
+query_rag_documents("What was the cause of death?", top_k=5)
+query_rag_documents("What was the victim's age and sex?", top_k=5)
+```
+
+## Tips
+- Always use `top_k=5` (default) to ensure enough context is retrieved.
+- Do NOT use `run_forensics_command` or `exiftool` to read PDF content.
+- If `query_rag_documents` returns "not available", call `ingest_pdf_document` first.

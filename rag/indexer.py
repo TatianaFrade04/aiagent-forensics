@@ -6,6 +6,7 @@ Fluxo:
       → HuggingFaceEmbeddings → Chroma (persisted)
 """
 
+import hashlib
 import logging
 import os
 
@@ -63,15 +64,41 @@ def _is_already_indexed(doc_id: str) -> bool:
     except Exception:
         return False
 
+
+def _purge_stale_entries(filename: str, current_doc_id: str) -> None:
+    """Apaga entradas antigas do mesmo ficheiro com doc_ids diferentes."""
+    try:
+        col = _chroma_collection()
+        result = col.get(where={"filename": {"$eq": filename}}, include=["metadatas"])
+        stale_ids = [
+            eid for eid, meta in zip(result["ids"], result["metadatas"] or [])
+            if meta and meta.get("doc_id") != current_doc_id
+        ]
+        if stale_ids:
+            col.delete(ids=stale_ids)
+            logger.info(
+                "Purged %d stale chunks for filename=%r (old doc_ids removed).",
+                len(stale_ids), filename,
+            )
+    except Exception as exc:
+        logger.warning("Could not purge stale entries for %r: %s", filename, exc)
+
 # ─── API pública ──────────────────────────────────────────────────────────────
 
-def ingest_pdf(filepath: str, doc_id: str) -> dict:
+def _make_doc_id(filename: str) -> str:
+    """Gera um doc_id determinístico a partir do nome do ficheiro (MD5[:12])."""
+    return hashlib.md5(os.path.basename(filename).encode()).hexdigest()[:12]
+
+
+def ingest_pdf(filepath: str, doc_id: str | None = None) -> dict:
     """
     Carrega um PDF, divide em chunks e indexa no ChromaDB.
 
     Args:
         filepath: Caminho absoluto ou relativo para o ficheiro PDF.
-        doc_id:   Identificador único do documento (usado como chave de dedup).
+        doc_id:   Ignorado — o doc_id é sempre gerado internamente a partir
+                  do nome do ficheiro via MD5 para garantir consistência
+                  entre sessões.
 
     Returns:
         Dict com status, doc_id e número de chunks indexados.
@@ -82,6 +109,13 @@ def ingest_pdf(filepath: str, doc_id: str) -> dict:
     """
     if not os.path.isfile(filepath):
         raise FileNotFoundError(f"PDF not found: {filepath!r}")
+
+    # doc_id sempre derivado do nome do ficheiro — ignora argumento externo
+    doc_id = _make_doc_id(filepath)
+    logger.info("Generated doc_id=%r from filename %r", doc_id, os.path.basename(filepath))
+
+    # ── Limpeza de entradas obsoletas (mesmo ficheiro, doc_id antigo) ─────────
+    _purge_stale_entries(os.path.basename(filepath), doc_id)
 
     # ── Deduplicação ──────────────────────────────────────────────────────────
     if _is_already_indexed(doc_id):

@@ -74,15 +74,14 @@ def run_forensics_command(command: str) -> str:
 
 
 @tool
-def ingest_pdf_document(filename: str, doc_id: str) -> str:
+def ingest_pdf_document(filename: str) -> str:
     """
     Index a local PDF document so it can be queried with query_rag_documents.
 
     Args:
         filename: PDF file name in the project root (e.g. "autopsia_relatorio.pdf").
                   Only the basename is used — path traversal is not allowed.
-        doc_id:   A short unique identifier for this document
-                  (e.g. "autopsia_relatorio").
+                  The doc_id is derived automatically from the filename (MD5).
     """
     if not _RAG_AVAILABLE:
         return "RAG module not available. Run: pip install -r requirements_rag.txt"
@@ -93,7 +92,7 @@ def ingest_pdf_document(filename: str, doc_id: str) -> str:
     if not filepath.startswith(os.path.realpath(RAG_DOCS_DIR)):
         return "Error: access denied — path outside allowed directory."
     try:
-        result = _rag_ingest_pdf(filepath, doc_id)
+        result = _rag_ingest_pdf(filepath)
         return str(result)
     except FileNotFoundError:
         return f"Error: file not found — {safe_name!r} is not in the workspace root."
@@ -114,7 +113,8 @@ def query_rag_documents(query: str, top_k: int = 5) -> str:
 
     Args:
         query:  The question to answer from the indexed documents.
-        top_k:  Number of document chunks to retrieve (default 5).
+        top_k:  Number of document chunks to retrieve. Use 5 by default.
+                NEVER set this below 5 — low values cause information loss.
     """
     if not _RAG_AVAILABLE:
         return "RAG module not available. Run: pip install -r requirements_rag.txt"
@@ -178,9 +178,9 @@ SYSTEM_PROMPT = (
     "TOOL: query_rag_documents(query, top_k=5) — answer questions from indexed PDF documents\n"
     "  Use this when the user asks about document CONTENT (reports, autopsy, etc.).\n"
     "  Do NOT use run_forensics_command or exiftool to read PDF content.\n"
-    "TOOL: ingest_pdf_document(filename, doc_id) — index a local PDF for RAG querying\n"
+    "TOOL: ingest_pdf_document(filename) — index a local PDF for RAG querying\n"
     "  filename: PDF filename in the workspace root (e.g. 'autopsia_relatorio.pdf')\n"
-    "  doc_id:   short unique ID (e.g. 'autopsia_relatorio')\n"
+    "  The doc_id is derived automatically from the filename — do NOT pass doc_id.\n"
     "  Call this FIRST if query_rag_documents says the document is not available.\n"
     "\n"
     "RULES:\n"
@@ -394,7 +394,7 @@ def main():
                             content=(
                                 "Your previous response was empty. You MUST call one of the available tools to answer:\n"
                                 "  - query_rag_documents(query) — for questions about PDF document content\n"
-                                "  - ingest_pdf_document(filename, doc_id) — to index a PDF before querying\n"
+                                "  - ingest_pdf_document(filename) — to index a PDF before querying\n"
                                 "  - run_forensics_command(command) — for filesystem/registry forensic commands\n"
                                 "Do NOT guess file paths. If using run_forensics_command, discover paths with find first.\n"
                                 "Just call the appropriate tool now — no text, no explanation."
@@ -439,7 +439,7 @@ def main():
                                 "You MUST call the appropriate tool now:\n"
                                 "  - For questions about PDF/document content: call query_rag_documents(query)\n"
                                 "  - For filesystem/registry commands: call run_forensics_command(command)\n"
-                                "  - To index a PDF: call ingest_pdf_document(filename, doc_id)\n"
+                                "  - To index a PDF: call ingest_pdf_document(filename)\n"
                                 "Do not write any text — just call the tool immediately."
                             )
                         ))

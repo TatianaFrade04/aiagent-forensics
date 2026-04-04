@@ -9,7 +9,6 @@ Endpoints:
 
 import logging
 import os
-import tempfile
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -44,28 +43,30 @@ async def ingest_endpoint(
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files (.pdf) are accepted.")
 
-    # doc_id opcional — usa o nome do ficheiro como fallback
-    effective_doc_id = doc_id.strip() if doc_id and doc_id.strip() else os.path.splitext(file.filename)[0]
-
-    # Guarda temporariamente em disco para o loader
-    tmp_path: str | None = None
+    # doc_id é sempre gerado internamente em ingest_pdf a partir do nome do ficheiro.
+    # Guardamos o PDF num directório temporário com o nome original para que o MD5
+    # seja calculado sobre o nome correctamente.
+    tmp_dir: str | None = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(await file.read())
-            tmp_path = tmp.name
+        import tempfile as _tf
+        tmp_dir = _tf.mkdtemp()
+        tmp_path = os.path.join(tmp_dir, file.filename)
+        with open(tmp_path, "wb") as fh:
+            fh.write(await file.read())
 
-        result = ingest_pdf(tmp_path, effective_doc_id)
+        result = ingest_pdf(tmp_path)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
         # PDF corrompido ou sem texto extraível
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
-        logger.exception("Unexpected error while ingesting doc_id=%r", effective_doc_id)
+        logger.exception("Unexpected error while ingesting %r", file.filename)
         raise HTTPException(status_code=500, detail=f"Ingest failed: {exc}")
     finally:
-        if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
+        if tmp_dir and os.path.exists(tmp_dir):
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     return result
 
