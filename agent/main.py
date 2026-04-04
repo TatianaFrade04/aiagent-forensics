@@ -43,6 +43,11 @@ OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "qwen2.5:7b")
 OLLAMA_URL     = os.getenv("OLLAMA_URL",     "http://localhost:11434")
 MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "15"))
 
+# Verifica se modelo suporta tool calling robusto
+KNOWN_GOOD_MODELS = ["llama3.2", "llama3.1", "mistral", "gemma2"]
+MODEL_NAME = OLLAMA_MODEL.split(":")[0].lower()
+ROBUST_TOOLCALLING = any(good in MODEL_NAME for good in KNOWN_GOOD_MODELS)
+
 atexit.register(stop_container)
 
 # Directório raiz do projecto — local onde o utilizador coloca os PDFs a indexar
@@ -70,7 +75,93 @@ def run_forensics_command(command: str) -> str:
       - Paths with spaces MUST use single quotes
       - /forensics is READ-ONLY — never redirect or write there
     """
-    return run_in_sandbox(command)
+    result = run_in_sandbox(command)
+    
+    # PROBLEMA 3 FIX: Detecção inteligente de ficheiros IE history
+    if "exiftool" in command.lower() and any(pattern in command.lower() for pattern in ['.dat', '.index', '/history/', '/cookies/']):
+        suggestion = """
+⚠️  AVISO: Detectado uso de exiftool em ficheiro de histórico IE!
+Para ficheiros .dat/.index do Internet Explorer, use:
+  - pasco 'path/to/file.dat' (para history files)
+  - hindsight -f 'path/to/file.dat' (alternativa)
+
+Comandos sugeridos baseados no seu input:
+"""
+        # Sugere comando correto baseado no comando original
+        corrected_cmd = command.replace("exiftool", "pasco")
+        suggestion += f"  {corrected_cmd}\n"
+        suggestion += f"  {command.replace('exiftool', 'hindsight -f')}\n"
+        
+        return suggestion + "\n" + result
+    
+    # PROBLEMA 4 FIX: Detecção de falha em análise USB
+    if ("usbstor" in command.lower() or "usb" in command.lower()) and ("não existe" in result.lower() or "not exist" in result.lower() or "not found" in result.lower()):
+        suggestion = """
+⚠️  AVISO: Estratégia USB falhou! Tentando estratégias alternativas...
+
+Estratégias USB disponíveis:
+1. reglookup -p '/ControlSet002/Enum/USBSTOR' "$HIVE"  
+2. reglookup -p '/CurrentControlSet/Enum/USBSTOR' "$HIVE"
+3. reglookup -p '/ControlSet001/Services/USBSTOR' "$HIVE"
+4. SOFTWARE hive: reglookup -p '/Microsoft/Windows Portable Devices' "$SOFT_HIVE"
+
+Executando Strategy 2 automaticamente...
+"""
+        # Tenta automaticamente a strategy 2
+        auto_cmd = """HIVE=$(find '/forensics/part006' -iname 'SYSTEM' -not -path '*/RegBack/*' 2>/dev/null | head -1); reglookup -p '/ControlSet002/Enum/USBSTOR' "$HIVE" """
+        auto_result = run_in_sandbox(auto_cmd)
+        
+        return suggestion + "\n=== RESULTADO STRATEGY 2 ===\n" + auto_result
+    
+    # PROBLEMA 2 FIX: Auto-análise de outputs grandes
+    # Se o resultado indica um ficheiro temporário, executa análise automática
+    if result.startswith("[Output grande:") and "/tmp/cmd_output_" in result:
+        # Extrai o nome do ficheiro temporário
+        import re
+        temp_file_match = re.search(r'/tmp/cmd_output_\d+\.txt', result)
+        if temp_file_match:
+            temp_file = temp_file_match.group()
+            
+            # Executa análise automática do ficheiro
+            auto_analysis = f"""
+=== ANÁLISE AUTOMÁTICA DO OUTPUT GRANDE ===
+
+Ficheiro: {temp_file}
+Comando original: {command}
+
+--- Estatísticas do ficheiro ---
+"""
+            
+            # Conta linhas, palavras, tamanho
+            stats_result = run_in_sandbox(f"wc -l -w -c {temp_file}")
+            auto_analysis += stats_result + "\n"
+            
+            # Mostra primeiras e últimas 10 linhas
+            auto_analysis += "\n--- Primeiras 10 linhas ---\n"
+            head_result = run_in_sandbox(f"head -10 {temp_file}")
+            auto_analysis += head_result + "\n"
+            
+            auto_analysis += "\n--- Últimas 10 linhas ---\n"
+            tail_result = run_in_sandbox(f"tail -10 {temp_file}")
+            auto_analysis += tail_result + "\n"
+            
+            # Se é output de find, conta tipos de ficheiros
+            if command.strip().startswith('find'):
+                auto_analysis += "\n--- Tipos de ficheiros encontrados (top 10) ---\n"
+                types_result = run_in_sandbox(f"sed 's/.*\\.//' {temp_file} | sort | uniq -c | sort -nr | head -10")
+                auto_analysis += types_result + "\n"
+            
+            # Se é output de ls -la, analisa tamanhos
+            if 'ls -l' in command:
+                auto_analysis += "\n--- Maiores ficheiros (top 10) ---\n"
+                size_result = run_in_sandbox(f"sort -k5 -n {temp_file} | tail -10")
+                auto_analysis += size_result + "\n"
+            
+            auto_analysis += f"\nPara análise mais específica, use:\n  grep 'keyword' {temp_file}\n  awk 'padrão' {temp_file}\n"
+            
+            return auto_analysis
+    
+    return result
 
 
 @tool
@@ -161,6 +252,14 @@ SYSTEM_PROMPT = (
     "  when mounted on Linux. ALWAYS use find with -iname to discover exact paths\n"
     "  before passing them to forensic tools. Never assume casing.\n"
     "\n"
+    "FILE SEARCH PROTOCOL:\n"
+    "  When asked to analyze a specific file (e.g., 'O Death.txt'), NEVER assume its location.\n"
+    "  ALWAYS search first: find '/forensics/part006' -iname 'filename' -type f\n"
+    "  Then use the discovered path in your forensic tool commands.\n"
+    "  Example workflow:\n"
+    "    1. run_forensics_command(\"find '/forensics/part006' -iname 'O Death.txt' -type f\")\n"
+    "    2. run_forensics_command(\"exiftool '/discovered/path/O Death.txt'\")\n"
+    "\n"
     "REGISTRY HIVES — Windows registry hive files have NO file extension.\n"
     "  The hive files are named: SOFTWARE, SYSTEM, SAM, SECURITY, NTUSER.DAT\n"
     "  Main hives location: /forensics/part006/Windows/System32/config/\n"
@@ -206,6 +305,9 @@ SYSTEM_PROMPT = (
     "   NEVER conclude failure immediately. Analyse the error, correct the command\n"
     "   (try different paths or case variations) and try again.\n"
     "   Only report failure after at least two distinct attempts.\n"
+    "7a. MANDATORY FILE SEARCH: If you get 'File not found' error for a specific file,\n"
+    "    you MUST search for it first using: find '/forensics/part006' -iname 'filename' -type f\n"
+    "    Then retry the original command with the discovered path.\n"
     "8. Every new question requires a new tool call — no exceptions.\n"
     "   NEVER answer from memory or from results seen earlier in this conversation.\n"
     "   Even if the exact same question was just asked, call run_forensics_command again\n"
@@ -236,10 +338,46 @@ SYSTEM_PROMPT = (
     "    Typed URLs key: Software\\\\Microsoft\\\\Internet Explorer\\\\TypedURLs\n"
     "    History files:  find '/forensics/part006/USERS/<user>/AppData/Local/Microsoft/Windows/History' -type f\n"
     "    Index.dat:      find '/forensics/part006/USERS' -iname 'index.dat' 2>/dev/null\n"
+    "    \n"
+    "    PROBLEMA 3 FIX — IE History File Detection:\n"
+    "    CRITICAL: For Internet Explorer history files (.dat, .index), NEVER use exiftool!\n"
+    "    Detection rules:\n"
+    "      - Files ending in .dat or .index in History folders: Use pasco\n"
+    "      - Files named index.dat anywhere: Use pasco or hindsight\n"
+    "      - Command: pasco 'path/to/file.dat' or hindsight -f file.dat\n"
+    "    Examples:\n"
+    "      WRONG: exiftool '/path/History/History.IE5/index.dat'\n"
+    "      RIGHT: pasco '/path/History/History.IE5/index.dat'\n"
+    "      WRONG: exiftool '/path/Cookies/index.dat'\n"
+    "      RIGHT: hindsight -f '/path/Cookies/index.dat'\n"
     "  Last login / user accounts:\n"
     "    regripper -r SAM -p samparse\n"
     "    SAM hive: find '/forensics/part006' -iname 'SAM' -not -path '*/RegBack/*' 2>/dev/null | head -1\n"
     "    Do NOT use plugins: logonitems, logonitems2 — they are NOT installed.\n"
+    "  USB Device Analysis:\n"
+    "    PROBLEMA 4 FIX — Multi-Strategy USB Analysis:\n"
+    "    USB devices require multiple approaches. Try ALL strategies until success:\n"
+    "    \n"
+    "    Strategy 1 - SYSTEM hive + usbstor plugin:\n"
+    "      HIVE=$(find '/forensics/part006' -iname 'SYSTEM' -not -path '*/RegBack/*' 2>/dev/null | head -1)\n"
+    "      regripper -r \"$HIVE\" -p usbstor\n"
+    "    \n"
+    "    Strategy 2 - Direct reglookup on USB entries:\n"
+    "      HIVE=$(find '/forensics/part006' -iname 'SYSTEM' -not -path '*/RegBack/*' 2>/dev/null | head -1)\n"
+    "      reglookup -p '/ControlSet001/Enum/USBSTOR' \"$HIVE\"\n"
+    "    \n"
+    "    Strategy 3 - Alternative ControlSet paths:\n"
+    "      reglookup -p '/ControlSet002/Enum/USBSTOR' \"$HIVE\"\n"
+    "      reglookup -p '/CurrentControlSet/Enum/USBSTOR' \"$HIVE\"\n"
+    "    \n"
+    "    Strategy 4 - USB service information:\n"
+    "      reglookup -p '/ControlSet001/Services/USBSTOR' \"$HIVE\"\n"
+    "    \n"
+    "    If all SYSTEM hive strategies fail, try SOFTWARE hive:\n"
+    "      SOFT_HIVE=$(find '/forensics/part006' -iname 'SOFTWARE' -not -path '*/RegBack/*' 2>/dev/null | head -1)\n"
+    "      reglookup -p '/Microsoft/Windows Portable Devices' \"$SOFT_HIVE\"\n"
+    "    \n"
+    "    ALWAYS try at least 2-3 strategies before concluding 'no USB devices found'.\n"
     "  Programs executed:\n"
     "    Prefetch:   find '/forensics/part006/Windows/Prefetch' -name '*.pf' | head -30\n"
     "    UserAssist: regripper -r NTUSER.DAT -p userassist (per-user hive)\n"
@@ -293,14 +431,48 @@ def _extract_tool_calls(message: Any) -> list[dict]:
     structured = getattr(message, "tool_calls", None)
     if structured:
         return list(structured)
+    
     # Fallback: o modelo escreveu JSON em texto
     payload = _extract_json_object(_render_message_text(message))
-    if not payload:
-        return []
-    name = payload.get("name")
-    arguments = payload.get("arguments", {})
-    if isinstance(name, str) and isinstance(arguments, dict):
-        return [{"id": "text-tool-call", "name": name, "args": arguments}]
+    if payload:
+        name = payload.get("name")
+        arguments = payload.get("arguments", {})
+        if isinstance(name, str) and isinstance(arguments, dict):
+            return [{"id": "text-tool-call", "name": name, "args": arguments}]
+    
+    # NOVO: Fallback para quando modelo escreve função como string
+    text_content = _render_message_text(message)
+    
+    # Detecta padrões como: run_forensics_command("comando aqui")
+    import re
+    
+    # PROBLEMA 1 FIX: Regex melhorada para capturar comandos completos
+    # Suporta paths complexos e aspas mistas sem truncar
+    function_patterns = [
+        # Pattern para aspas duplas: func("comando completo aqui")
+        r'(\w+)\s*\(\s*"([^"]+)"\s*\)',
+        # Pattern para aspas simples: func('comando completo aqui')  
+        r"(\w+)\s*\(\s*'([^']+)'\s*\)",
+        # Pattern com escapes: func("comando com \"aspas\"")
+        r'(\w+)\s*\(\s*"([^"\\]*(?:\\.[^"\\]*)*)"\s*\)',
+    ]
+    
+    for pattern in function_patterns:
+        function_calls = re.findall(pattern, text_content)
+        if function_calls:
+            for func_name, command in function_calls:
+                if func_name in ["run_forensics_command", "query_rag_documents", "ingest_pdf_document"]:
+                    if func_name == "run_forensics_command":
+                        return [{"id": "parsed-tool-call", "name": "run_forensics_command", "args": {"command": command}}]
+                    elif func_name == "query_rag_documents":
+                        return [{"id": "parsed-tool-call", "name": "query_rag_documents", "args": {"query": command, "top_k": 5}}]
+                    elif func_name == "ingest_pdf_document":
+                        return [{"id": "parsed-tool-call", "name": "ingest_pdf_document", "args": {"filename": command}}]
+            break  # Se encontrou matches, para aqui
+    
+    # PROBLEMA 1 FIX: REMOVER detecção automática de bash commands
+    # Esta detecção causava loops infinitos - o modelo deve sempre usar funções explícitas
+    
     return []
 
 # ─── Interface chatbot ────────────────────────────────────────────────────────
@@ -326,6 +498,8 @@ def cmd_estrutura():
 def main():
     print(BANNER)
     print(f"[*] Modelo: {OLLAMA_MODEL} via {OLLAMA_URL}")
+    if not ROBUST_TOOLCALLING:
+        print(f"[!] AVISO: Modelo {MODEL_NAME} pode ter tool calling menos robusto. Ajustes aplicados.")
     start_container()
 
     # Carregar skills forenses
@@ -364,14 +538,20 @@ def main():
             print(f"[*] Skills selecionadas: {', '.join(s.name for s in selected)}")
 
         # Injetar skills no system prompt (posição 0)
-        if skills_context:
-            conversation[0] = SystemMessage(
-                content=SYSTEM_PROMPT
-                + "\nThe following commands are installed and available in the container:\n"
-                + skills_context + "\n"
+        enhanced_prompt = SYSTEM_PROMPT
+        if not ROBUST_TOOLCALLING:
+            enhanced_prompt += (
+                "\n\nIMPORTANT FOR TOOL CALLING:\n"
+                "- You MUST use the available tools (run_forensics_command, query_rag_documents, ingest_pdf_document)\n"  
+                "- NEVER write command strings like 'run_forensics_command(\"ls\")' as text\n"
+                "- ALWAYS use the actual tool functionality built into the system\n"
+                "- If you write text instead of using tools, your response will be rejected\n"
             )
-        else:
-            conversation[0] = SystemMessage(content=SYSTEM_PROMPT)
+        
+        if skills_context:
+            enhanced_prompt += "\nThe following commands are installed and available in the container:\n" + skills_context + "\n"
+        
+        conversation[0] = SystemMessage(content=enhanced_prompt)
 
         conversation.append(HumanMessage(content=user_input))
 
@@ -382,6 +562,15 @@ def main():
 
                 tool_calls = _extract_tool_calls(response)
                 content = _render_message_text(response)
+
+                # Debug: mostra se tool calls foram extraídos via parsing
+                parsed_calls = [tc for tc in tool_calls if tc.get("id", "").startswith(("parsed-", "detected-"))]
+                if parsed_calls:
+                    print(f"\n{'─'*60}")
+                    print(f"[INFO — iteração {iteration + 1}: converteu texto em tool call automaticamente]")
+                    for tc in parsed_calls:
+                        print(f"  Convertido: {tc}")
+                    print(f"{'─'*60}")
 
                 # Se resposta vazia (sem tool calls nem texto), não poluir a conversa
                 if not tool_calls and not content.strip():
@@ -431,18 +620,22 @@ def main():
                     )
                     if not tool_used_this_turn and iteration < 2:
                         print(f"\n{'─'*60}")
-                        print(f"[AVISO — iteração {iteration + 1}: modelo descreveu comando sem executar, a forçar tool call]")
+                        print(f"[AVISO — iteração {iteration + 1}: modelo não usou ferramentas, tentando forçar]")
+                        print(f"[DEBUG] Content recebido: {content[:100]!r}")
                         print(f"{'─'*60}")
-                        conversation.append(HumanMessage(
-                            content=(
-                                "You wrote your answer as plain text without calling any tool. "
-                                "You MUST call the appropriate tool now:\n"
-                                "  - For questions about PDF/document content: call query_rag_documents(query)\n"
-                                "  - For filesystem/registry commands: call run_forensics_command(command)\n"
-                                "  - To index a PDF: call ingest_pdf_document(filename)\n"
-                                "Do not write any text — just call the tool immediately."
-                            )
-                        ))
+                        is_forensics_question = any(word in user_input.lower() for word in 
+                            ["ficheiro", "registo", "registry", "sistema", "utilizador", "user", "comando", "metadados", "exiftool"])
+                        is_pdf_question = any(word in user_input.lower() for word in 
+                            ["pdf", "autopsia", "causa", "morte", "relatório", "idade", "sexo", "vítima"])
+                        
+                        if is_pdf_question:
+                            nudge_text = "Use query_rag_documents tool now. NO TEXT."
+                        elif is_forensics_question:
+                            nudge_text = "Use run_forensics_command tool now. NO TEXT."
+                        else:
+                            nudge_text = "Use tools, not text. NO EXPLANATIONS."
+                        
+                        conversation.append(HumanMessage(content=nudge_text))
                         continue
                     print(f"\n{'='*60}")
                     print(f"Agente: {content}")
