@@ -7,7 +7,9 @@ Politécnico de Leiria — ESTG | Licenciatura em Engenharia Informática
 import atexit
 import json
 import os
+import sys
 from typing import Any
+import logging
 
 from dotenv import load_dotenv
 
@@ -18,15 +20,33 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from tools import run_in_sandbox, stop_container, start_container
 from skills import load_skills, select_skills, format_skills_context
 
+# RAG pipeline (requer rag/ + ANTHROPIC_API_KEY no .env)
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+try:
+    from rag.indexer import ingest_pdf as _rag_ingest_pdf
+    from rag.generator import answer_with_rag as _rag_answer
+    _RAG_AVAILABLE = True
+except ImportError:
+    _RAG_AVAILABLE = False
+
 # ─── Configuração ─────────────────────────────────────────────────────────────
 
 load_dotenv()
+
+# ─── Supressão de ruído de bibliotecas externas ───────────────────────────────
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+logging.getLogger("transformers").setLevel(logging.ERROR)
 
 OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "qwen2.5:7b")
 OLLAMA_URL     = os.getenv("OLLAMA_URL",     "http://localhost:11434")
 MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "15"))
 
 atexit.register(stop_container)
+
+# Directório raiz do projecto — local onde o utilizador coloca os PDFs a indexar
+RAG_DOCS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 # ─── Ferramenta exposta ao agente ─────────────────────────────────────────────
 
@@ -53,7 +73,71 @@ def run_forensics_command(command: str) -> str:
     return run_in_sandbox(command)
 
 
-TOOLS = {run_forensics_command.name: run_forensics_command}
+@tool
+def ingest_pdf_document(filename: str, doc_id: str) -> str:
+    """
+    Index a local PDF document so it can be queried with query_rag_documents.
+
+    Args:
+        filename: PDF file name in the project root (e.g. "autopsia_relatorio.pdf").
+                  Only the basename is used — path traversal is not allowed.
+        doc_id:   A short unique identifier for this document
+                  (e.g. "autopsia_relatorio").
+    """
+    if not _RAG_AVAILABLE:
+        return "RAG module not available. Run: pip install -r requirements_rag.txt"
+    safe_name = os.path.basename(filename)
+    if not safe_name.lower().endswith(".pdf"):
+        return f"Error: only PDF files are accepted (got {safe_name!r})."
+    filepath = os.path.realpath(os.path.join(RAG_DOCS_DIR, safe_name))
+    if not filepath.startswith(os.path.realpath(RAG_DOCS_DIR)):
+        return "Error: access denied — path outside allowed directory."
+    try:
+        result = _rag_ingest_pdf(filepath, doc_id)
+        return str(result)
+    except FileNotFoundError:
+        return f"Error: file not found — {safe_name!r} is not in the workspace root."
+    except ValueError as exc:
+        return f"Error: {exc}"
+    except Exception as exc:
+        return f"Unexpected error during ingest: {exc}"
+
+
+@tool
+def query_rag_documents(query: str, top_k: int = 5) -> str:
+    """
+    Answer a question from indexed PDF documents using the RAG pipeline (Claude).
+
+    Use this tool when the user asks about the CONTENT of a PDF document
+    (e.g. autopsy reports, forensic reports, investigation summaries).
+    Do NOT use run_forensics_command or exiftool to read document content.
+
+    Args:
+        query:  The question to answer from the indexed documents.
+        top_k:  Number of document chunks to retrieve (default 5).
+    """
+    if not _RAG_AVAILABLE:
+        return "RAG module not available. Run: pip install -r requirements_rag.txt"
+    try:
+        result = _rag_answer(query, top_k=top_k)
+        answer = result["answer"]
+        sources = result.get("sources", [])
+        if sources:
+            sources_str = "\n".join(
+                f"  [{s['doc_id']} | {s['filename']} | page {s['page']}]"
+                for s in sources
+            )
+            return f"{answer}\n\nSources:\n{sources_str}"
+        return answer
+    except Exception as exc:
+        return f"Error querying RAG: {exc}"
+
+
+TOOLS = {
+    run_forensics_command.name: run_forensics_command,
+    ingest_pdf_document.name: ingest_pdf_document,
+    query_rag_documents.name: query_rag_documents,
+}
 
 # ─── Modelo LLM ───────────────────────────────────────────────────────────────
 
@@ -91,6 +175,13 @@ SYSTEM_PROMPT = (
     "  on the SOFTWARE hive.\n"
     "\n"
     "TOOL: run_forensics_command(command) — run any bash command inside the forensic container\n"
+    "TOOL: query_rag_documents(query, top_k=5) — answer questions from indexed PDF documents\n"
+    "  Use this when the user asks about document CONTENT (reports, autopsy, etc.).\n"
+    "  Do NOT use run_forensics_command or exiftool to read PDF content.\n"
+    "TOOL: ingest_pdf_document(filename, doc_id) — index a local PDF for RAG querying\n"
+    "  filename: PDF filename in the workspace root (e.g. 'autopsia_relatorio.pdf')\n"
+    "  doc_id:   short unique ID (e.g. 'autopsia_relatorio')\n"
+    "  Call this FIRST if query_rag_documents says the document is not available.\n"
     "\n"
     "RULES:\n"
     "1. ALWAYS call run_forensics_command immediately — never write commands as text.\n"
@@ -128,6 +219,32 @@ SYSTEM_PROMPT = (
     "11. To list Windows users on the evidence image, ALWAYS use:\n"
     "   find '/forensics/part006/USERS' -mindepth 1 -maxdepth 1 -type d\n"
     "   NEVER use registry hives (SAM, regripper, reglookup) for this operation.\n"
+    "12. When the user asks about the CONTENT of a document (PDF, report, autopsy, etc.),\n"
+    "   ALWAYS use query_rag_documents — NEVER run_forensics_command or exiftool.\n"
+    "   If query_rag_documents returns 'not available in the indexed documents', first\n"
+    "   call ingest_pdf_document(filename, doc_id), then call query_rag_documents again.\n"
+    "   If ingest_pdf_document returns 'already_indexed' or 'file not found', do NOT retry —\n"
+    "   proceed directly to query_rag_documents. Never call ingest_pdf_document more than\n"
+    "   once per conversation turn.\n"
+    "13. If query_rag_documents returns a valid answer (not 'not available'), accept it\n"
+    "   and respond to the user immediately — do NOT call run_forensics_command after a\n"
+    "   successful RAG answer.\n"
+    "\n"
+    "FORENSIC KNOWLEDGE — Windows 7 artefact locations:\n"
+    "  Browser history (IE):\n"
+    "    regripper -r NTUSER.DAT -p typedurls\n"
+    "    Typed URLs key: Software\\\\Microsoft\\\\Internet Explorer\\\\TypedURLs\n"
+    "    History files:  find '/forensics/part006/USERS/<user>/AppData/Local/Microsoft/Windows/History' -type f\n"
+    "    Index.dat:      find '/forensics/part006/USERS' -iname 'index.dat' 2>/dev/null\n"
+    "  Last login / user accounts:\n"
+    "    regripper -r SAM -p samparse\n"
+    "    SAM hive: find '/forensics/part006' -iname 'SAM' -not -path '*/RegBack/*' 2>/dev/null | head -1\n"
+    "    Do NOT use plugins: logonitems, logonitems2 — they are NOT installed.\n"
+    "  Programs executed:\n"
+    "    Prefetch:   find '/forensics/part006/Windows/Prefetch' -name '*.pf' | head -30\n"
+    "    UserAssist: regripper -r NTUSER.DAT -p userassist (per-user hive)\n"
+    "    MUICache:   regripper -r NTUSER.DAT -p muicache\n"
+    "    AppCompat:  regripper -r SYSTEM -p appcompatcache\n"
 )
 
 # ─── Helpers para extracção de tool calls ─────────────────────────────────────
@@ -275,11 +392,12 @@ def main():
                         # Nudge: relembrar o modelo do workflow correcto
                         conversation.append(HumanMessage(
                             content=(
-                                "Your previous response was empty. You must call run_forensics_command to answer the question.\n"
-                                "IMPORTANT: Do NOT guess file paths. Before running any forensic tool, "
-                                "always discover the exact path first using find, for example:\n"
-                                "  find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' 2>/dev/null | head -3\n"
-                                "Then use the exact path returned by find in your next command."
+                                "Your previous response was empty. You MUST call one of the available tools to answer:\n"
+                                "  - query_rag_documents(query) — for questions about PDF document content\n"
+                                "  - ingest_pdf_document(filename, doc_id) — to index a PDF before querying\n"
+                                "  - run_forensics_command(command) — for filesystem/registry forensic commands\n"
+                                "Do NOT guess file paths. If using run_forensics_command, discover paths with find first.\n"
+                                "Just call the appropriate tool now — no text, no explanation."
                             )
                         ))
                         continue
@@ -317,9 +435,11 @@ def main():
                         print(f"{'─'*60}")
                         conversation.append(HumanMessage(
                             content=(
-                                "You wrote a command in your text response but did NOT call run_forensics_command. "
-                                "Writing bash or JSON in text is NOT execution. "
-                                "You MUST call run_forensics_command now with the exact command. "
+                                "You wrote your answer as plain text without calling any tool. "
+                                "You MUST call the appropriate tool now:\n"
+                                "  - For questions about PDF/document content: call query_rag_documents(query)\n"
+                                "  - For filesystem/registry commands: call run_forensics_command(command)\n"
+                                "  - To index a PDF: call ingest_pdf_document(filename, doc_id)\n"
                                 "Do not write any text — just call the tool immediately."
                             )
                         ))
