@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y \
     md5deep \
     sqlite3 \
     libimage-exiftool-perl \
+
     regripper \
     reglookup \
     && pip3 install --break-system-packages python-evtx evtx \

@@ -194,23 +194,33 @@ def ingest_pdf_document(filename: str) -> str:
 
 
 @tool
-def query_rag_documents(query: str, top_k: int = 5) -> str:
+def query_rag_documents(query: str, top_k: int = 5, filename: str | None = None) -> str:
     """
-    Answer a question from indexed PDF documents using the RAG pipeline (Claude).
+    Answer a question from indexed PDF documents using the RAG pipeline.
 
     Use this tool when the user asks about the CONTENT of a PDF document
     (e.g. autopsy reports, forensic reports, investigation summaries).
     Do NOT use run_forensics_command or exiftool to read document content.
 
     Args:
-        query:  The question to answer from the indexed documents.
-        top_k:  Number of document chunks to retrieve. Use 5 by default.
-                NEVER set this below 5 — low values cause information loss.
+        query:    The question to answer from the indexed documents.
+        top_k:    Number of document chunks to retrieve. Use 5 by default.
+                  NEVER set this below 5 — low values cause information loss.
+        filename: [NOVO] Optional - filter results to a specific PDF file.
+                  Use this when user asks about a specific document.
+                  Example: "caso_autopsia_forense.pdf"
     """
     if not _RAG_AVAILABLE:
         return "RAG module not available. Run: pip install -r requirements_rag.txt"
+    
+    # Se um filename específico foi pedido, verificar se está indexado
+    if filename:
+        from rag.indexer import is_document_indexed
+        if not is_document_indexed(filename):
+            return f"Document '{filename}' is not indexed. Use ingest_pdf_document('{filename}') first to index it."
+    
     try:
-        result = _rag_answer(query, top_k=top_k)
+        result = _rag_answer(query, top_k=top_k, filename=filename)
         answer = result["answer"]
         sources = result.get("sources", [])
         if sources:
@@ -224,10 +234,39 @@ def query_rag_documents(query: str, top_k: int = 5) -> str:
         return f"Error querying RAG: {exc}"
 
 
+@tool
+def list_indexed_documents() -> str:
+    """
+    List all PDF documents that have been indexed and are available for querying.
+    
+    Use this tool to check which documents are available before querying them.
+    """
+    if not _RAG_AVAILABLE:
+        return "RAG module not available. Run: pip install -r requirements_rag.txt"
+    
+    try:
+        from rag.indexer import list_indexed_documents as _list_docs
+        docs = _list_docs()
+        
+        if not docs:
+            return "No documents are currently indexed. Use ingest_pdf_document(filename) to index PDF files."
+        
+        result = "Indexed documents available for querying:\n"
+        for doc in docs:
+            result += f"  • {doc['filename']} (doc_id: {doc['doc_id']})\n"
+        
+        result += f"\nTotal: {len(docs)} document(s) indexed."
+        return result
+        
+    except Exception as exc:
+        return f"Error listing indexed documents: {exc}"
+
+
 TOOLS = {
     run_forensics_command.name: run_forensics_command,
     ingest_pdf_document.name: ingest_pdf_document,
     query_rag_documents.name: query_rag_documents,
+    list_indexed_documents.name: list_indexed_documents,
 }
 
 # ─── Modelo LLM ───────────────────────────────────────────────────────────────
@@ -274,13 +313,17 @@ SYSTEM_PROMPT = (
     "  on the SOFTWARE hive.\n"
     "\n"
     "TOOL: run_forensics_command(command) — run any bash command inside the forensic container\n"
-    "TOOL: query_rag_documents(query, top_k=5) — answer questions from indexed PDF documents\n"
+    "TOOL: query_rag_documents(query, top_k=5, filename=None) — answer questions from indexed PDF documents\n"
     "  Use this when the user asks about document CONTENT (reports, autopsy, etc.).\n"
+    "  filename parameter: filter results to a specific PDF file to avoid contamination.\n"
+    "  Example: query_rag_documents('What was the cause of death?', filename='caso_autopsia_forense.pdf')\n"
     "  Do NOT use run_forensics_command or exiftool to read PDF content.\n"
     "TOOL: ingest_pdf_document(filename) — index a local PDF for RAG querying\n"
     "  filename: PDF filename in the workspace root (e.g. 'autopsia_relatorio.pdf')\n"
     "  The doc_id is derived automatically from the filename — do NOT pass doc_id.\n"
     "  Call this FIRST if query_rag_documents says the document is not available.\n"
+    "TOOL: list_indexed_documents() — list all currently indexed PDF documents\n"
+    "  Use this to check which documents are available for querying.\n"
     "\n"
     "RULES:\n"
     "1. ALWAYS call run_forensics_command immediately — never write commands as text.\n"
@@ -323,8 +366,11 @@ SYSTEM_PROMPT = (
     "   NEVER use registry hives (SAM, regripper, reglookup) for this operation.\n"
     "12. When the user asks about the CONTENT of a document (PDF, report, autopsy, etc.),\n"
     "   ALWAYS use query_rag_documents — NEVER run_forensics_command or exiftool.\n"
+    "   IMPORTANT: When asking about a specific file, use the filename parameter:\n"
+    "   query_rag_documents('question', filename='specific_file.pdf')\n"
+    "   This prevents contamination from other indexed documents.\n"
     "   If query_rag_documents returns 'not available in the indexed documents', first\n"
-    "   call ingest_pdf_document(filename, doc_id), then call query_rag_documents again.\n"
+    "   call ingest_pdf_document(filename), then call query_rag_documents again.\n"
     "   If ingest_pdf_document returns 'already_indexed' or 'file not found', do NOT retry —\n"
     "   proceed directly to query_rag_documents. Never call ingest_pdf_document more than\n"
     "   once per conversation turn.\n"

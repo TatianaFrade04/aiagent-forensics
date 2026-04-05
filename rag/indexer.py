@@ -187,3 +187,21 @@ def list_indexed_documents() -> list[dict]:
             }
 
     return list(seen.values())
+
+
+def is_document_indexed(filename: str) -> bool:
+    """
+    [NOVA FUNÇÃO] Verifica se um documento específico está indexado.
+    
+    Args:
+        filename: Nome do ficheiro a verificar.
+        
+    Returns:
+        True se o documento estiver indexado, False caso contrário.
+    """
+    try:
+        col = _chroma_collection()
+        result = col.get(where={"filename": {"$eq": filename}}, limit=1, include=[])
+        return len(result["ids"]) > 0
+    except Exception:
+        return False

@@ -58,26 +58,43 @@ def _format_docs(docs) -> str:
 
 # ─── API pública ──────────────────────────────────────────────────────────────
 
-def answer_with_rag(query: str, top_k: int = 5) -> dict:
+def answer_with_rag(query: str, top_k: int = 5, filename: str | None = None) -> dict:
     """
     Responde a uma query usando o pipeline RAG completo (LCEL).
 
     Args:
-        query:  Pergunta do utilizador.
-        top_k:  Número de chunks a recuperar.
+        query:    Pergunta do utilizador.
+        top_k:    Número de chunks a recuperar.
+        filename: [NOVO] Se especificado, filtra apenas por este documento.
 
     Returns:
         Dict com:
-          - "answer"  : str — resposta gerada pelo Claude
+          - "answer"  : str — resposta gerada pelo modelo
           - "sources" : list[dict] — [{doc_id, filename, page}, …]
     """
-    logger.info("RAG query (top_k=%d): %r", top_k, query)
+    if filename:
+        logger.info("RAG query (top_k=%d, file=%s): %r", top_k, filename, query)
+    else:
+        logger.info("RAG query (top_k=%d): %r", top_k, query)
 
-    retriever = get_retriever(top_k=top_k)
+    retriever = get_retriever(top_k=top_k, filename=filename)
     llm = ChatOllama(model=OLLAMA_MODEL, base_url=OLLAMA_URL, temperature=0)
 
     # Recuperar os docs separadamente para extrair fontes
     docs = retriever.invoke(query)
+    
+    # Se não encontrou documentos e um filename específico foi pedido,
+    # retornar mensagem informativa
+    if not docs and filename:
+        return {
+            "answer": f"No information found for '{filename}'. The document may not be indexed or does not contain relevant content for this query.",
+            "sources": []
+        }
+    elif not docs:
+        return {
+            "answer": "This information is not available in the indexed documents.",
+            "sources": []
+        }
 
     # Montar chain LCEL: contexto já formatado + pergunta → LLM → string
     rag_chain = (
