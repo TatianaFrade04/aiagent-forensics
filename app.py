@@ -8,6 +8,7 @@ Documentação interactiva:
   http://localhost:8000/docs
 """
 
+
 import logging
 
 from fastapi import FastAPI
