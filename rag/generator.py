@@ -48,6 +48,7 @@ _PROMPT = ChatPromptTemplate.from_messages(
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+#formatacao dos chunks para contexto
 def _format_docs(docs) -> str:
     parts = []
     for doc in docs:
@@ -109,7 +110,7 @@ def answer_with_rag(query: str, top_k: int = 5, filename: str | None = None) -> 
 
     answer = rag_chain.invoke(query)
 
-    # Extrair fontes únicas
+    # Extrair fontes únicas -> se dois chunls vieram da mesma pagina, cita essa pagina apenas uma vez
     sources: list[dict] = []
     seen_sources: set[tuple] = set()
     for doc in docs:

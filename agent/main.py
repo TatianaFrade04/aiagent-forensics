@@ -44,7 +44,7 @@ OLLAMA_URL     = os.getenv("OLLAMA_URL",     "http://localhost:11434")
 MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "15"))
 
 # Verifica se modelo suporta tool calling robusto
-KNOWN_GOOD_MODELS = ["llama3.2", "llama3.1", "mistral", "gemma2"]
+KNOWN_GOOD_MODELS = ["llama3.2", "llama3.1", "qwen2.5"]
 MODEL_NAME = OLLAMA_MODEL.split(":")[0].lower()
 ROBUST_TOOLCALLING = any(good in MODEL_NAME for good in KNOWN_GOOD_MODELS)
 
@@ -80,13 +80,13 @@ def run_forensics_command(command: str) -> str:
     # PROBLEMA 3 FIX: Detecção inteligente de ficheiros IE history
     if "exiftool" in command.lower() and any(pattern in command.lower() for pattern in ['.dat', '.index', '/history/', '/cookies/']):
         suggestion = """
-⚠️  AVISO: Detectado uso de exiftool em ficheiro de histórico IE!
-Para ficheiros .dat/.index do Internet Explorer, use:
-  - pasco 'path/to/file.dat' (para history files)
-  - hindsight -f 'path/to/file.dat' (alternativa)
+        ⚠️  AVISO: Detectado uso de exiftool em ficheiro de histórico IE!
+        Para ficheiros .dat/.index do Internet Explorer, use:
+        - pasco 'path/to/file.dat' (para history files)
+        - hindsight -f 'path/to/file.dat' (alternativa)
 
-Comandos sugeridos baseados no seu input:
-"""
+        Comandos sugeridos baseados no seu input:
+        """
         # Sugere comando correto baseado no comando original
         corrected_cmd = command.replace("exiftool", "pasco")
         suggestion += f"  {corrected_cmd}\n"
@@ -97,16 +97,16 @@ Comandos sugeridos baseados no seu input:
     # PROBLEMA 4 FIX: Detecção de falha em análise USB
     if ("usbstor" in command.lower() or "usb" in command.lower()) and ("não existe" in result.lower() or "not exist" in result.lower() or "not found" in result.lower()):
         suggestion = """
-⚠️  AVISO: Estratégia USB falhou! Tentando estratégias alternativas...
+        ⚠️  AVISO: Estratégia USB falhou! Tentando estratégias alternativas...
 
-Estratégias USB disponíveis:
-1. reglookup -p '/ControlSet002/Enum/USBSTOR' "$HIVE"  
-2. reglookup -p '/CurrentControlSet/Enum/USBSTOR' "$HIVE"
-3. reglookup -p '/ControlSet001/Services/USBSTOR' "$HIVE"
-4. SOFTWARE hive: reglookup -p '/Microsoft/Windows Portable Devices' "$SOFT_HIVE"
+        Estratégias USB disponíveis:
+        1. reglookup -p '/ControlSet002/Enum/USBSTOR' "$HIVE"  
+        2. reglookup -p '/CurrentControlSet/Enum/USBSTOR' "$HIVE"
+        3. reglookup -p '/ControlSet001/Services/USBSTOR' "$HIVE"
+        4. SOFTWARE hive: reglookup -p '/Microsoft/Windows Portable Devices' "$SOFT_HIVE"
 
-Executando Strategy 2 automaticamente...
-"""
+        Executando Strategy 2 automaticamente...
+        """
         # Tenta automaticamente a strategy 2
         auto_cmd = """HIVE=$(find '/forensics/part006' -iname 'SYSTEM' -not -path '*/RegBack/*' 2>/dev/null | head -1); reglookup -p '/ControlSet002/Enum/USBSTOR' "$HIVE" """
         auto_result = run_in_sandbox(auto_cmd)
@@ -124,13 +124,13 @@ Executando Strategy 2 automaticamente...
             
             # Executa análise automática do ficheiro
             auto_analysis = f"""
-=== ANÁLISE AUTOMÁTICA DO OUTPUT GRANDE ===
+            === ANÁLISE AUTOMÁTICA DO OUTPUT GRANDE ===
 
-Ficheiro: {temp_file}
-Comando original: {command}
+            Ficheiro: {temp_file}
+            Comando original: {command}
 
---- Estatísticas do ficheiro ---
-"""
+            --- Estatísticas do ficheiro ---
+            """
             
             # Conta linhas, palavras, tamanho
             stats_result = run_in_sandbox(f"wc -l -w -c {temp_file}")
@@ -299,6 +299,12 @@ SYSTEM_PROMPT = (
     "    1. run_forensics_command(\"find '/forensics/part006' -iname 'O Death.txt' -type f\")\n"
     "    2. run_forensics_command(\"exiftool '/discovered/path/O Death.txt'\")\n"
     "\n"
+    "QUICK ANSWERS FOR COMMON QUESTIONS:\n"
+    "  • OS Install Date: use '/Microsoft/Windows NT/CurrentVersion' in SOFTWARE hive + grep InstallDate\n"
+    "  • Last System Use: use 'find /forensics/part006/Windows/System32 -type f -printf %T@ %Tc %p\\n | sort -n | tail -5'\n"
+    "  • User Accounts: use 'find /forensics/part006/Users -mindepth 1 -maxdepth 1 -type d'\n"
+    "  • USB Devices: use '/ControlSet001/Enum/USBSTOR' in SYSTEM hive\n"
+    "\n"
     "REGISTRY HIVES — Windows registry hive files have NO file extension.\n"
     "  The hive files are named: SOFTWARE, SYSTEM, SAM, SECURITY, NTUSER.DAT\n"
     "  Main hives location: /forensics/part006/Windows/System32/config/\n"
@@ -325,26 +331,29 @@ SYSTEM_PROMPT = (
     "TOOL: list_indexed_documents() — list all currently indexed PDF documents\n"
     "  Use this to check which documents are available for querying.\n"
     "\n"
-    "RULES:\n"
-    "1. ALWAYS call run_forensics_command immediately — never write commands as text.\n"
-    "   WRONG: writing ```bash command``` in your reply without a tool call.\n"
-    "   WRONG: saying 'I will run ...' or 'Let me execute ...' without calling the tool.\n"
-    "   WRONG: emitting JSON like {\"name\": \"run_forensics_command\", ...} in text.\n"
-    "   RIGHT: call run_forensics_command(command) as your very first action, with no preamble.\n"
-    "   Your response must contain ONLY a tool call — zero words of introduction or explanation.\n"
-    "   Do NOT announce what you are about to do. Do NOT ask for clarification. Just call the tool.\n"
-    "2. NEVER invent or hallucinate results — only report what the tool returns.\n"
-    "3. CRITICAL — EVERY path under /forensics/ MUST be wrapped in single quotes. No exceptions.\n"
+    "CRITICAL RULES:\n"
+    "1. FOR ANY FORENSIC QUESTION: IMMEDIATELY call run_forensics_command().\n"
+    "   - NO text explanations before the tool call\n"
+    "   - NO announcing what you'll do\n"
+    "   - JUST call the tool with the appropriate command\n"
+    "   Example: User asks 'list users' → You MUST call: run_forensics_command('find /forensics/part006/USERS -mindepth 1 -maxdepth 1 -type d')\n"
+    "2. WRONG responses:\n"
+    "   - Writing commands as text: find '/forensics/...'\n"
+    "   - Explaining first: 'I will check users...'\n"
+    "   - JSON in text: {\"name\": \"run_forensics_command\"}\n"
+    "3. RIGHT response: Direct tool call, nothing else.\n"
+    "4. NEVER invent or hallucate results — only report what the tool returns.\n"
+    "5. CRITICAL — EVERY path under /forensics/ MUST be wrapped in single quotes. No exceptions.\n"
     "   WRONG: stat /forensics/part006/USERS/Jimmy Wilson/file.txt\n"
     "   WRONG: stat /forensics/part006/USERS/Jimmy\\ Wilson/file.txt\n"
     "   RIGHT: stat '/forensics/part006/USERS/Jimmy Wilson/file.txt'\n"
     "   RIGHT: find '/forensics/part006' -name '*.pdf'\n"
     "   RIGHT: exiftool '/forensics/part006/USERS/Jimmy Wilson/Documents/photo.jpg'\n"
-    "4. /forensics is READ-ONLY. NEVER redirect or write there.\n"
-    "5. NEVER use: rm, mv, dd, shred, find -delete, sed -i.\n"
-    "6. To save output to a file: command > /exports/file.txt\n"
+    "6. /forensics is READ-ONLY. NEVER redirect or write there.\n"
+    "7. NEVER use: rm, mv, dd, shred, find -delete, sed -i.\n"
+    "8. To save output to a file: command > /exports/file.txt\n"
     "   Then verify with: ls -lh /exports/file.txt\n"
-    "7. If a tool call returns an error (e.g. wrong path, file not found, command not found),\n"
+    "9. If a tool call returns an error (e.g. wrong path, file not found, command not found),\n"
     "   NEVER conclude failure immediately. Analyse the error, correct the command\n"
     "   (try different paths or case variations) and try again.\n"
     "   Only report failure after at least two distinct attempts.\n"
@@ -516,8 +525,20 @@ def _extract_tool_calls(message: Any) -> list[dict]:
                         return [{"id": "parsed-tool-call", "name": "ingest_pdf_document", "args": {"filename": command}}]
             break  # Se encontrou matches, para aqui
     
-    # PROBLEMA 1 FIX: REMOVER detecção automática de bash commands
-    # Esta detecção causava loops infinitos - o modelo deve sempre usar funções explícitas
+    # FALLBACK: Corrige comandos malformados como 'ronics_command("comando")'
+    malformed_pattern = r'ronics_command\s*\(\s*"([^"]+)"\s*\)'
+    malformed_matches = re.findall(malformed_pattern, text_content)
+    if malformed_matches:
+        command = malformed_matches[0]
+        return [{"id": "corrected-tool-call", "name": "run_forensics_command", "args": {"command": command}}]
+    
+    # FALLBACK: Detecta comandos forenses directos
+    lines = text_content.strip().split('\n')
+    if len(lines) == 1:
+        line = lines[0].strip()
+        forensic_keywords = ['find', 'grep', 'ls', 'cat', 'file', 'strings', 'reglookup', 'regripper', 'exiftool']
+        if any(line.strip().startswith(keyword) for keyword in forensic_keywords):
+            return [{"id": "direct-tool-call", "name": "run_forensics_command", "args": {"command": line}}]
     
     return []
 

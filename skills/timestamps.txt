@@ -1,0 +1,81 @@
+SKILL: timestamps
+DESCRIPTION: Robust forensic methods to determine OS installation date and last system usage using file timestamps and direct registry queries. Avoids problematic RegRipper plugins.
+KEYWORDS: instalação, installation, última utilização, last used, last usage, sistema operativo, operating system, quando foi instalado, when installed, quando usado, when used, data, date, timestamp, boot, startup, shutdown, logoff
+---
+
+## OS INSTALLATION DATE
+
+### Method 1: InstallDate Registry Key (Most Reliable)
+```bash
+SOFTWARE_HIVE=$(find '/forensics/part006' -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/RegBack/*' 2>/dev/null | head -1)
+reglookup -p '/Microsoft/Windows NT/CurrentVersion' "$SOFTWARE_HIVE" | grep InstallDate
+```
+
+### Method 2: System File Creation Timestamps
+```bash
+# Check creation time of critical system files
+ls -la '/forensics/part006/Windows/System32/config/SOFTWARE'
+ls -la '/forensics/part006/Windows/System32/config/SYSTEM' 
+ls -la '/forensics/part006/Windows/System32/kernel32.dll'
+```
+
+### Method 3: Windows Directory Timestamp
+```bash
+# Windows folder creation time = installation time
+ls -la '/forensics/part006/Windows'
+stat '/forensics/part006/Windows' | grep Birth
+```
+
+## LAST SYSTEM USAGE
+
+### Method 1: Most Recent System Files 
+```bash
+# Find most recently modified system files
+find '/forensics/part006/Windows/System32' -type f -printf '%T@ %Tc %p\n' | sort -n | tail -10
+```
+
+### Method 2: User Profile Activity
+```bash
+# Check user profile timestamps - indicates last logon
+ls -la '/forensics/part006/Users/*/NTUSER.DAT'
+find '/forensics/part006/Users' -name 'NTUSER.DAT' -printf '%T@ %Tc %p\n' | sort -n
+```
+
+### Method 3: Recent User Activity Files
+```bash
+# Desktop files - recent user activity
+find '/forensics/part006/Users/*/Desktop' -type f -printf '%T@ %Tc %p\n' 2>/dev/null | sort -n | tail -5
+
+# Recent documents folders
+find '/forensics/part006/Users/*/Documents' -type f -printf '%T@ %Tc %p\n' 2>/dev/null | sort -n | tail -5
+```
+
+### Method 4: Event Logs (if available)
+```bash
+# Windows event logs - most recent system events
+find '/forensics/part006/Windows/System32/winevt/Logs' -name '*.evtx' -printf '%T@ %Tc %p\n' 2>/dev/null | sort -n | tail -5
+
+# Check if logs directory exists
+ls -la '/forensics/part006/Windows/System32/winevt/Logs/' 2>/dev/null | head -10
+```
+
+## TROUBLESHOOTING
+
+### If InstallDate returns strange value:
+- InstallDate is stored as Unix timestamp (seconds since 1970-01-01)
+- Use: `date -d "@VALUE" +"%Y-%m-%d %H:%M:%S"` to convert
+
+### If no recent files found:
+```bash
+# Fallback: Check Windows logs directory
+ls -la '/forensics/part006/Windows/Logs/'
+
+# Or check Program Files modification times  
+find '/forensics/part006/Program Files' -type f -printf '%T@ %Tc %p\n' 2>/dev/null | sort -n | tail -5
+```
+
+### Date Format Explanation:
+- %T@ = timestamp (seconds since epoch)
+- %Tc = human readable date/time 
+- Sort -n = numerical sort (chronological)
+- tail -5 = show 5 most recent

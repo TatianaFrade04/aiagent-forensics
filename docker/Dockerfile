@@ -47,3 +47,4 @@ CMD ["/bin/sleep", "infinity"]
 #cd C:\AIAgentForensics
 #./build.ps1  -> apenas uma vez ao inicio
 #py agent\main.py
+#uv run python agent/main.py

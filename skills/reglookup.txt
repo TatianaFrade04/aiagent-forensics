@@ -1,6 +1,31 @@
 SKILL: reglookup
 DESCRIPTION: Query Windows Registry keys with reglookup. HIVE SELECTION IS MANDATORY: CurrentVersion/Run and CurrentVersion/RunOnce → SOFTWARE hive; ControlSet001/* → SYSTEM hive; SAM/Domains/* → SAM hive; per-user Run/RecentDocs/UserAssist → NTUSER.DAT. Syntax: reglookup -p '/Key/Path' "$HIVE" (flags BEFORE hive). Forward slashes in -p. ALWAYS discover hive path with find -iname before running.
-KEYWORDS: reglookup, registry, registo, hive, SAM, SYSTEM, SOFTWARE, NTUSER, NTUSER.DAT, windows registry, key, chave, value, valor, query, consulta, search registry, pesquisar registo, path, type, data, security, SID, filter, filtrar, export, timeline
+KEYWORDS: reglookup, registry, registo, hive, SAM, SYSTEM, SOFTWARE, NTUSER, NTUSER.DAT, windows registry, key, chave, value, valor, query, consulta, search registry, pesquisar registo, path, type, data, security, SID, filter, filtrar, export, timeline, instalação, installation, última utilização, last used, boot, startup
+---
+
+## !! QUICK SOLUTIONS FOR COMMON QUESTIONS !!
+
+### DATA DE INSTALAÇÃO DO WINDOWS:
+```bash
+# Método mais robusto - usar InstallDate do SOFTWARE hive
+SOFTWARE_HIVE=$(find '/forensics/part006' -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/RegBack/*' 2>/dev/null | head -1)
+reglookup -p '/Microsoft/Windows NT/CurrentVersion' "$SOFTWARE_HIVE" | grep InstallDate
+
+# Alternativa - timestamp do ficheiro SOFTWARE
+ls -la '/forensics/part006/Windows/System32/config/SOFTWARE'
+```
+
+### ÚLTIMA UTILIZAÇÃO DO SISTEMA:
+```bash
+# Método 1: Ficheiros de sistema mais recentes
+find '/forensics/part006/Windows/System32' -type f -printf '%T@ %Tc %p\n' | sort -n | tail -5
+
+# Método 2: User profiles mais recentes
+ls -la '/forensics/part006/Users/*/NTUSER.DAT'
+
+# Método 3: Event logs mais recentes (se existirem)
+find '/forensics/part006/Windows/System32/winevt/Logs' -name '*.evtx' -printf '%T@ %Tc %p\n' 2>/dev/null | sort -n | tail -3
+```
 ---
 
 ## !! HIVE SELECTION — READ BEFORE ANYTHING ELSE !!

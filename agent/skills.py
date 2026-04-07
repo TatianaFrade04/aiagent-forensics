@@ -170,8 +170,10 @@ def select_skills(
         # 2. Match de tokens individuais
         for token in query_tokens:
             for kw in skill.keywords:
+                #token for igual à keyword
                 if token == kw:
                     score += 1.0
+                #token contido em keyword ou vice-versa
                 elif token in kw or kw in token:
                     score += 0.5
 
@@ -180,7 +182,9 @@ def select_skills(
         skill_desc_tokens = _tokenize(skill.description)
         name_overlap = len(query_tokens & skill_name_tokens)
         desc_overlap = len(query_tokens & skill_desc_tokens)
+        #overlap com nome
         score += name_overlap * 1.5
+        #overlap com descrição
         score += desc_overlap * 0.5
 
         # Normalizar pelo número de keywords para não favorecer skills com muitas keywords
