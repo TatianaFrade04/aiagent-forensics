@@ -1,0 +1,67 @@
+SKILL: browser_history
+DESCRIPTION: Extract browser history, visited URLs, downloads, and searches from Chrome, Firefox, and Edge SQLite databases. SQLite files must be copied to /exports/ before querying (evidence is READ-ONLY).
+KEYWORDS: browser, history, historico, chrome, firefox, edge, internet explorer, ie, sqlite, url, visited, visitado, downloads, search, pesquisa, web, navegacao, navegador, bookmark, marcadores, favoritos, cookies, cache, historico de navegacao, sites visitados, browsing history, web history, internet history, pasco, index.dat, places.sqlite, History, timeline, web activity, atividade web, credentials, login, passwords, saved passwords, form data, dados formulario, credenciais, logins guardados, signons, keyword search, search terms, termos pesquisa
+---
+
+## What is browser history analysis?
+Browsers store visited URLs, search queries, downloads, and cookies in SQLite databases (Chrome/Edge) or SQLite + index.dat files (IE). These databases are on the NTFS evidence partition (READ-ONLY), so they must be copied to `/exports/` before sqlite3 can open them.
+
+## Forensic use cases
+- Identify websites visited by a suspect
+- Find file downloads and their source URLs
+- Extract search queries entered in search engines
+- Determine timeline of web activity
+- Find saved credentials or form data
+
+## Browser database locations
+
+| Browser | Database | Path |
+|---------|----------|------|
+| Chrome | History | `USERS/<user>/AppData/Local/Google/Chrome/User Data/Default/History` |
+| Edge (Chromium) | History | `USERS/<user>/AppData/Local/Microsoft/Edge/User Data/Default/History` |
+| Firefox | places.sqlite | `USERS/<user>/AppData/Roaming/Mozilla/Firefox/Profiles/*.default*/places.sqlite` |
+| IE | index.dat | `USERS/<user>/AppData/Local/Microsoft/Windows/History/` |
+
+## CRITICAL: copy pattern — NEVER use wildcards in cp paths
+WRONG: cp '/forensics/part006/USERS/*/AppData/.../places.sqlite' /exports/
+RIGHT: DB=$(find '/forensics/part006/USERS' -iname 'places.sqlite' 2>/dev/null | head -1); cp "$DB" /exports/firefox_places.db
+The shell does NOT expand * inside single quotes. ALWAYS use find to get the exact path first.
+
+## CRITICAL: SQL quoting — ALWAYS double quotes around SQL
+WRONG: sqlite3 db 'SELECT ... LIKE '%search%';'   ← % broken by shell glob
+RIGHT: sqlite3 db "SELECT ... LIKE '%search%';"
+
+## Usage examples
+```bash
+# Find which browsers exist on the evidence
+find '/forensics/part006/USERS' -iname 'History' \( -path '*/Chrome/*' -o -path '*/Edge/*' \) 2>/dev/null ; find '/forensics/part006/USERS' -iname 'places.sqlite' 2>/dev/null
+
+# Firefox: copy and query visited URLs (find exact path first, then cp)
+FIREFOX_DB=$(find '/forensics/part006/USERS' -iname 'places.sqlite' 2>/dev/null | head -1); cp "$FIREFOX_DB" /exports/firefox_places.db; sqlite3 /exports/firefox_places.db "SELECT url, title, visit_count, datetime(last_visit_date/1000000,'unixepoch') as last_visit FROM moz_places WHERE visit_count > 0 ORDER BY last_visit_date DESC LIMIT 50;"
+
+# Firefox: downloads (stored in moz_annos in Firefox 26+, no moz_downloads table)
+sqlite3 /exports/firefox_places.db "SELECT p.url, a.content, datetime(a.lastModified/1000000,'unixepoch') as download_time FROM moz_annos a JOIN moz_places p ON a.place_id = p.id WHERE a.anno_attribute_id IN (SELECT id FROM moz_anno_attributes WHERE name LIKE 'downloads/%') ORDER BY a.lastModified DESC LIMIT 30;"
+
+# Firefox: saved credentials — MUST find and copy first; table is moz_logins (NOT logins, NOT users)
+# WARNING: sqlite3 creates an empty file if given a non-existent path — always copy before querying
+SIGNONS=$(find '/forensics/part006/USERS' -iname 'signons.sqlite' 2>/dev/null | head -1); cp "$SIGNONS" /exports/signons.db && sqlite3 /exports/signons.db "SELECT hostname, encryptedUsername, encryptedPassword FROM moz_logins;"
+
+# Firefox: extract search queries from URL history (keyword_search_terms does NOT exist in Firefox — Chrome only)
+sqlite3 /exports/firefox_places.db "SELECT url, title, datetime(last_visit_date/1000000,'unixepoch') as searched_at FROM moz_places WHERE (url LIKE '%google%search%' OR url LIKE '%bing%search%' OR url LIKE '%q=%') AND visit_count > 0 ORDER BY last_visit_date DESC LIMIT 30;"
+
+# Chrome: copy and query visited URLs (find exact path first)
+CHROME_DB=$(find '/forensics/part006/USERS' -path '*/Chrome/User Data/Default/History' 2>/dev/null | head -1); cp "$CHROME_DB" /exports/chrome_history.db; sqlite3 /exports/chrome_history.db "SELECT url, title, visit_count, datetime(last_visit_time/1000000-11644473600,'unixepoch') as last_visit FROM urls ORDER BY last_visit_time DESC LIMIT 50;"
+
+# Chrome: downloads
+sqlite3 /exports/chrome_history.db "SELECT target_path, tab_url, datetime(start_time/1000000-11644473600,'unixepoch') as download_time FROM downloads ORDER BY start_time DESC LIMIT 20;"
+
+# Chrome: search terms
+sqlite3 /exports/chrome_history.db "SELECT kst.term, datetime(u.last_visit_time/1000000-11644473600,'unixepoch') as searched_at FROM keyword_search_terms kst JOIN urls u ON kst.url_id = u.id ORDER BY u.last_visit_time DESC LIMIT 30;"
+```
+
+## Tips
+- ALWAYS copy the database to /exports/ before querying — sqlite3 cannot open read-only files
+- Chrome timestamps are in Windows FILETIME format (microseconds since 1601-01-01); convert with: `datetime(ts/1000000-11644473600,'unixepoch')`
+- Firefox timestamps are in microseconds since Unix epoch: `datetime(ts/1000000,'unixepoch')`
+- If the database is locked, it may be in use — try copying anyway, sqlite3 can often still read it
+- Use `sqlite3 db.sqlite ".tables"` to list all tables in an unknown database

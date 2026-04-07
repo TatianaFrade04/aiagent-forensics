@@ -111,6 +111,13 @@ Tu: Que versão do Windows está instalada?
 - Quando foi usado pela última vez.
 - Quais os programas instalados no sistema operativo.
 Que sistema operativo é este?
+
+browser history
+- Identify websites visited by a suspect
+- Find file downloads and their source URLs
+- Extract search queries entered in search engines
+- Determine timeline of web activity
+- Find saved credentials or form data (X) ### tem que ser trabalhada , key3.db/key4.db e de ferramentas específicas como o firefox_decrypt.
 ```
 
 ### Comandos especiais
