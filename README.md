@@ -107,17 +107,24 @@ Tu: Que chaves de registo estão configuradas para auto-arranque?
 Tu: Mostra os ficheiros modificados entre 25 e 27 de maio de 2015
 Tu: Que versão do Windows está instalada?
 
-- Quando foi instalado o sistema operativo.
-- Quando foi usado pela última vez.
-- Quais os programas instalados no sistema operativo.
-Que sistema operativo é este?
+Tu: Quando foi instalado o sistema operativo.
+Tu: Quando foi usado pela última vez.
+Tu: Quais os programas instalados no sistema operativo.
+Tu: Que sistema operativo é este?
 
 browser history
-- Identify websites visited by a suspect
-- Find file downloads and their source URLs
-- Extract search queries entered in search engines
-- Determine timeline of web activity
-- Find saved credentials or form data (X) ### tem que ser trabalhada , key3.db/key4.db e de ferramentas específicas como o firefox_decrypt.
+Tu: Identify websites visited by a suspect
+Tu: Find file downloads and their source URLs
+Tu: Extract search queries entered in search engines
+Tu: Determine timeline of web activity
+Tu: Find saved credentials or form data (X) ### tem que ser trabalhada , key3.db/key4.db e de ferramentas específicas como o firefox_decrypt.
+
+Jump Lists
+Tu: Identify recently accessed documents, images, and files
+Tu: Find evidence that specific files were opened by a user
+Tu: Determine which applications were used most frequently
+Tu: Recover file paths even if the files were later deleted
+Tu: Build a timeline of user activity
 ```
 
 ### Comandos especiais

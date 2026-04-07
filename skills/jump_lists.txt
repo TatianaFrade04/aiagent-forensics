@@ -1,0 +1,107 @@
+SKILL: jump_lists
+DESCRIPTION: Analyse Windows Jump Lists to find recently and frequently accessed files and applications. Jump lists are stored in AppData\Roaming\Microsoft\Windows\Recent\ as binary files (.automaticDestinations-ms and .customDestinations-ms). Use strings to extract file paths from them.
+KEYWORDS: jump list, jumplist, jump lists, recent, recente, mru, most recently used, lnk, shortcut, atalho, automatic destinations, automaticDestinations, custom destinations, customDestinations, ficheiros recentes, recent files, frequent, frequente, taskbar, barra de tarefas, ficheiros acedidos, accessed files, recently accessed, recentemente acedido, recent documents, documentos recentes, timeline, linha do tempo, activity timeline, atividade, user activity, atividade utilizador, applications used, aplicacoes usadas, most used apps, most frequent, mais frequente, frequencia, frequency, programa usado, que aplicacoes, which applications, what files opened, que ficheiros abertos
+---
+
+## MANDATORY QUERY → COMMAND MAPPING
+When the user asks one of these questions, use EXACTLY the command shown:
+
+| Question type | Correct command |
+|---|---|
+| "which files were opened / recently accessed?" | Pattern B: `find ... while read f; do strings "$f" \| grep -iE 'docx\|pdf\|...'; done` |
+| "find evidence files were opened by user X" | Pattern B on ALL jump lists — the jump list content IS the evidence |
+| "which applications were used most frequently?" | `find ... \| sed 's\|.*/AutomaticDestinations/\|\|' \| sort \| uniq -c \| sort -rn` — AppID = filename |
+| "build a timeline / when was activity?" | `find ... -printf '%TY-%Tm-%Td %TH:%TM  %p\n' \| sort -r` OR `while read f; do stat -c '%y %n' "$f"; done \| sort -r` |
+| "recover deleted file paths?" | Pattern B with `grep ':'` to find Windows drive-letter paths |
+
+⚠️ "WHICH APPLICATIONS" means the AppID hash filenames — NOT file extensions, NOT grep patterns inside files.
+AppIDs are the filenames: `1b4dd67f29cb1962.automaticDestinations-ms` → `1b4dd67f29cb1962` is the AppID.
+NEVER extract AppIDs by grepping file content or using `cut` on filenames found inside the binary data.
+The correct command is: `find ... | sed 's|.*/AutomaticDestinations/||' | sort | uniq -c | sort -rn | head -20`
+
+⚠️ "FIND EVIDENCE FILES WERE OPENED" means: list file paths stored inside jump list binary data.
+NEVER use `find -iname '*username*'` — that searches for files named after the user, not files the user opened.
+NEVER use `grep -l` on user directories. The evidence is inside the .automaticDestinations-ms binary files.
+The correct command is Pattern B: `find ... | while read f; do strings "$f" | grep -iE 'docx|pdf|...'; done`
+
+## What are Jump Lists?
+Jump Lists store recently and frequently accessed files per application. They are created automatically by Windows when files are opened. Location: `AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations\` and `CustomDestinations\`. Each file is named with an AppID hash (e.g., `1b4dd67f29cb1962.automaticDestinations-ms`).
+
+## Forensic use cases
+- Identify recently accessed documents, images, and files
+- Find evidence that specific files were opened by a user
+- Determine which applications were used most frequently
+- Recover file paths even if the files were later deleted
+- Build a timeline of user activity
+
+## CRITICAL: two command patterns — use these EXACTLY
+
+### Pattern A — single file (find path → variable → strings):
+```bash
+JL=$(find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | head -1); strings "$JL" | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip' | sort -u | head -40
+```
+NEVER use `{}` as a placeholder for the path — that is a find -exec pattern that does NOT work here.
+ALWAYS assign the find result to a variable first, then pass "$VARIABLE" to strings.
+
+### Pattern B — all files (while loop, no xargs):
+```bash
+find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | while read f; do strings "$f" | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip'; done | sort -u | head -100
+```
+
+## CRITICAL: timestamps — two correct methods, two wrong methods
+
+WRONG (stat does NOT understand %TY, %Tm, %TH, %TM — those are find-printf directives):
+  `while read f; do stat --format='%TY-%Tm-%Td %TH:%TM  %p\n' "$f"; done`  → outputs `0Y-0m-0d 0H:0M ?`
+
+WRONG (find -printf needs a start path BEFORE -printf, not after):
+  `while read f; do find -printf '...' "$f"; done`  → error: "paths must precede expression"
+
+RIGHT method 1 — ONE find command with -printf (no while loop):
+```bash
+find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f -printf '%TY-%Tm-%Td %TH:%TM  %p\n' 2>/dev/null | sort -r | head -30
+```
+
+RIGHT method 2 — stat with -c flag (lowercase format specifiers, NOT --format with %TY):
+```bash
+find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | while read f; do stat -c '%y %n' "$f"; done | sort -r | head -30
+```
+
+## Usage examples
+```bash
+# Build a timeline: list all jump list files sorted by modification time — USE find -printf, NOT stat
+find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f -printf '%TY-%Tm-%Td %TH:%TM  %p\n' 2>/dev/null | sort -r | head -30
+
+# Find all automatic jump list files for all users
+find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null
+
+# Extract file paths from ONE jump list (Pattern A: variable, then strings)
+JL=$(find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | head -1); strings "$JL" | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip' | sort -u | head -40
+
+# Most frequently used applications: the AppID IS the filename — NEVER grep inside files for AppID
+# Full path structure: <user>/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/<APPID>.automaticDestinations-ms
+# ALWAYS use find -path to discover the correct path — NEVER construct it manually
+find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | sed 's|.*/AutomaticDestinations/||' | sort | uniq -c | sort -rn | head -20
+
+# Find ALL files opened by a specific user (all their jump lists)
+find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | while read f; do strings "$f" | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip'; done | sort -u | head -100
+
+# Recover deleted file paths: use strings + grep ':' (colon = drive letter like C:\ or D:\)
+# Jump lists store paths even after the original file was deleted
+find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | while read f; do strings "$f" | grep ':' | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip'; done | sort -u | head -100
+
+# Save all extracted paths to exports (use ls -lh to confirm, NOT echo "..." — double quotes break JSON)
+find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | while read f; do strings "$f" | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip'; done | sort -u > /exports/jump_list_paths.txt; ls -lh /exports/jump_list_paths.txt
+
+# Also check CustomDestinations
+find '/forensics/part006/USERS' -path '*/CustomDestinations/*.customDestinations-ms' -type f 2>/dev/null | while read f; do strings "$f" | grep ':' | head -10; done
+```
+
+## Tips
+- Jump list files are binary (LNK/OLE format) — `strings` extracts readable paths but not structured metadata
+- The AppID in the filename maps to a specific application (e.g., `1b4dd67f29cb1962` = Windows Explorer)
+- File modification timestamp of the `.automaticDestinations-ms` file = last time any file was accessed via that application — use `find -printf` to get it, NOT `stat`
+- Even if the original file was deleted, its path may still appear in jump lists
+- `Recent\` also contains individual `.lnk` shortcut files — use `strings` on those too
+- NEVER use xargs with sh -c and single-quoted patterns — use `while read f; do ...; done` instead
+- Use `grep ':'` to detect Windows drive-letter paths (e.g., `C:\Users\...`) — no backslash escaping needed
+- Pattern A (single file) may return no output if that file doesn't contain the searched extension — fall back to Pattern B (all files loop) which covers all jump lists
