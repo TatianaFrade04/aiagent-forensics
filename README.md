@@ -106,6 +106,11 @@ Tu: Mostra os metadados EXIF de uma fotografia
 Tu: Que chaves de registo estão configuradas para auto-arranque?
 Tu: Mostra os ficheiros modificados entre 25 e 27 de maio de 2015
 Tu: Que versão do Windows está instalada?
+
+- Quando foi instalado o sistema operativo.
+- Quando foi usado pela última vez.
+- Quais os programas instalados no sistema operativo.
+Que sistema operativo é este?
 ```
 
 ### Comandos especiais

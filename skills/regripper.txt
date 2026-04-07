@@ -1,7 +1,24 @@
 SKILL: regripper
-DESCRIPTION: Parse Windows Registry hives with plugins. The apt package installs the binary as 'regripper' (NOT rip.pl). Usage: regripper -r '/path/to/hive' -a (all plugins) or regripper -r '/path/to/hive' -p pluginname. Useful plugins: run, userassist, recentdocs, usbstor, samparse. Hive paths are case-sensitive on Linux — ALWAYS discover them first with find -iname before running regripper.
-KEYWORDS: regripper, rip.pl, registry, registo, hive, SAM, SYSTEM, SOFTWARE, NTUSER, NTUSER.DAT, UsrClass, usrclass.dat, windows registry, user activity, atividade utilizador, USB, devices, dispositivos, installed programs, programas instalados, network, rede, autorun, startup, arranque, MRU, recent files, ficheiros recentes, shellbags, userassist, user accounts, contas utilizador, last login, ultimo login, plugin
+DESCRIPTION: Extract forensic artefacts from a Windows system — user accounts, OS version and install date, installed programs, last system use, USB devices, startup programs, recently opened files, program execution history. Uses regripper plugins on Windows Registry hives (SAM, SYSTEM, SOFTWARE, NTUSER.DAT). The binary is 'regripper' (NOT rip.pl). ALWAYS discover hive paths first with find -iname.
+KEYWORDS: regripper, rip.pl, registry, registo, hive, SAM, SYSTEM, SOFTWARE, NTUSER, NTUSER.DAT, UsrClass, usrclass.dat, windows registry, user activity, atividade utilizador, USB, devices, dispositivos, installed programs, programas instalados, software instalado, network, rede, autorun, startup, arranque, MRU, recent files, ficheiros recentes, shellbags, userassist, user accounts, contas utilizador, last login, ultimo login, plugin, utilizadores, users, contas, accounts, sistema operativo, operating system, versao do windows, windows version, os version, instalado, instalacao, installation date, data instalacao, ultima vez, last used, quando instalado, computador, computer name, nome do computador, que sistema, que windows, versao sistema, when installed, quem usou, who used, programas, programs, software, shutdown, desligado, desligar, ultimo uso, ultima utilizacao, last shutdown, last use, quando foi usado, when was used, utilizado, foi utilizado
 ---
+
+## MANDATORY QUERY → COMMAND MAPPING
+When the user asks one of these questions, use EXACTLY the command shown — no variations.
+
+| User question (any language)                          | Command to use                                      |
+|-------------------------------------------------------|-----------------------------------------------------|
+| "when was the OS last used / shutdown / turned off?"  | regripper -r $SYSTEM_HIVE -p shutdown               |
+| "when was the OS installed?"                          | reglookup on SOFTWARE + grep InstallDate (see below)|
+| "what OS / Windows version is this?"                  | reglookup on SOFTWARE + grep ProductName            |
+| "what programs are installed?"                        | reglookup on SOFTWARE /CurrentVersion/Uninstall     |
+| "what users exist?"                                   | find '/forensics/part006/USERS' -mindepth 1 -maxdepth 1 -type d |
+| "USB devices connected?"                              | regripper -r $SYSTEM_HIVE -p usbstor                |
+
+⚠️ "LAST USED" MEANS SHUTDOWN — NOT SESSION DATA:
+The forensic evidence for "when was the system last used" is the last shutdown timestamp in the SYSTEM hive.
+DO NOT use PendingFileRenameOperations, LastLogonTimestamp, or any SOFTWARE hive key for this.
+The correct command is: regripper -r $SYSTEM_HIVE -p shutdown
 
 ## What is RegRipper?
 RegRipper is a Perl-based tool that extracts and parses specific forensic artifacts from Windows Registry hive files. It uses plugins to target specific registry keys, making it far more efficient than manual registry browsing.
@@ -26,6 +43,7 @@ RegRipper is a Perl-based tool that extracts and parses specific forensic artifa
 | ControlSet001/Enum/USBSTOR (USB devices)     | SYSTEM      | usbstor              |
 | ControlSet001/Control/ComputerName           | SYSTEM      | compname             |
 | ControlSet001/Services                       | SYSTEM      | services             |
+| Last shutdown time                           | SYSTEM      | shutdown             |
 | SAM/Domains/Account/Users (accounts)         | SAM         | samparse             |
 | Software/.../CurrentVersion/Run (per-user)   | NTUSER.DAT  | run                  |
 | Software/.../Explorer/RecentDocs             | NTUSER.DAT  | recentdocs           |
@@ -37,16 +55,15 @@ ALWAYS query both hives when asked about Run/startup keys.
 ## Registry hive locations on Windows NTFS
 NOTE: Windows directory names are case-sensitive when mounted on Linux (ntfs-3g). The real path may be `Windows/System32` or `WINDOWS/system32` etc. ALWAYS use find -iname to discover the exact path before running regripper.
 
-```bash
-SYSTEM_HIVE=$(find /forensics/part006 -iname 'SYSTEM' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1)
-regripper -r "$SYSTEM_HIVE" -p usbstor
-```
+Hive discovery commands (use find -iname to handle case-sensitive Linux paths):
+- SAM:        find /forensics/part006 -iname 'SAM' -not -path '*/Users/*' 2>/dev/null | head -1
+- SYSTEM:     find /forensics/part006 -iname 'SYSTEM' -not -path '*/Users/*' -not -path '*/RegBack/*' 2>/dev/null | head -1
+- SOFTWARE:   find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/RegBack/*' 2>/dev/null | head -1
+- NTUSER.DAT: find /forensics/part006 -iname 'NTUSER.DAT' 2>/dev/null
 
-Hive discovery commands:
-- `find /forensics/part006 -iname 'SAM'     -not -path '*/Users/*' 2>/dev/null | head -1`
-- `find /forensics/part006 -iname 'SYSTEM'  -not -path '*/Users/*' 2>/dev/null | head -1`
-- `find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' 2>/dev/null | head -1`
-- `find /forensics/part006 -iname 'NTUSER.DAT' 2>/dev/null`
+⚠️ CRITICAL HIVE CONFUSION WARNING:
+/Microsoft/Windows NT/CurrentVersion (OS version, InstallDate) → SOFTWARE hive, NOT SYSTEM.
+The `osversion` plugin also runs on SOFTWARE hive. NEVER use SYSTEM hive for OS version queries.
 
 ## Key flags
 - `-r <hive>`     — Path to the registry hive file
@@ -56,34 +73,37 @@ Hive discovery commands:
 
 ## Usage examples
 ```bash
-# Step 1: discover hive paths (case-sensitive; exclude non-hive dirs like diagnostics)
-SYSTEM_HIVE=$(find /forensics/part006 -iname 'SYSTEM' -not -path '*/Users/*' -not -path '*/diagnostics/*' 2>/dev/null | head -1)
-regripper -r "$SYSTEM_HIVE" -p usbstor
+# OS version, install date, product name — SOFTWARE hive, reglookup (always works)
+# NOTE: InstallDate is returned as a DWORD hex value (Unix timestamp). Convert with:
+#   python3 -c "import datetime; print(datetime.datetime.utcfromtimestamp(0x<VALUE>))"
+SOFTWARE_HIVE=$(find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); reglookup -p '/Microsoft/Windows NT/CurrentVersion' "$SOFTWARE_HIVE" | grep -E 'ProductName|InstallDate|RegisteredOwner' | python3 -c "import sys,datetime; [print(l.strip().split('/')[-1].split(',')[0] + ': ' + (datetime.datetime.utcfromtimestamp(int(l.strip().split(',')[2],16)).strftime('%Y-%m-%d %H:%M:%S UTC') if 'InstallDate' in l else l.strip().split(',')[2])) for l in sys.stdin if l.strip()]"
 
-SAM_HIVE=$(find /forensics/part006 -iname 'SAM' -not -path '*/Users/*' 2>/dev/null | head -1)
-SOFTWARE_HIVE=$(find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' 2>/dev/null | head -1)
-NTUSER=$(find /forensics/part006 -iname 'NTUSER.DAT' 2>/dev/null | grep -i 'Jimmy' | head -1)
+# Installed programs — SOFTWARE hive, correct path /Microsoft/Windows/CurrentVersion/Uninstall
+SOFTWARE_HIVE=$(find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); reglookup -p '/Microsoft/Windows/CurrentVersion/Uninstall' "$SOFTWARE_HIVE" | grep -i DisplayName
 
-# Run all plugins on the SYSTEM hive
-regripper -r "$SYSTEM_HIVE" -a
+# Last system shutdown time — SYSTEM hive with shutdown plugin
+# ⚠️ CRITICAL: ALWAYS assign to variable and quote it. NEVER use inline $(...) in -r argument.
+# ⚠️ CRITICAL: The -not -path '*/diagnostics/*' filter is MANDATORY — without it, find may
+#    return a diagnostics file that is NOT a valid hive, causing 'undefined value' errors.
+SYSTEM_HIVE=$(find /forensics/part006 -iname 'SYSTEM' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); regripper -r "$SYSTEM_HIVE" -p shutdown
 
-# Run all plugins on the SAM hive (user accounts)
-regripper -r "$SAM_HIVE" -a
+# User accounts and last login — SAM hive with samparse plugin (confirmed installed)
+SAM_HIVE=$(find /forensics/part006 -iname 'SAM' -not -path '*/Users/*' 2>/dev/null | head -1); regripper -r "$SAM_HIVE" -p samparse
 
-# Run all plugins on the SOFTWARE hive (installed programs)
-regripper -r "$SOFTWARE_HIVE" -a
+# USB devices connected — SYSTEM hive with usbstor plugin (confirmed installed)
+SYSTEM_HIVE=$(find /forensics/part006 -iname 'SYSTEM' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); regripper -r "$SYSTEM_HIVE" -p usbstor
 
-# Run all plugins on NTUSER.DAT (user activity)
-regripper -r "$NTUSER" -a
+# Startup/autorun programs — SOFTWARE hive
+SOFTWARE_HIVE=$(find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); reglookup -p '/Microsoft/Windows/CurrentVersion/Run' "$SOFTWARE_HIVE"
 
-# Run a specific plugin (e.g., userassist for program execution)
-regripper -r "$NTUSER" -p userassist
+# Run all plugins on the SAM hive
+SAM_HIVE=$(find /forensics/part006 -iname 'SAM' -not -path '*/Users/*' 2>/dev/null | head -1); regripper -r "$SAM_HIVE" -a
 
-# List all available plugins
+# Run all plugins on the SOFTWARE hive
+SOFTWARE_HIVE=$(find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); regripper -r "$SOFTWARE_HIVE" -a
+
+# List all available plugins (to check what is installed)
 regripper -l
-
-# Save output to exports
-regripper -r "$SAM_HIVE" -a > /exports/sam_report.txt
 ```
 
 ## Tips

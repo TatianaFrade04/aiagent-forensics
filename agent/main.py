@@ -82,23 +82,28 @@ SYSTEM_PROMPT = (
     "  Main hives location: /forensics/part006/Windows/System32/config/\n"
     "  Per-user hive:        /forensics/part006/USERS/<username>/NTUSER.DAT\n"
     "  NEVER search for *.reg or *.hive — those are not hive files.\n"
-    "  ALWAYS resolve hive paths with find in the SAME command string:\n"
+    "  ALWAYS resolve hive paths with find in the SAME command string, using this pattern:\n"
     "    HIVE=$(find '/forensics/part006' -iname 'SOFTWARE' -not -path '*/Users/*'\n"
-    "      -not -path '*/RegBack/*' 2>/dev/null | head -1); reglookup -p '/...' \"$HIVE\"\n"
-    "  NEVER use bare shell variables like $SOFTWARE_HIVE or $SYSTEM_HIVE — they are\n"
-    "  not defined and will always cause 'No such file or directory' errors.\n"
+    "      -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1)\n"
+    "    ; reglookup -p '/...' \"$HIVE\"\n"
+    "  The variable HIVE is defined and used in the SAME command — this is correct.\n"
+    "  NEVER use $HIVE or $SOFTWARE_HIVE or $SYSTEM_HIVE across separate commands —\n"
+    "  variables do NOT persist between tool calls.\n"
+    "  NEVER use inline $(find ...) without assigning to a quoted variable first.\n"
+    "  The -not -path '*/diagnostics/*' filter is CRITICAL — omitting it may return\n"
+    "  a diagnostics file instead of the real hive, causing 'undefined value' errors.\n"
     "  To find the Windows version: reglookup -p '/Microsoft/Windows NT/CurrentVersion'\n"
     "  on the SOFTWARE hive.\n"
     "\n"
     "TOOL: run_forensics_command(command) — run any bash command inside the forensic container\n"
     "\n"
     "RULES:\n"
-    "1. ALWAYS call run_forensics_command immediately — never write commands as text.\n"
-    "   WRONG: writing ```bash command``` in your reply without a tool call.\n"
+    "1. ALWAYS call run_forensics_command immediately — never describe commands as text.\n"
+    "   WRONG: writing ```bash command``` or code blocks in your reply.\n"
     "   WRONG: saying 'I will run ...' or 'Let me execute ...' without calling the tool.\n"
-    "   WRONG: emitting JSON like {\"name\": \"run_forensics_command\", ...} in text.\n"
-    "   RIGHT: call run_forensics_command(command) as your very first action, with no preamble.\n"
-    "   Your response must contain ONLY a tool call — zero words of introduction or explanation.\n"
+    "   WRONG: outputting run_forensics_command(...) as Python syntax.\n"
+    "   RIGHT: emit a JSON tool call exactly like this, with no other text:\n"
+    "     {\"name\": \"run_forensics_command\", \"arguments\": {\"command\": \"<bash command here>\"}}\n"
     "   Do NOT announce what you are about to do. Do NOT ask for clarification. Just call the tool.\n"
     "2. NEVER invent or hallucinate results — only report what the tool returns.\n"
     "3. CRITICAL — EVERY path under /forensics/ MUST be wrapped in single quotes. No exceptions.\n"
@@ -147,6 +152,29 @@ def _render_message_text(message: Any) -> str:
     return str(content)
 
 
+_VALID_JSON_ESCAPES = set('"\\\/bfnrtu')
+
+
+def _sanitize_json_escapes(s: str) -> str:
+    """Fix invalid JSON escape sequences produced by the model (e.g. \\; \\')."""
+    result = []
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == '\\' and i + 1 < len(s):
+            next_ch = s[i + 1]
+            if next_ch in _VALID_JSON_ESCAPES:
+                result.append('\\')  # valid escape — keep backslash
+            elif next_ch == "'":
+                pass  # strip backslash before single quote (model artifact)
+            else:
+                result.append('\\\\')  # invalid escape — escape the backslash
+        else:
+            result.append(ch)
+        i += 1
+    return ''.join(result)
+
+
 def _extract_json_object(text: str) -> dict | None:
     """Tenta extrair um objecto JSON do texto (fallback para modelos sem tool calling nativo)."""
     candidates = []
@@ -163,7 +191,7 @@ def _extract_json_object(text: str) -> dict | None:
                         break
     for m in sorted(candidates, key=len, reverse=True):
         try:
-            obj = json.loads(m.replace("\\'", "'"))
+            obj = json.loads(_sanitize_json_escapes(m))
             if isinstance(obj, dict):
                 return obj
         except json.JSONDecodeError:

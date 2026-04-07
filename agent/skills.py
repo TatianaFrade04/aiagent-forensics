@@ -5,6 +5,7 @@ Carrega, seleciona e injeta skills relevantes no contexto do agente.
 
 import os
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
 
@@ -108,9 +109,15 @@ _STOP_WORDS = frozenset({
     "e", "ou", "mas", "nao", "sim", "mais", "muito",
 })
 
+def _normalize(text: str) -> str:
+    """Remove acentos para comparação independente de diacríticos."""
+    return unicodedata.normalize("NFD", text).encode("ascii", "ignore").decode("ascii")
+
+
 def _tokenize(text: str) -> set[str]:
-    """Tokeniza texto em palavras normalizadas, removendo stop words."""
-    words = re.findall(r"[a-zA-Z0-9_./\-]+", text.lower())
+    """Tokeniza texto em palavras normalizadas, removendo stop words e acentos."""
+    normalized = _normalize(text.lower())
+    words = re.findall(r"[a-zA-Z0-9_./\-]+", normalized)
     return {w for w in words if w not in _STOP_WORDS and len(w) > 1}
 
 
@@ -201,18 +208,14 @@ def _extract_examples(content: str, max_commands: int = 2) -> str:
 
 
 def format_skills_context(skills: list[Skill]) -> str:
-    """Formata as skills como lista compacta para o system prompt.
+    """Formata as skills para o system prompt.
 
-    Inclui nome, descrição e até 2 exemplos de comandos reais.
+    Injeta o conteúdo completo de cada skill selecionada (tabelas, avisos, exemplos).
     """
     if not skills:
         return ""
 
-    lines = []
+    parts = []
     for skill in skills:
-        examples = _extract_examples(skill.content, max_commands=2)
-        entry = f"- {skill.name}: {skill.description}"
-        if examples:
-            entry += f"\n  EXAMPLES: {examples}"
-        lines.append(entry)
-    return "\n".join(lines)
+        parts.append(f"### SKILL: {skill.name}\n{skill.content}")
+    return "\n\n".join(parts)
