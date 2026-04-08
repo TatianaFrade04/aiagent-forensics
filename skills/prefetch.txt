@@ -1,0 +1,32 @@
+SKILL: prefetch
+DESCRIPTION: Analyse Windows Prefetch files to determine which programs were executed, how many times, and when they last ran. Prefetch files (.pf) are in Windows\Prefetch\ and are named PROGRAM.EXE-XXXXXXXX.pf.
+KEYWORDS: prefetch, execucao, execution, executado, executed, ran, program, programa, quando executou, when executed, when ran, prefetch file, .pf, windows prefetch, application execution, execucao de programas, program execution, executavel, executable, historico de execucao, execution history, foi executado, foi corrido, correu, ran program, last run, ultima execucao, ultima vez executado, suspicious tools, ferramentas suspeitas, malware, malicious, ferramenta maliciosa, suspeito, suspeita, que programas suspeitos, tools that were run, ran malware, executou malware, foi executado malware, prove executed, prove that ran, cmd.exe was executed, prove cmd, was ever executed, ever run, alguma vez executado, alguma vez correu, foi alguma vez
+---
+
+## What are Prefetch files?
+Windows creates a `.pf` file in `Windows\Prefetch\` the first time an executable runs. The file's modification timestamp = last execution time.
+
+## Key concept
+Prefetch files are named after the **executable** (e.g., `CMD.EXE-089F261A.pf`). To find suspicious tools or malware, you must **list all .pf files** and review the names — you cannot search by threat name.
+
+## Usage examples
+
+**List all programs executed / find suspicious tools / find malware evidence:**
+```bash
+find '/forensics/part006' -ipath '*/Prefetch/*.pf' -printf '%TY-%Tm-%Td %TH:%TM  %f\n' 2>/dev/null | sort -r | head -50
+```
+
+**Check if a specific program was executed (e.g., BCTextEncoder):**
+```bash
+find '/forensics/part006' -ipath '*/Prefetch/*.pf' -iname '*BCTEXT*' 2>/dev/null
+```
+
+**Save prefetch timeline to exports:**
+```bash
+find '/forensics/part006' -ipath '*/Prefetch/*.pf' -printf '%TY-%Tm-%Td %TH:%TM  %f\n' 2>/dev/null | sort -r > /exports/prefetch_timeline.txt; ls -lh /exports/prefetch_timeline.txt
+```
+
+## Tips
+- For "find suspicious tools" or "find malware": use the listing command above — never search by `-iname '*suspicious*'`
+- If a specific program search returns no output: it was never executed (or prefetch was disabled)
+- Do NOT use wevtutil or any Windows tools — this is a Linux workstation analysing a Windows image

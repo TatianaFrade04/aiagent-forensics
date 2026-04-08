@@ -99,9 +99,9 @@ Tu: Quais são os utilizadores existentes?
 Tu: Quantos utilizadores existem?
 Tu: Lista os ficheiros do desktop de Jimmy Wilson
 Tu: Encontra todos os ficheiros PDF
-Tu: Qual é o MD5 do ficheiro report.pdf?
+Tu: Qual é o MD5 do ficheiro R40599.pdf?
 Tu: Qual é o esquema de partições do disco?
-Tu: Mostra os event logs do sistema
+***Tu: Mostra os event logs do sistema***
 Tu: Mostra os metadados EXIF de uma fotografia
 Tu: Que chaves de registo estão configuradas para auto-arranque?
 Tu: Mostra os ficheiros modificados entre 25 e 27 de maio de 2015
@@ -132,6 +132,13 @@ Tu: search for the word "password" in all documents
 Tu: find all URLs in jimmy wilsons documents
 Tu: search for ip address across all user files
 Tu: extract all strings from a suspicious executable on the desktop
+
+Prefecth
+Tu: Prove that CMD.exe was executed on the system
+Tu: When was the last time a program ran?
+Tu: Find evidence of suspicious tools or malware that were run
+Tu: What programs were executed most recently
+Tu: Was BCTextEncoder.exe ever executed
 ```
 
 ### Comandos especiais
