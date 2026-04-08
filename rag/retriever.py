@@ -1,5 +1,7 @@
 """
 rag/retriever.py — Recuperação de chunks relevantes do ChromaDB.
+
+Busca semantica
 """
 
 import logging

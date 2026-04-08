@@ -1,11 +1,6 @@
-# requirements_rag.txt — Dependências adicionais para o pipeline RAG
+# requirements_rag.txt — Dependências para o pipeline RAG integrado no agent
 # Instalar com: pip install -r requirements_rag.txt
 # Ou com uv:    uv pip install -r requirements_rag.txt
-
-# ── API Web ────────────────────────────────────────────────────────────────────
-fastapi>=0.110.0
-uvicorn[standard]>=0.27.0
-python-multipart>=0.0.9          # necessário para File/Form uploads no FastAPI
 
 # ── LangChain ─────────────────────────────────────────────────────────────────
 langchain-core>=0.3.0            # LCEL primitives (RunnablePassthrough, etc.)
