@@ -1,0 +1,38 @@
+SKILL: file_search
+DESCRIPTION: Search for files by name, extension, type, or size across the evidence image using find, file, and ls. Use this for generic file discovery — finding all PDFs, executables, images, specific filenames, or large files.
+KEYWORDS: encontrar ficheiro, procurar ficheiro, search file, find file, localizar, locate, listar ficheiros, list files, extensao, extension, tipo de ficheiro, file type, tamanho, size, nome, name, pdf, docx, xlsx, doc, xls, jpg, jpeg, png, mp3, mp4, zip, rar, exe, dll, bat, ps1, csv, txt, todos os ficheiros, all files, ficheiros de, files with, que ficheiros, what files, mostrar ficheiros, show files
+---
+
+## What is generic file search?
+`find` locates files by name, extension, path pattern, size, or type anywhere in the evidence image. `file` identifies the true file type from magic bytes (ignores the extension). Use these when you need to discover what files exist before doing deeper analysis.
+
+## Usage examples
+```bash
+# Find all PDF files (case-insensitive)
+find '/forensics/part006' -iname '*.pdf' -type f 2>/dev/null
+
+# Find files by name pattern
+find '/forensics/part006' -iname '*password*' -type f 2>/dev/null
+
+# Find all executable files
+find '/forensics/part006/USERS' -iname '*.exe' -o -iname '*.bat' -o -iname '*.ps1' 2>/dev/null | head -50
+
+# Find large files (over 50MB) — useful for hidden media
+find '/forensics/part006/USERS' -type f -size +50M 2>/dev/null
+
+# Identify true file type of a suspicious file (ignores extension)
+file '/forensics/part006/USERS/Jimmy Wilson/Desktop/document.pdf'
+
+# Find all Office documents
+find '/forensics/part006/USERS' \( -iname '*.doc' -o -iname '*.docx' -o -iname '*.xls' -o -iname '*.xlsx' \) -type f 2>/dev/null
+
+# Find recently created files in user folders
+find '/forensics/part006/USERS' -type f -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort -r | head -30
+```
+
+## Tips
+- Always use `-iname` (case-insensitive) since Windows filenames may have mixed case on a Linux mount
+- Add `2>/dev/null` to suppress permission errors on system directories
+- `file` is useful for detecting files with wrong or missing extensions (e.g., a `.jpg` that is actually a ZIP)
+- For very large results, pipe to `head -50` or save to `/exports/` with `>`
+- Combine `find` with `-printf '%TY-%Tm-%Td %TH:%TM %p\n'` to include modification dates in the output
