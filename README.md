@@ -125,6 +125,13 @@ Tu: Find evidence that specific files were opened by a user
 Tu: Determine which applications were used most frequently
 Tu: Recover file paths even if the files were later deleted
 Tu: Build a timeline of user activity
+
+string_search
+Tu: Find all email addres in jimmy wilsons files
+Tu: search for the word "password" in all documents
+Tu: find all URLs in jimmy wilsons documents
+Tu: search for ip address across all user files
+Tu: extract all strings from a suspicious executable on the desktop
 ```
 
 ### Comandos especiais

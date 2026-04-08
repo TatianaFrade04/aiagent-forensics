@@ -1,0 +1,36 @@
+SKILL: string_search
+DESCRIPTION: Search for text patterns, keywords, email addresses, URLs, or strings inside files using grep and strings. Use grep for text/document files and strings for binary files. Essential for finding hidden data, passwords, or specific content across the evidence.
+KEYWORDS: grep, strings, procurar texto, search text, encontrar texto, find text, conteudo, content, pesquisar, search, keyword, palavra chave, palavra, word, texto, text, email, url, padrao, pattern, binario, binary, rg, ripgrep, busca, procurar string, find string, search string, contém, contains, dentro do ficheiro, inside file, pesquisa de conteudo, content search, grep recursivo
+---
+
+## What is string/content search?
+`grep` searches text content of files for patterns. `strings` extracts all printable ASCII/Unicode sequences from any file (including binaries, executables, memory dumps). These are essential for finding evidence hidden inside files.
+
+## Usage examples
+```bash
+# Search all user documents for a keyword (case-insensitive, recursive)
+grep -ri 'password' '/forensics/part006/USERS/Jimmy Wilson/Documents/' 2>/dev/null | head -50
+
+# Search for email addresses across all user files
+grep -rEi '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' '/forensics/part006/USERS/Jimmy Wilson/' 2>/dev/null | head -30
+
+# Extract all printable strings from a suspicious binary
+strings '/forensics/part006/USERS/Jimmy Wilson/AppData/Local/Temp/suspicious.exe' | head -100
+
+# Search for URLs in browser cache or documents
+grep -rEoi 'https?://[^ "]+' '/forensics/part006/USERS/Jimmy Wilson/Documents/' 2>/dev/null | head -30
+
+# Search specific file types for a keyword
+find '/forensics/part006/USERS' -iname '*.txt' -exec grep -li 'confidential' {} \; 2>/dev/null
+
+# Search for IP addresses in files
+grep -rEo '([0-9]{1,3}\.){3}[0-9]{1,3}' '/forensics/part006/USERS/Jimmy Wilson/' 2>/dev/null | head -20
+```
+
+## Tips
+- `grep -r` is recursive (searches all files in a directory); `-i` is case-insensitive; `-l` shows only filenames
+- For binary files (exe, dll, dat) use `strings` instead of `grep` — grep may choke on binary data
+- Large recursive greps over system directories can be very slow — limit to user directories (`/USERS/`) when possible
+- `grep -E` uses extended regex (useful for email, URL, IP patterns)
+- Save results to exports: `grep -ri 'keyword' '/forensics/part006/USERS/' 2>/dev/null > /exports/grep_results.txt`
+- If a file has unusual encoding (UTF-16), add `strings -e l` for little-endian Unicode
