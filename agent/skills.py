@@ -208,7 +208,7 @@ def _extract_examples(content: str, max_commands: int = 2) -> str:
 
 
 def format_skills_context(skills: list[Skill]) -> str:
-    """Formata as skills para o system prompt.
+    """Formata as skills para serem injetadas no system prompt.
 
     Injeta o conteúdo completo de cada skill selecionada (tabelas, avisos, exemplos).
     """
