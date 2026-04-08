@@ -30,6 +30,7 @@ ExifTool is a powerful command-line utility for reading, writing, and editing me
 # Show all metadata of a file
 exiftool '/forensics/part006/USERS/Jimmy Wilson/Pictures/photo.jpg'
 
+
 # Extract only GPS coordinates
 exiftool -gps:all '/forensics/part006/USERS/Jimmy Wilson/Pictures/photo.jpg'
 

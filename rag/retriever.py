@@ -96,3 +96,30 @@ def get_retriever(top_k: int = 5, filename: str | None = None) -> VectorStoreRet
         search_kwargs["filter"] = {"filename": {"$eq": filename}}
     
     return _vectorstore().as_retriever(search_kwargs=search_kwargs)
+
+
+def list_indexed_documents() -> list[str]:
+    """
+    List all unique document filenames that have been indexed.
+    
+    Returns:
+        List of unique document filenames in the vector store.
+    """
+    logger.info("Retrieving list of indexed documents")
+    
+    vs = _vectorstore()
+    
+    # Get all documents from the collection
+    collection = vs._collection
+    result = collection.get(include=["metadatas"])
+    
+    # Extract unique filenames from metadata
+    filenames = set()
+    if result and result["metadatas"]:
+        for metadata in result["metadatas"]:
+            if metadata and "filename" in metadata:
+                filenames.add(metadata["filename"])
+    
+    unique_files = sorted(list(filenames))
+    logger.info("Found %d unique indexed documents", len(unique_files))
+    return unique_files
