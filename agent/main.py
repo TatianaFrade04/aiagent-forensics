@@ -7,6 +7,7 @@ Politécnico de Leiria — ESTG | Licenciatura em Engenharia Informática
 import atexit
 import json
 import os
+import re
 from typing import Any
 
 from dotenv import load_dotenv
@@ -98,12 +99,10 @@ SYSTEM_PROMPT = (
     "TOOL: run_forensics_command(command) — run any bash command inside the forensic container\n"
     "\n"
     "RULES:\n"
-    "1. ALWAYS call run_forensics_command immediately — never describe commands as text.\n"
+    "1. ALWAYS use the run_forensics_command tool to execute commands — never describe them.\n"
     "   WRONG: writing ```bash command``` or code blocks in your reply.\n"
     "   WRONG: saying 'I will run ...' or 'Let me execute ...' without calling the tool.\n"
-    "   WRONG: outputting run_forensics_command(...) as Python syntax.\n"
-    "   RIGHT: emit a JSON tool call exactly like this, with no other text:\n"
-    "     {\"name\": \"run_forensics_command\", \"arguments\": {\"command\": \"<bash command here>\"}}\n"
+    "   RIGHT: call run_forensics_command with the bash command as the argument.\n"
     "   Do NOT announce what you are about to do. Do NOT ask for clarification. Just call the tool.\n"
     "2. NEVER invent or hallucinate results — only report what the tool returns.\n"
     "3. CRITICAL — EVERY path under /forensics/ MUST be wrapped in single quotes. No exceptions.\n"
@@ -152,67 +151,41 @@ def _render_message_text(message: Any) -> str:
     return str(content)
 
 
-_VALID_JSON_ESCAPES = set('"\\\/bfnrtu')
-
-
-def _sanitize_json_escapes(s: str) -> str:
-    """Fix invalid JSON escape sequences produced by the model (e.g. \\; \\')."""
-    result = []
-    i = 0
-    while i < len(s):
-        ch = s[i]
-        if ch == '\\' and i + 1 < len(s):
-            next_ch = s[i + 1]
-            if next_ch in _VALID_JSON_ESCAPES:
-                result.append('\\')  # valid escape — keep backslash
-            elif next_ch == "'":
-                pass  # strip backslash before single quote (model artifact)
-            else:
-                result.append('\\\\')  # invalid escape — escape the backslash
-        else:
-            result.append(ch)
-        i += 1
-    return ''.join(result)
-
-
-def _extract_json_object(text: str) -> dict | None:
-    """Tenta extrair um objecto JSON do texto (fallback para modelos sem tool calling nativo)."""
-    candidates = []
-    for i, ch in enumerate(text):
-        if ch == "{":
-            depth = 0
-            for j, c in enumerate(text[i:], i):
-                if c == "{":
-                    depth += 1
-                elif c == "}":
-                    depth -= 1
-                    if depth == 0:
-                        candidates.append(text[i:j+1])
-                        break
-    for m in sorted(candidates, key=len, reverse=True):
-        try:
-            obj = json.loads(_sanitize_json_escapes(m))
-            if isinstance(obj, dict):
-                return obj
-        except json.JSONDecodeError:
-            pass
+def _try_parse_tool_json(raw: str) -> dict | None:
+    """Tenta parsear JSON de tool call, reparando truncação e escapes inválidos."""
+    # Repara escapes inválidos: \$ \! etc. → \\$ \\! (só os não-standard)
+    repaired = re.sub(r'\\([^"\\/bfnrtu0-9])', r'\\\\\1', raw)
+    for candidate in (raw, repaired):
+        for suffix in ("", "}", "}}"):
+            try:
+                return json.loads(candidate + suffix)
+            except json.JSONDecodeError:
+                pass
     return None
 
 
 def _extract_tool_calls(message: Any) -> list[dict]:
-    """Extrai tool calls da mensagem — tenta structured primeiro, depois fallback JSON."""
-    structured = getattr(message, "tool_calls", None)
-    if structured:
-        return list(structured)
-    # Fallback: o modelo escreveu JSON em texto
-    payload = _extract_json_object(_render_message_text(message))
-    if not payload:
-        return []
-    name = payload.get("name")
-    arguments = payload.get("arguments", {})
-    if isinstance(name, str) and isinstance(arguments, dict):
-        return [{"id": "text-tool-call", "name": name, "args": arguments}]
-    return []
+    """Extrai tool calls via message.tool_calls (structured) ou <|tool_call_start|> tokens (fallback)."""
+    tool_calls = getattr(message, "tool_calls", None)
+    if tool_calls:
+        return list(tool_calls)
+    # Fallback: tokens <|tool_call_start|>...<|tool_call_end|> (qwen2.5fc:7b custom model)
+    content = _render_message_text(message)
+    calls = []
+    for m in re.finditer(r"<\|tool_call_start\|>(.+?)<\|tool_call_end\|>", content, re.DOTALL):
+        obj = _try_parse_tool_json(m.group(1).strip())
+        if obj is None:
+            continue
+        name = obj.get("name")
+        args = obj.get("arguments", {})
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                continue
+        if isinstance(name, str) and isinstance(args, dict):
+            calls.append({"id": "token-tool-call", "name": name, "args": args})
+    return calls
 
 # ─── Interface chatbot ────────────────────────────────────────────────────────
 
@@ -290,7 +263,7 @@ def main():
         try:
             last_tool_command = None  # loop detection per turn
             for iteration in range(MAX_ITERATIONS):
-                response = llm.invoke(conversation)
+                response = llm.invoke(conversation, stream=False)
 
                 tool_calls = _extract_tool_calls(response)
                 content = _render_message_text(response)
@@ -325,7 +298,8 @@ def main():
                 # Debug: output em bruto
                 print(f"\n{'─'*60}")
                 print(f"[RAW AGENT OUTPUT — iteração {iteration + 1}]")
-                print(f"  [{response.__class__.__name__}] content={content!r}")
+                debug_content = re.sub(r"<\|tool_call_start\|>.+?<\|tool_call_end\|>", "", content, flags=re.DOTALL).strip()
+                print(f"  [{response.__class__.__name__}] content={debug_content!r}")
                 if tool_calls:
                     for tc in tool_calls:
                         print(f"    tool_call: {tc}")
@@ -342,16 +316,24 @@ def main():
                     )
                     if not tool_used_this_turn and iteration < 2:
                         print(f"\n{'─'*60}")
-                        print(f"[AVISO — iteração {iteration + 1}: modelo descreveu comando sem executar, a forçar tool call]")
-                        print(f"{'─'*60}")
-                        conversation.append(HumanMessage(
-                            content=(
+                        if "<|tool_call_start|>" in content:
+                            print(f"[AVISO — iteração {iteration + 1}: JSON do tool call malformado, a pedir regeneração]")
+                            nudge = (
+                                "Your tool call JSON was malformed (likely a missing closing brace `}`). "
+                                "Please regenerate the tool call with valid, complete JSON inside "
+                                "<|tool_call_start|>...<|tool_call_end|>. "
+                                "Do not write any text — just the tool call."
+                            )
+                        else:
+                            print(f"[AVISO — iteração {iteration + 1}: modelo descreveu comando sem executar, a forçar tool call]")
+                            nudge = (
                                 "You wrote a command in your text response but did NOT call run_forensics_command. "
                                 "Writing bash or JSON in text is NOT execution. "
                                 "You MUST call run_forensics_command now with the exact command. "
                                 "Do not write any text — just call the tool immediately."
                             )
-                        ))
+                        print(f"{'─'*60}")
+                        conversation.append(HumanMessage(content=nudge))
                         continue
                     print(f"\n{'='*60}")
                     print(f"Agente: {content}")
