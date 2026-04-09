@@ -4,28 +4,22 @@ Agente LLM com paradigma ReAct para investigação forense digital.
 Politécnico de Leiria — ESTG | Licenciatura em Engenharia Informática
 """
 
+import argparse
 import atexit
-import json
 import os
-import re
-from typing import Any
 
 from dotenv import load_dotenv
 
 from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+
+from langchain.agents import create_agent
 
 from tools import run_in_sandbox, stop_container, start_container
 from skills import load_skills, select_skills, format_skills_context
 
-# ─── Configuração ─────────────────────────────────────────────────────────────
-
 load_dotenv()
-
-OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "qwen2.5:7b")
-OLLAMA_URL     = os.getenv("OLLAMA_URL",     "http://localhost:11434")
-MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "15"))
 
 atexit.register(stop_container)
 
@@ -37,15 +31,8 @@ def run_forensics_command(command: str) -> str:
     Run any bash command inside the forensic Linux container and get back stdout and stderr.
 
     FILESYSTEM LAYOUT:
-      /forensics/part006/  - Windows NTFS partition (READ-ONLY evidence)
-      /exports/            - writable directory for saving output files
-
-    EXAMPLES:
-      ls -la /forensics/part006/USERS
-      find /forensics/part006 -name "*.pdf"
-      grep -ri "keyword" /forensics/part006/USERS/
-      cat '/forensics/part006/USERS/Jimmy Wilson/Documents/file.txt'
-      cat '/forensics/part006/USERS/Jimmy Wilson/Documents/file.txt' > /exports/file.txt
+      /forensics/  - mounted forensic partitions (READ-ONLY evidence)
+      /exports/    - writable directory for saving output files
 
     NOTES:
       - Paths with spaces MUST use single quotes
@@ -54,25 +41,16 @@ def run_forensics_command(command: str) -> str:
     return run_in_sandbox(command)
 
 
-TOOLS = {run_forensics_command.name: run_forensics_command}
-
-# ─── Modelo LLM ───────────────────────────────────────────────────────────────
-
-llm = ChatOllama(
-    model=OLLAMA_MODEL,
-    base_url=OLLAMA_URL,
-    temperature=0.3,
-    num_ctx=32768,
-).bind_tools(list(TOOLS.values()))
+TOOLS = [run_forensics_command]
 
 # ─── System prompt ────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = (
+_SYSTEM_PROMPT_TEMPLATE = (
     "You are a digital forensics expert agent operating in READ-ONLY forensic mode.\n"
     "Always respond in English, regardless of the language of the user's message.\n"
     "\n"
     "FILESYSTEM LAYOUT:\n"
-    "  /forensics/part006/ — Windows NTFS partition (READ-ONLY evidence)\n"
+    "  {evidence}/ — Windows NTFS partition (READ-ONLY evidence)\n"
     "  /exports/           — the ONLY writable directory\n"
     "  NOTE: Windows directory names (Windows, System32, etc.) are case-sensitive\n"
     "  when mounted on Linux. ALWAYS use find with -iname to discover exact paths\n"
@@ -80,11 +58,11 @@ SYSTEM_PROMPT = (
     "\n"
     "REGISTRY HIVES — Windows registry hive files have NO file extension.\n"
     "  The hive files are named: SOFTWARE, SYSTEM, SAM, SECURITY, NTUSER.DAT\n"
-    "  Main hives location: /forensics/part006/Windows/System32/config/\n"
-    "  Per-user hive:        /forensics/part006/USERS/<username>/NTUSER.DAT\n"
+    "  Main hives location: {evidence}/Windows/System32/config/\n"
+    "  Per-user hive:        {evidence}/USERS/<username>/NTUSER.DAT\n"
     "  NEVER search for *.reg or *.hive — those are not hive files.\n"
     "  ALWAYS resolve hive paths with find in the SAME command string, using this pattern:\n"
-    "    HIVE=$(find '/forensics/part006' -iname 'SOFTWARE' -not -path '*/Users/*'\n"
+    "    HIVE=$(find '{evidence}' -iname 'SOFTWARE' -not -path '*/Users/*'\n"
     "      -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1)\n"
     "    ; reglookup -p '/...' \"$HIVE\"\n"
     "  The variable HIVE is defined and used in the SAME command — this is correct.\n"
@@ -106,11 +84,11 @@ SYSTEM_PROMPT = (
     "   Do NOT announce what you are about to do. Do NOT ask for clarification. Just call the tool.\n"
     "2. NEVER invent or hallucinate results — only report what the tool returns.\n"
     "3. CRITICAL — EVERY path under /forensics/ MUST be wrapped in single quotes. No exceptions.\n"
-    "   WRONG: stat /forensics/part006/USERS/Jimmy Wilson/file.txt\n"
-    "   WRONG: stat /forensics/part006/USERS/Jimmy\\ Wilson/file.txt\n"
-    "   RIGHT: stat '/forensics/part006/USERS/Jimmy Wilson/file.txt'\n"
-    "   RIGHT: find '/forensics/part006' -name '*.pdf'\n"
-    "   RIGHT: exiftool '/forensics/part006/USERS/Jimmy Wilson/Documents/photo.jpg'\n"
+    "   WRONG: stat {evidence}/USERS/Jimmy Wilson/file.txt\n"
+    "   WRONG: stat {evidence}/USERS/Jimmy\\ Wilson/file.txt\n"
+    "   RIGHT: stat '{evidence}/USERS/Jimmy Wilson/file.txt'\n"
+    "   RIGHT: find '{evidence}' -name '*.pdf'\n"
+    "   RIGHT: exiftool '{evidence}/USERS/Jimmy Wilson/Documents/photo.jpg'\n"
     "4. /forensics is READ-ONLY. NEVER redirect or write there.\n"
     "5. NEVER use: rm, mv, dd, shred, find -delete, sed -i.\n"
     "6. To save output to a file: command > /exports/file.txt\n"
@@ -126,66 +104,18 @@ SYSTEM_PROMPT = (
     "9. If command output is truncated, use grep, head, or tail to extract the needed\n"
     "   information before answering. NEVER assume or invent content that was cut off.\n"
     "10. When the user provides an absolute path in a command, run it EXACTLY as given.\n"
-    "   NEVER modify, rewrite, or prefix it with /forensics/part006/.\n"
-    "   WRONG (user said 'cat /etc/hosts'): cat '/forensics/part006/etc/hosts'\n"
+    "   NEVER modify, rewrite, or prefix it with {evidence}.\n"
+    "   WRONG (user said 'cat /etc/hosts'): cat '{evidence}/etc/hosts'\n"
     "   RIGHT: cat /etc/hosts\n"
     "11. To list Windows users on the evidence image, ALWAYS use:\n"
-    "   find '/forensics/part006/USERS' -mindepth 1 -maxdepth 1 -type d\n"
+    "   find '{evidence}/USERS' -mindepth 1 -maxdepth 1 -type d\n"
     "   NEVER use registry hives (SAM, regripper, reglookup) for this operation.\n"
 )
 
-# ─── Helpers para extracção de tool calls ─────────────────────────────────────
 
-def _render_message_text(message: Any) -> str:
-    content = getattr(message, "content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and block.get("type") == "text":
-                parts.append(block.get("text", ""))
-        return "\n".join(parts)
-    return str(content)
+def build_system_prompt(evidence: str) -> str:
+    return _SYSTEM_PROMPT_TEMPLATE.format(evidence=evidence)
 
-
-def _try_parse_tool_json(raw: str) -> dict | None:
-    """Tenta parsear JSON de tool call, reparando truncação e escapes inválidos."""
-    # Repara escapes inválidos: \$ \! etc. → \\$ \\! (só os não-standard)
-    repaired = re.sub(r'\\([^"\\/bfnrtu0-9])', r'\\\\\1', raw)
-    for candidate in (raw, repaired):
-        for suffix in ("", "}", "}}"):
-            try:
-                return json.loads(candidate + suffix)
-            except json.JSONDecodeError:
-                pass
-    return None
-
-
-def _extract_tool_calls(message: Any) -> list[dict]:
-    """Extrai tool calls via message.tool_calls (structured) ou <|tool_call_start|> tokens (fallback)."""
-    tool_calls = getattr(message, "tool_calls", None)
-    if tool_calls:
-        return list(tool_calls)
-    # Fallback: tokens <|tool_call_start|>...<|tool_call_end|> (qwen2.5fc:7b custom model)
-    content = _render_message_text(message)
-    calls = []
-    for m in re.finditer(r"<\|tool_call_start\|>(.+?)<\|tool_call_end\|>", content, re.DOTALL):
-        obj = _try_parse_tool_json(m.group(1).strip())
-        if obj is None:
-            continue
-        name = obj.get("name")
-        args = obj.get("arguments", {})
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except json.JSONDecodeError:
-                continue
-        if isinstance(name, str) and isinstance(args, dict):
-            calls.append({"id": "token-tool-call", "name": name, "args": args})
-    return calls
 
 # ─── Interface chatbot ────────────────────────────────────────────────────────
 
@@ -202,21 +132,46 @@ BANNER = """
 ╚══════════════════════════════════════════════════════════╝
 """
 
-def cmd_estrutura():
-    result = run_in_sandbox("find /forensics -maxdepth 3 -type d")
-    print("\n[Estrutura montada]\n" + result)
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="AIAgent@forensics — Agente LLM para investigação forense")
+    parser.add_argument("--model",    default=os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
+                        help="Modelo Ollama (default: llama3.2:9b)")
+    parser.add_argument("--url",      default=os.getenv("OLLAMA_URL", "http://localhost:11434"),
+                        help="URL do servidor Ollama (default: http://localhost:11434)")
+    parser.add_argument("--ctx",      type=int,   default=32768,
+                        help="Tamanho do contexto em tokens (default: 32768)")
+    parser.add_argument("--temp",     type=float, default=0.3,
+                        help="Temperatura do modelo (default: 0.3)")
+    parser.add_argument("--evidence", default="/forensics/part006",
+                        help="Directoria da partição forense (default: /forensics/part006)")
+    parser.add_argument("--max-iter", dest="max_iter", type=int, default=15,
+                        help="Máximo de iterações por pergunta (default: 15)")
+    return parser.parse_args()
 
 
 def main():
+    args = parse_args()
+
     print(BANNER)
-    print(f"[*] Modelo: {OLLAMA_MODEL} via {OLLAMA_URL}")
+    print(f"[*] Modelo   : {args.model} via {args.url}")
+    print(f"[*] Contexto : {args.ctx} tokens | Temperatura: {args.temp}")
+    print(f"[*] Evidência: {args.evidence}")
     start_container()
 
-    # Carregar skills forenses
     all_skills = load_skills()
     print(f"[*] Skills carregadas: {len(all_skills)} ({', '.join(s.name for s in all_skills)})")
 
-    conversation = [SystemMessage(content=SYSTEM_PROMPT)]
+    llm = ChatOllama(
+        model=args.model,
+        base_url=args.url,
+        temperature=args.temp,
+        num_ctx=args.ctx,
+    )
+    agent = create_agent(model=llm, tools=TOOLS)
+
+    system_prompt = build_system_prompt(args.evidence)
+    conversation = [SystemMessage(content=system_prompt)]
 
     while True:
         try:
@@ -227,163 +182,92 @@ def main():
 
         if not user_input:
             continue
-
         if user_input.lower() in ("sair", "exit", "quit"):
             print("[*] Ate logo!")
             break
-
         if user_input.lower() == "limpar":
-            conversation = [SystemMessage(content=SYSTEM_PROMPT)]
+            conversation = [SystemMessage(content=system_prompt)]
             print("[*] Historico limpo.\n")
             continue
-
         if user_input.lower() == "estrutura":
-            cmd_estrutura()
+            print("\n[Estrutura montada]\n" + run_in_sandbox("find /forensics -maxdepth 3 -type d"))
             continue
 
-        # Selecionar skills relevantes
+        # Skills
         selected = select_skills(user_input, all_skills)
         skills_context = format_skills_context(selected)
         if selected:
             print(f"[*] Skills selecionadas: {', '.join(s.name for s in selected)}")
 
-        # Injetar skills no system prompt (posição 0)
-        if skills_context:
-            conversation[0] = SystemMessage(
-                content=SYSTEM_PROMPT
-                + "\nThe following commands are installed and available in the container:\n"
+        conversation[0] = SystemMessage(
+            content=system_prompt + (
+                "\nThe following commands are installed and available in the container:\n"
                 + skills_context + "\n"
+                if skills_context else ""
             )
-        else:
-            conversation[0] = SystemMessage(content=SYSTEM_PROMPT)
-
+        )
         conversation.append(HumanMessage(content=user_input))
 
         print()
         try:
-            last_tool_command = None  # loop detection per turn
-            for iteration in range(MAX_ITERATIONS):
-                response = llm.invoke(conversation, stream=False)
+            result = agent.invoke(
+                {"messages": conversation},
+                {"recursion_limit": args.max_iter * 3},
+            )
 
-                tool_calls = _extract_tool_calls(response)
-                content = _render_message_text(response)
+            prev_len = len(conversation)
+            conversation = list(result["messages"])
+            new_messages = conversation[prev_len:]
 
-                # Se resposta vazia (sem tool calls nem texto), não poluir a conversa
-                if not tool_calls and not content.strip():
-                    print(f"\n{'─'*60}")
-                    print(f"[AVISO — iteração {iteration + 1}: resposta vazia, a tentar de novo]")
-                    print(f"{'─'*60}")
-                    if iteration < 2:
-                        # Nudge: relembrar o modelo do workflow correcto
-                        conversation.append(HumanMessage(
-                            content=(
-                                "Your previous response was empty. You must call run_forensics_command to answer the question.\n"
-                                "IMPORTANT: Do NOT guess file paths. Before running any forensic tool, "
-                                "always discover the exact path first using find, for example:\n"
-                                "  find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' 2>/dev/null | head -3\n"
-                                "Then use the exact path returned by find in your next command."
-                            )
-                        ))
-                        continue
-                    # Remover HumanMessages adicionadas (nudges + mensagem original)
-                    while len(conversation) > 1 and isinstance(conversation[-1], HumanMessage):
-                        conversation.pop()
-                    print(f"\n{'='*60}")
-                    print("Agente: Não foi possível obter resposta do modelo após várias tentativas. Reformule a pergunta ou verifique se o modelo está a funcionar correctamente.")
-                    print(f"{'='*60}\n")
-                    break
+            # Debug: intermediate steps
+            tool_call_map = {}
+            for msg in new_messages:
+                if isinstance(msg, AIMessage):
+                    for tc in (getattr(msg, "tool_calls", None) or []):
+                        tool_call_map[tc["id"]] = tc
 
-                conversation.append(response)
-
-                # Debug: output em bruto
+            for msg in new_messages:
                 print(f"\n{'─'*60}")
-                print(f"[RAW AGENT OUTPUT — iteração {iteration + 1}]")
-                debug_content = re.sub(r"<\|tool_call_start\|>.+?<\|tool_call_end\|>", "", content, flags=re.DOTALL).strip()
-                print(f"  [{response.__class__.__name__}] content={debug_content!r}")
-                if tool_calls:
+                if isinstance(msg, AIMessage):
+                    content = msg.content if isinstance(msg.content, str) else ""
+                    tool_calls = getattr(msg, "tool_calls", None) or []
+                    print(f"  [AIMessage] content={content!r}")
                     for tc in tool_calls:
                         print(f"    tool_call: {tc}")
+                elif isinstance(msg, ToolMessage):
+                    tc_info = tool_call_map.get(msg.tool_call_id, {})
+                    tool_name = tc_info.get("name", "?")
+                    tool_args = tc_info.get("args", {})
+                    out = msg.content[:200] if isinstance(msg.content, str) else str(msg.content)[:200]
+                    ellipsis = "..." if isinstance(msg.content, str) and len(msg.content) > 200 else ""
+                    print(f"  [ToolMessage] {tool_name}({tool_args}) => {out!r}{ellipsis}")
                 print(f"{'─'*60}")
 
-                if not tool_calls:
-                    # Nudge: model wrote text but no tool call, and no tool was used yet this turn
-                    last_human_idx = max(
-                        (i for i, m in enumerate(conversation) if isinstance(m, HumanMessage)),
-                        default=0,
-                    )
-                    tool_used_this_turn = any(
-                        isinstance(m, ToolMessage) for m in conversation[last_human_idx:]
-                    )
-                    if not tool_used_this_turn and iteration < 2:
-                        print(f"\n{'─'*60}")
-                        if "<|tool_call_start|>" in content:
-                            print(f"[AVISO — iteração {iteration + 1}: JSON do tool call malformado, a pedir regeneração]")
-                            nudge = (
-                                "Your tool call JSON was malformed (likely a missing closing brace `}`). "
-                                "Please regenerate the tool call with valid, complete JSON inside "
-                                "<|tool_call_start|>...<|tool_call_end|>. "
-                                "Do not write any text — just the tool call."
-                            )
-                        else:
-                            print(f"[AVISO — iteração {iteration + 1}: modelo descreveu comando sem executar, a forçar tool call]")
-                            nudge = (
-                                "You wrote a command in your text response but did NOT call run_forensics_command. "
-                                "Writing bash or JSON in text is NOT execution. "
-                                "You MUST call run_forensics_command now with the exact command. "
-                                "Do not write any text — just call the tool immediately."
-                            )
-                        print(f"{'─'*60}")
-                        conversation.append(HumanMessage(content=nudge))
-                        continue
-                    print(f"\n{'='*60}")
-                    print(f"Agente: {content}")
-                    print(f"{'='*60}\n")
-                    break
+            # Token usage
+            last_ai = next((m for m in reversed(new_messages) if isinstance(m, AIMessage)), None)
+            if last_ai and getattr(last_ai, "usage_metadata", None):
+                u = last_ai.usage_metadata
+                pct = round(u["total_tokens"] / args.ctx * 100)
+                print(f"[Contexto: {u['input_tokens']} in + {u['output_tokens']} out = {u['total_tokens']}/{args.ctx} tokens ({pct}%)]")
 
-                loop_detected = False
-                for tool_call in tool_calls:
-                    tool_name = tool_call.get("name", "")
-                    tool_args = tool_call.get("args", {})
-                    tool_id   = tool_call.get("id", "tool-call")
-
-                    if tool_name not in TOOLS:
-                        tool_output = f"Erro: ferramenta desconhecida '{tool_name}'"
-                    else:
-                        tool_output = TOOLS[tool_name].invoke(tool_args)
-
-                    print(f"  [ToolMessage] {tool_name}({tool_args}) => {tool_output[:200]!r}{'...' if len(tool_output) > 200 else ''}")
-
-                    conversation.append(ToolMessage(
-                        content=json.dumps({"result": tool_output}),
-                        tool_call_id=tool_id,
-                    ))
-
-                    # Loop detection: same command repeated → inject break-out nudge
-                    cmd = tool_args.get("command", "")
-                    if cmd and cmd == last_tool_command:
-                        loop_detected = True
-                        print(f"\n{'─'*60}")
-                        print(f"[AVISO — iteração {iteration + 1}: loop detectado, mesmo comando repetido]")
-                        print(f"{'─'*60}")
-                        conversation.append(HumanMessage(
-                            content=(
-                                "STOP — you just repeated the exact same command and got the same result. "
-                                "Do NOT call this command again.\n"
-                                "If a previous find/ls command already returned a list of file paths saved in a temp file, "
-                                "those paths ARE the answer. Use 'head -100 <tempfile>' to read them and report to the user.\n"
-                                "Do NOT grep for date strings inside a list of file paths — dates are not in the paths.\n"
-                                "Try a completely different approach or report the results you already have."
-                            )
-                        ))
-                        break
-                    last_tool_command = cmd or last_tool_command
-
-                if loop_detected:
-                    continue
+            # Final answer — last AIMessage without tool calls
+            answer = next(
+                (m for m in reversed(new_messages)
+                 if isinstance(m, AIMessage) and not (getattr(m, "tool_calls", None) or [])),
+                None,
+            )
+            if answer:
+                content = answer.content if isinstance(answer.content, str) else str(answer.content)
+                print(f"\n{'='*60}")
+                print(f"Agente: {content}")
+                print(f"{'='*60}\n")
+            else:
+                print(f"\n{'='*60}")
+                print("Agente: Não foi possível obter uma resposta final.")
+                print(f"{'='*60}\n")
 
         except Exception as e:
             print(f"\n[!] Erro: {str(e)}\n")
-            # Remove a HumanMessage que causou o erro
             if conversation and isinstance(conversation[-1], HumanMessage):
                 conversation.pop()
 
