@@ -7,6 +7,7 @@ Politécnico de Leiria — ESTG | Licenciatura em Engenharia Informática
 import argparse
 import atexit
 import os
+import sys
 
 from dotenv import load_dotenv
 
@@ -117,6 +118,27 @@ def build_system_prompt(evidence: str) -> str:
     return _SYSTEM_PROMPT_TEMPLATE.format(evidence=evidence)
 
 
+# ─── Auto-detecção da partição de evidência ──────────────────────────────────
+
+def auto_detect_evidence() -> str:
+    """Detecta automaticamente a partição principal sob /forensics/ (Windows ou Linux).
+    Termina o programa se nenhuma partição reconhecível for encontrada."""
+    cmd = (
+        "find /forensics -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | "
+        "while read p; do "
+        "( find \"$p\" -maxdepth 1 -type d \\( -iname 'USERS' -o -iname 'Windows' -o -iname 'home' \\) "
+        "2>/dev/null | grep -q . || [ -f \"$p/etc/passwd\" ] ) && echo \"$p\" && break; "
+        "done | head -1"
+    )
+    result = run_in_sandbox(cmd)
+    path = result.strip().splitlines()[0] if result.strip() else ""
+    if not path:
+        print("[!] Nenhuma partição reconhecível encontrada em /forensics/.")
+        print("    Use --evidence para especificar o caminho manualmente.")
+        sys.exit(1)
+    return path
+
+
 # ─── Interface chatbot ────────────────────────────────────────────────────────
 
 BANNER = """
@@ -143,8 +165,8 @@ def parse_args() -> argparse.Namespace:
                         help="Tamanho do contexto em tokens (default: 32768)")
     parser.add_argument("--temp",     type=float, default=0.3,
                         help="Temperatura do modelo (default: 0.3)")
-    parser.add_argument("--evidence", default="/forensics/part006",
-                        help="Directoria da partição forense (default: /forensics/part006)")
+    parser.add_argument("--evidence", default=None,
+                        help="Directoria da particao forense (default: auto-detectada)")
     parser.add_argument("--max-iter", dest="max_iter", type=int, default=15,
                         help="Máximo de iterações por pergunta (default: 15)")
     return parser.parse_args()
@@ -156,8 +178,20 @@ def main():
     print(BANNER)
     print(f"[*] Modelo   : {args.model} via {args.url}")
     print(f"[*] Contexto : {args.ctx} tokens | Temperatura: {args.temp}")
-    print(f"[*] Evidência: {args.evidence}")
     start_container()
+
+    if args.evidence:
+        check = run_in_sandbox(f"test -d '{args.evidence}' && echo ok")
+        if check.strip() == "ok":
+            evidence = args.evidence
+            print(f"[*] Evidencia: {evidence} (manual)")
+        else:
+            print(f"[!] Particao '{args.evidence}' nao encontrada. A usar auto-deteccao...")
+            evidence = auto_detect_evidence()
+            print(f"[*] Evidencia: {evidence} (auto-detectada)")
+    else:
+        evidence = auto_detect_evidence()
+        print(f"[*] Evidencia: {evidence} (auto-detectada)")
 
     all_skills = load_skills()
     print(f"[*] Skills carregadas: {len(all_skills)} ({', '.join(s.name for s in all_skills)})")
@@ -170,7 +204,7 @@ def main():
     )
     agent = create_agent(model=llm, tools=TOOLS)
 
-    system_prompt = build_system_prompt(args.evidence)
+    system_prompt = build_system_prompt(evidence)
     conversation = [SystemMessage(content=system_prompt)]
 
     while True:
@@ -195,7 +229,7 @@ def main():
 
         # Skills
         selected = select_skills(user_input, all_skills)
-        skills_context = format_skills_context(selected)
+        skills_context = format_skills_context(selected, evidence)
         if selected:
             print(f"[*] Skills selecionadas: {', '.join(s.name for s in selected)}")
 
@@ -267,9 +301,27 @@ def main():
                 print(f"{'='*60}\n")
 
         except Exception as e:
-            print(f"\n[!] Erro: {str(e)}\n")
-            if conversation and isinstance(conversation[-1], HumanMessage):
-                conversation.pop()
+            from langgraph.errors import GraphRecursionError
+            if isinstance(e, GraphRecursionError):
+                # Limit reached — show last partial answer if available
+                partial = next(
+                    (m for m in reversed(conversation)
+                     if isinstance(m, AIMessage) and m.content
+                     and not (getattr(m, "tool_calls", None) or [])),
+                    None,
+                )
+                print(f"\n[!] Limite de {args.max_iter} iteracoes atingido.")
+                if partial:
+                    content = partial.content if isinstance(partial.content, str) else str(partial.content)
+                    print(f"\n{'='*60}")
+                    print(f"Agente (parcial): {content}")
+                    print(f"{'='*60}\n")
+                else:
+                    print("    Sem resposta parcial disponivel. Tente uma pergunta mais especifica.\n")
+            else:
+                print(f"\n[!] Erro: {str(e)}\n")
+                if conversation and isinstance(conversation[-1], HumanMessage):
+                    conversation.pop()
 
 
 if __name__ == "__main__":
