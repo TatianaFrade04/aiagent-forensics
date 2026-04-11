@@ -7,6 +7,7 @@ Politécnico de Leiria — ESTG | Licenciatura em Engenharia Informática
 import argparse
 import atexit
 import os
+import re
 import sys
 
 from dotenv import load_dotenv
@@ -243,85 +244,104 @@ def main():
         conversation.append(HumanMessage(content=user_input))
 
         print()
+
+        tool_call_count = 0
+        limit_reached = False
+        new_messages = []
+
         try:
-            result = agent.invoke(
+            for chunk in agent.stream(
                 {"messages": conversation},
-                {"recursion_limit": args.max_iter * 3},
-            )
+                {"recursion_limit": 999},
+            ):
+                for node_output in chunk.values():
+                    for msg in node_output.get("messages", []):
+                        new_messages.append(msg)
+                        print(f"\n{'─'*60}")
 
-            prev_len = len(conversation)
-            conversation = list(result["messages"])
-            new_messages = conversation[prev_len:]
+                        if isinstance(msg, AIMessage):
+                            raw = msg.content if isinstance(msg.content, str) else ""
+                            # Mostrar bloco <think> separado
+                            think_match = re.search(r"<think>(.*?)</think>", raw, re.DOTALL)
+                            if think_match:
+                                thought = think_match.group(1).strip()
+                                if thought:
+                                    print(f"  [Pensamento]\n{thought}")
+                            visible = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+                            tool_calls = getattr(msg, "tool_calls", None) or []
+                            print(f"  [AIMessage] content={visible!r}")
+                            if tool_calls:
+                                print(f"  [tool_calls]")
+                            for tc in tool_calls:
+                                print(f"    → {tc['name']}({tc['args']})")
 
-            # Debug: intermediate steps
-            tool_call_map = {}
-            for msg in new_messages:
-                if isinstance(msg, AIMessage):
-                    for tc in (getattr(msg, "tool_calls", None) or []):
-                        tool_call_map[tc["id"]] = tc
+                        elif isinstance(msg, ToolMessage):
+                            out = msg.content[:300] if isinstance(msg.content, str) else str(msg.content)[:300]
+                            suffix = "…" if isinstance(msg.content, str) and len(msg.content) > 300 else ""
+                            print(f"  [resultado] {out!r}{suffix}")
+                            tool_call_count += 1
 
-            for msg in new_messages:
-                print(f"\n{'─'*60}")
-                if isinstance(msg, AIMessage):
-                    content = msg.content if isinstance(msg.content, str) else ""
-                    tool_calls = getattr(msg, "tool_calls", None) or []
-                    print(f"  [AIMessage] content={content!r}")
-                    for tc in tool_calls:
-                        print(f"    tool_call: {tc}")
-                elif isinstance(msg, ToolMessage):
-                    tc_info = tool_call_map.get(msg.tool_call_id, {})
-                    tool_name = tc_info.get("name", "?")
-                    tool_args = tc_info.get("args", {})
-                    out = msg.content[:200] if isinstance(msg.content, str) else str(msg.content)[:200]
-                    ellipsis = "..." if isinstance(msg.content, str) and len(msg.content) > 200 else ""
-                    print(f"  [ToolMessage] {tool_name}({tool_args}) => {out!r}{ellipsis}")
-                print(f"{'─'*60}")
+                        print(f"{'─'*60}", flush=True)
 
-            # Token usage
+                if tool_call_count >= args.max_iter:
+                    limit_reached = True
+                    break
+
+            # Actualizar conversation com os novos passos
+            conversation.extend(new_messages)
+
+            # Token usage (último AIMessage)
             last_ai = next((m for m in reversed(new_messages) if isinstance(m, AIMessage)), None)
             if last_ai and getattr(last_ai, "usage_metadata", None):
                 u = last_ai.usage_metadata
                 pct = round(u["total_tokens"] / args.ctx * 100)
-                print(f"[Contexto: {u['input_tokens']} in + {u['output_tokens']} out = {u['total_tokens']}/{args.ctx} tokens ({pct}%)]")
+                print(f"\n[Contexto: {u['input_tokens']} in + {u['output_tokens']} out = {u['total_tokens']}/{args.ctx} tokens ({pct}%)]")
 
-            # Final answer — last AIMessage without tool calls
-            answer = next(
-                (m for m in reversed(new_messages)
-                 if isinstance(m, AIMessage) and not (getattr(m, "tool_calls", None) or [])),
-                None,
-            )
-            if answer:
-                content = answer.content if isinstance(answer.content, str) else str(answer.content)
-                print(f"\n{'='*60}")
-                print(f"Agente: {content}")
-                print(f"{'='*60}\n")
-            else:
-                print(f"\n{'='*60}")
-                print("Agente: Não foi possível obter uma resposta final.")
-                print(f"{'='*60}\n")
-
-        except Exception as e:
-            from langgraph.errors import GraphRecursionError
-            if isinstance(e, GraphRecursionError):
-                # Limit reached — show last partial answer if available
-                partial = next(
-                    (m for m in reversed(conversation)
-                     if isinstance(m, AIMessage) and m.content
-                     and not (getattr(m, "tool_calls", None) or [])),
+            if limit_reached:
+                print(f"\n[!] Limite de {args.max_iter} iterações atingido. A pedir sumário...")
+                conversation.append(HumanMessage(content=(
+                    "You have reached the maximum number of tool calls. "
+                    "Based on the evidence collected so far, provide a concise summary of your findings. "
+                    "Do NOT call any more tools."
+                )))
+                summary_msgs = []
+                for chunk in agent.stream({"messages": conversation}, {"recursion_limit": 5}):
+                    for node_output in chunk.values():
+                        summary_msgs.extend(node_output.get("messages", []))
+                conversation.extend(summary_msgs)
+                answer = next(
+                    (m for m in reversed(summary_msgs)
+                     if isinstance(m, AIMessage) and not (getattr(m, "tool_calls", None) or [])),
                     None,
                 )
-                print(f"\n[!] Limite de {args.max_iter} iteracoes atingido.")
-                if partial:
-                    content = partial.content if isinstance(partial.content, str) else str(partial.content)
+                if answer:
+                    content = answer.content if isinstance(answer.content, str) else str(answer.content)
                     print(f"\n{'='*60}")
-                    print(f"Agente (parcial): {content}")
+                    print(f"Agente (sumário): {content}")
                     print(f"{'='*60}\n")
                 else:
-                    print("    Sem resposta parcial disponivel. Tente uma pergunta mais especifica.\n")
+                    print("    Sem sumário disponível.\n")
             else:
-                print(f"\n[!] Erro: {str(e)}\n")
-                if conversation and isinstance(conversation[-1], HumanMessage):
-                    conversation.pop()
+                # Resposta final — último AIMessage sem tool calls
+                answer = next(
+                    (m for m in reversed(new_messages)
+                     if isinstance(m, AIMessage) and not (getattr(m, "tool_calls", None) or [])),
+                    None,
+                )
+                if answer:
+                    content = answer.content if isinstance(answer.content, str) else str(answer.content)
+                    print(f"\n{'='*60}")
+                    print(f"Agente: {content}")
+                    print(f"{'='*60}\n")
+                else:
+                    print(f"\n{'='*60}")
+                    print("Agente: Não foi possível obter uma resposta final.")
+                    print(f"{'='*60}\n")
+
+        except Exception as e:
+            print(f"\n[!] Erro: {str(e)}\n")
+            if conversation and isinstance(conversation[-1], HumanMessage):
+                conversation.pop()
 
 
 if __name__ == "__main__":

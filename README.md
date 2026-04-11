@@ -140,6 +140,7 @@ Tu: Find evidence of suspicious tools or malware that were run
 Tu: What programs were executed most recently
 Tu: Was BCTextEncoder.exe ever executed
 ```
+Pergunta teste sumario: faz analise completa de utilizadores, programas instalados, ficheiros recentes e dispositivos usb
 
 ### Comandos especiais
 - `estrutura` — mostra o que está montado em /forensics
