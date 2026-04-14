@@ -10,6 +10,11 @@ import os
 import re
 import sys
 
+try:
+    import readline  # activa setas, histórico e edição no input() — Linux/macOS
+except ImportError:
+    pass  # Windows sem pyreadline — silencioso
+
 from dotenv import load_dotenv
 
 from langchain_ollama import ChatOllama
@@ -211,7 +216,10 @@ def main():
     while True:
         try:
             user_input = input("Tu: ").strip()
-        except (KeyboardInterrupt, EOFError):
+        except KeyboardInterrupt:
+            print("\n[*] Cancelado. Use 'sair' para terminar.")
+            continue
+        except EOFError:
             print("\n[*] A encerrar...")
             break
 
@@ -337,6 +345,11 @@ def main():
                     print(f"\n{'='*60}")
                     print("Agente: Não foi possível obter uma resposta final.")
                     print(f"{'='*60}\n")
+
+        except KeyboardInterrupt:
+            print("\n[!] Agente cancelado. A voltar ao prompt...")
+            if conversation and isinstance(conversation[-1], HumanMessage):
+                conversation.pop()
 
         except Exception as e:
             print(f"\n[!] Erro: {str(e)}\n")
