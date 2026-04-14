@@ -138,7 +138,7 @@ def auto_detect_evidence() -> str:
     )
     result = run_in_sandbox(cmd)
     path = result.strip().splitlines()[0] if result.strip() else ""
-    if not path:
+    if not path or not path.startswith("/"):
         print("[!] Nenhuma partição reconhecível encontrada em /forensics/.")
         print("    Use --evidence para especificar o caminho manualmente.")
         sys.exit(1)
@@ -160,6 +160,8 @@ BANNER = """
 ╚══════════════════════════════════════════════════════════╝
 """
 
+_default_evidence_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "evidence"))
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="AIAgent@forensics — Agente LLM para investigação forense")
@@ -175,6 +177,8 @@ def parse_args() -> argparse.Namespace:
                         help="Directoria da particao forense (default: auto-detectada)")
     parser.add_argument("--max-iter", dest="max_iter", type=int, default=15,
                         help="Máximo de iterações por pergunta (default: 15)")
+    parser.add_argument("--dir", default=_default_evidence_dir,
+                        help=f"Directoria host com a imagem forense (default: {_default_evidence_dir})")
     return parser.parse_args()
 
 
@@ -184,6 +188,8 @@ def main():
     print(BANNER)
     print(f"[*] Modelo   : {args.model} via {args.url}")
     print(f"[*] Contexto : {args.ctx} tokens | Temperatura: {args.temp}")
+    sys.modules["tools"].FORENSICS_IMAGE_PATH = os.path.abspath(args.dir)
+    print(f"[*] Dir. imagem : {sys.modules['tools'].FORENSICS_IMAGE_PATH}")
     start_container()
 
     if args.evidence:
