@@ -23,8 +23,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from langchain.agents import create_agent
 
-from tools import run_in_sandbox, stop_container, start_container
-from skills import load_skills, select_skills, format_skills_context
+from .tools import run_in_sandbox, stop_container, start_container
+from .skills import load_skills, select_skills, format_skills_context
 
 load_dotenv()
 
@@ -193,8 +193,8 @@ def main():
     print(BANNER)
     print(f"[*] Modelo   : {args.model} via {args.url}")
     print(f"[*] Contexto : {args.ctx} tokens | Temperatura: {args.temp}")
-    sys.modules["tools"].FORENSICS_IMAGE_PATH = os.path.abspath(args.dir)
-    print(f"[*] Dir. imagem : {sys.modules['tools'].FORENSICS_IMAGE_PATH}")
+    sys.modules["agent.tools"].FORENSICS_IMAGE_PATH = os.path.abspath(args.dir)
+    print(f"[*] Dir. imagem : {sys.modules['agent.tools'].FORENSICS_IMAGE_PATH}")
     start_container()
 
     if args.evidence:
