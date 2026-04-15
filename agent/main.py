@@ -160,6 +160,7 @@ BANNER = """
 ╚══════════════════════════════════════════════════════════╝
 """
 
+
 _default_evidence_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "evidence"))
 
 
@@ -179,6 +180,10 @@ def parse_args() -> argparse.Namespace:
                         help="Máximo de iterações por pergunta (default: 15)")
     parser.add_argument("--dir", default=_default_evidence_dir,
                         help=f"Directoria host com a imagem forense (default: {_default_evidence_dir})")
+    parser.add_argument("--think", action="store_true", default=False,
+                        help="Activa modo de raciocínio do modelo (reasoning=True)")
+    parser.add_argument("--debug", action="store_true", default=False,
+                        help="Mostra campos raw do AIMessage para inspecção")
     return parser.parse_args()
 
 
@@ -213,6 +218,7 @@ def main():
         base_url=args.url,
         temperature=args.temp,
         num_ctx=args.ctx,
+        reasoning=True if args.think else None,
     )
     agent = create_agent(model=llm, tools=TOOLS)
 
@@ -275,12 +281,17 @@ def main():
 
                         if isinstance(msg, AIMessage):
                             raw = msg.content if isinstance(msg.content, str) else ""
-                            # Mostrar bloco <think> separado
-                            think_match = re.search(r"<think>(.*?)</think>", raw, re.DOTALL)
-                            if think_match:
-                                thought = think_match.group(1).strip()
-                                if thought:
-                                    print(f"  [Pensamento]\n{thought}")
+                            if args.debug:
+                                print(f"  [DEBUG] additional_kwargs={msg.additional_kwargs}")
+                                print(f"  [DEBUG] response_metadata={msg.response_metadata}")
+                            # Pensamento via reasoning_content (reasoning=True) ou tags <think> inline
+                            thought = (getattr(msg, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
+                            if not thought:
+                                think_match = re.search(r"<think>(.*?)</think>", raw, re.DOTALL)
+                                if think_match:
+                                    thought = think_match.group(1).strip()
+                            if thought:
+                                print(f"  [Pensamento]\n{thought}")
                             visible = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
                             tool_calls = getattr(msg, "tool_calls", None) or []
                             print(f"  [AIMessage] content={visible!r}")
