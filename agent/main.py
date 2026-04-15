@@ -180,7 +180,7 @@ def parse_args() -> argparse.Namespace:
                         help="Máximo de iterações por pergunta (default: 15)")
     parser.add_argument("--dir", default=_default_evidence_dir,
                         help=f"Directoria host com a imagem forense (default: {_default_evidence_dir})")
-    parser.add_argument("--think", action="store_true", default=False,
+    parser.add_argument("--think", action="store_true", default=True,
                         help="Activa modo de raciocínio do modelo (reasoning=True)")
     parser.add_argument("--debug", action="store_true", default=False,
                         help="Mostra campos raw do AIMessage para inspecção")
@@ -218,7 +218,7 @@ def main():
         base_url=args.url,
         temperature=args.temp,
         num_ctx=args.ctx,
-        reasoning=True if args.think else None,
+        reasoning=True,  # Always enabled for better user experience
     )
     agent = create_agent(model=llm, tools=TOOLS)
 
