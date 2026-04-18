@@ -31,7 +31,7 @@ WRONG (breaks command parsing — never use xargs bash -c with backslash pattern
 
 RIGHT — use strings -e l (little-endian 16-bit = UTF-16LE):
 ```bash
-find '/forensics/part006/$RECYCLE.BIN' -name '$I*' -type f 2>/dev/null | while read f; do strings -e l "$f" | grep ':'; done | sort -u
+find '{evidence}/$RECYCLE.BIN' -name '$I*' -type f 2>/dev/null | while read f; do strings -e l "$f" | grep ':'; done | sort -u
 ```
 
 ALWAYS use `while read f; do strings -e l "$f" | grep ':'; done` for extracting original paths.
@@ -40,30 +40,30 @@ NEVER use `xargs -I {} bash -c '...'` — complex quoting inside bash -c always 
 ## CRITICAL: identifying which user deleted files
 
 The SID IS the directory name in the path — it does NOT need to be extracted from the binary.
-Example path: `/forensics/part006/$RECYCLE.BIN/S-1-5-21-...-1004/$IABFQJP.txt`
+Example path: `{evidence}/$RECYCLE.BIN/S-1-5-21-...-1004/$IABFQJP.txt`
 → User SID is `S-1-5-21-...-1004` (the directory between `$RECYCLE.BIN/` and the `$I` filename)
 
-To list unique SIDs: `find '/forensics/part006/$RECYCLE.BIN' -mindepth 1 -maxdepth 1 -type d 2>/dev/null`
+To list unique SIDs: `find '{evidence}/$RECYCLE.BIN' -mindepth 1 -maxdepth 1 -type d 2>/dev/null`
 
 ## Usage examples
 ```bash
 # List all $I metadata files (one per deleted item)
-find '/forensics/part006/$RECYCLE.BIN' -name '$I*' -type f 2>/dev/null
+find '{evidence}/$RECYCLE.BIN' -name '$I*' -type f 2>/dev/null
 
 # Recover original paths from ALL $I files — strings -e l extracts UTF-16LE paths, grep ':' finds Windows paths
-find '/forensics/part006/$RECYCLE.BIN' -name '$I*' -type f 2>/dev/null | while read f; do strings -e l "$f" | grep ':'; done | sort -u
+find '{evidence}/$RECYCLE.BIN' -name '$I*' -type f 2>/dev/null | while read f; do strings -e l "$f" | grep ':'; done | sort -u
 
 # List all deleted items with timestamps — use find -printf (NOT stat)
-find '/forensics/part006/$RECYCLE.BIN' -name '$I*' -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort
+find '{evidence}/$RECYCLE.BIN' -name '$I*' -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort
 
 # Identify which users deleted files: SID directories under $RECYCLE.BIN
-find '/forensics/part006/$RECYCLE.BIN' -mindepth 1 -maxdepth 1 -type d 2>/dev/null
+find '{evidence}/$RECYCLE.BIN' -mindepth 1 -maxdepth 1 -type d 2>/dev/null
 
 # List actual deleted file contents ($R files)
-find '/forensics/part006/$RECYCLE.BIN' -name '$R*' -type f 2>/dev/null | head -30
+find '{evidence}/$RECYCLE.BIN' -name '$R*' -type f 2>/dev/null | head -30
 
 # Copy a recoverable deleted file to exports
-cp '/forensics/part006/$RECYCLE.BIN/S-1-5-21-1171287513-3642516788-2358256967-1004/$RABFQJP.txt' /exports/recovered_file.txt
+cp '{evidence}/$RECYCLE.BIN/S-1-5-21-1171287513-3642516788-2358256967-1004/$RABFQJP.txt' /exports/recovered_file.txt
 ```
 
 ## Tips

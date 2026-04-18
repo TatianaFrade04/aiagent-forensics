@@ -12,7 +12,7 @@ When the user asks one of these questions, use EXACTLY the command shown — no 
 | "when was the OS installed?"                          | reglookup on SOFTWARE + grep InstallDate (see below)|
 | "what OS / Windows version is this?"                  | reglookup on SOFTWARE + grep ProductName            |
 | "what programs are installed?"                        | reglookup on SOFTWARE /CurrentVersion/Uninstall     |
-| "what users exist?"                                   | find '/forensics/part006/USERS' -mindepth 1 -maxdepth 1 -type d |
+| "what users exist?"                                   | find '{evidence}/USERS' -mindepth 1 -maxdepth 1 -type d |
 | "USB devices connected?"                              | regripper -r $SYSTEM_HIVE -p usbstor                |
 
 ⚠️ "LAST USED" MEANS SHUTDOWN — NOT SESSION DATA:
@@ -56,10 +56,10 @@ ALWAYS query both hives when asked about Run/startup keys.
 NOTE: Windows directory names are case-sensitive when mounted on Linux (ntfs-3g). The real path may be `Windows/System32` or `WINDOWS/system32` etc. ALWAYS use find -iname to discover the exact path before running regripper.
 
 Hive discovery commands (use find -iname to handle case-sensitive Linux paths):
-- SAM:        find /forensics/part006 -iname 'SAM' -not -path '*/Users/*' 2>/dev/null | head -1
-- SYSTEM:     find /forensics/part006 -iname 'SYSTEM' -not -path '*/Users/*' -not -path '*/RegBack/*' 2>/dev/null | head -1
-- SOFTWARE:   find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/RegBack/*' 2>/dev/null | head -1
-- NTUSER.DAT: find /forensics/part006 -iname 'NTUSER.DAT' 2>/dev/null
+- SAM:        find {evidence} -iname 'SAM' -not -path '*/Users/*' 2>/dev/null | head -1
+- SYSTEM:     find {evidence} -iname 'SYSTEM' -not -path '*/Users/*' -not -path '*/RegBack/*' 2>/dev/null | head -1
+- SOFTWARE:   find {evidence} -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/RegBack/*' 2>/dev/null | head -1
+- NTUSER.DAT: find {evidence} -iname 'NTUSER.DAT' 2>/dev/null
 
 ⚠️ CRITICAL HIVE CONFUSION WARNING:
 /Microsoft/Windows NT/CurrentVersion (OS version, InstallDate) → SOFTWARE hive, NOT SYSTEM.
@@ -76,31 +76,31 @@ The `osversion` plugin also runs on SOFTWARE hive. NEVER use SYSTEM hive for OS 
 # OS version, install date, product name — SOFTWARE hive, reglookup (always works)
 # NOTE: InstallDate is returned as a DWORD hex value (Unix timestamp). Convert with:
 #   python3 -c "import datetime; print(datetime.datetime.utcfromtimestamp(0x<VALUE>))"
-SOFTWARE_HIVE=$(find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); reglookup -p '/Microsoft/Windows NT/CurrentVersion' "$SOFTWARE_HIVE" | grep -E 'ProductName|InstallDate|RegisteredOwner' | python3 -c "import sys,datetime; [print(l.strip().split('/')[-1].split(',')[0] + ': ' + (datetime.datetime.utcfromtimestamp(int(l.strip().split(',')[2],16)).strftime('%Y-%m-%d %H:%M:%S UTC') if 'InstallDate' in l else l.strip().split(',')[2])) for l in sys.stdin if l.strip()]"
+SOFTWARE_HIVE=$(find {evidence} -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); reglookup -p '/Microsoft/Windows NT/CurrentVersion' "$SOFTWARE_HIVE" | grep -E 'ProductName|InstallDate|RegisteredOwner' | python3 -c "import sys,datetime; [print(l.strip().split('/')[-1].split(',')[0] + ': ' + (datetime.datetime.utcfromtimestamp(int(l.strip().split(',')[2],16)).strftime('%Y-%m-%d %H:%M:%S UTC') if 'InstallDate' in l else l.strip().split(',')[2])) for l in sys.stdin]"
 
 # Installed programs — SOFTWARE hive, correct path /Microsoft/Windows/CurrentVersion/Uninstall
-SOFTWARE_HIVE=$(find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); reglookup -p '/Microsoft/Windows/CurrentVersion/Uninstall' "$SOFTWARE_HIVE" | grep -i DisplayName
+SOFTWARE_HIVE=$(find {evidence} -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); reglookup -p '/Microsoft/Windows/CurrentVersion/Uninstall' "$SOFTWARE_HIVE" | grep -i DisplayName
 
 # Last system shutdown time — SYSTEM hive with shutdown plugin
 # ⚠️ CRITICAL: ALWAYS assign to variable and quote it. NEVER use inline $(...) in -r argument.
 # ⚠️ CRITICAL: The -not -path '*/diagnostics/*' filter is MANDATORY — without it, find may
 #    return a diagnostics file that is NOT a valid hive, causing 'undefined value' errors.
-SYSTEM_HIVE=$(find /forensics/part006 -iname 'SYSTEM' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); regripper -r "$SYSTEM_HIVE" -p shutdown
+SYSTEM_HIVE=$(find {evidence} -iname 'SYSTEM' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); regripper -r "$SYSTEM_HIVE" -p shutdown
 
 # User accounts and last login — SAM hive with samparse plugin (confirmed installed)
-SAM_HIVE=$(find /forensics/part006 -iname 'SAM' -not -path '*/Users/*' 2>/dev/null | head -1); regripper -r "$SAM_HIVE" -p samparse
+SAM_HIVE=$(find {evidence} -iname 'SAM' -not -path '*/Users/*' 2>/dev/null | head -1); regripper -r "$SAM_HIVE" -p samparse
 
 # USB devices connected — SYSTEM hive with usbstor plugin (confirmed installed)
-SYSTEM_HIVE=$(find /forensics/part006 -iname 'SYSTEM' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); regripper -r "$SYSTEM_HIVE" -p usbstor
+SYSTEM_HIVE=$(find {evidence} -iname 'SYSTEM' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); regripper -r "$SYSTEM_HIVE" -p usbstor
 
 # Startup/autorun programs — SOFTWARE hive
-SOFTWARE_HIVE=$(find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); reglookup -p '/Microsoft/Windows/CurrentVersion/Run' "$SOFTWARE_HIVE"
+SOFTWARE_HIVE=$(find {evidence} -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); reglookup -p '/Microsoft/Windows/CurrentVersion/Run' "$SOFTWARE_HIVE"
 
 # Run all plugins on the SAM hive
-SAM_HIVE=$(find /forensics/part006 -iname 'SAM' -not -path '*/Users/*' 2>/dev/null | head -1); regripper -r "$SAM_HIVE" -a
+SAM_HIVE=$(find {evidence} -iname 'SAM' -not -path '*/Users/*' 2>/dev/null | head -1); regripper -r "$SAM_HIVE" -a
 
 # Run all plugins on the SOFTWARE hive
-SOFTWARE_HIVE=$(find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); regripper -r "$SOFTWARE_HIVE" -a
+SOFTWARE_HIVE=$(find {evidence} -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1); regripper -r "$SOFTWARE_HIVE" -a
 
 # List all available plugins (to check what is installed)
 regripper -l

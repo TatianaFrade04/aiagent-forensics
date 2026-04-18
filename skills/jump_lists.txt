@@ -38,14 +38,14 @@ Jump Lists store recently and frequently accessed files per application. They ar
 
 ### Pattern A — single file (find path → variable → strings):
 ```bash
-JL=$(find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | head -1); strings "$JL" | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip' | sort -u | head -40
+JL=$(find '{evidence}/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | head -1); strings "$JL" | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip' | sort -u | head -40
 ```
 NEVER use `{}` as a placeholder for the path — that is a find -exec pattern that does NOT work here.
 ALWAYS assign the find result to a variable first, then pass "$VARIABLE" to strings.
 
 ### Pattern B — all files (while loop, no xargs):
 ```bash
-find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | while read f; do strings "$f" | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip'; done | sort -u | head -100
+find '{evidence}/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | while read f; do strings "$f" | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip'; done | sort -u | head -100
 ```
 
 ## CRITICAL: timestamps — two correct methods, two wrong methods
@@ -58,42 +58,42 @@ WRONG (find -printf needs a start path BEFORE -printf, not after):
 
 RIGHT method 1 — ONE find command with -printf (no while loop):
 ```bash
-find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f -printf '%TY-%Tm-%Td %TH:%TM  %p\n' 2>/dev/null | sort -r | head -30
+find '{evidence}/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f -printf '%TY-%Tm-%Td %TH:%TM  %p\n' 2>/dev/null | sort -r | head -30
 ```
 
 RIGHT method 2 — stat with -c flag (lowercase format specifiers, NOT --format with %TY):
 ```bash
-find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | while read f; do stat -c '%y %n' "$f"; done | sort -r | head -30
+find '{evidence}/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | while read f; do stat -c '%y %n' "$f"; done | sort -r | head -30
 ```
 
 ## Usage examples
 ```bash
 # Build a timeline: list all jump list files sorted by modification time — USE find -printf, NOT stat
-find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f -printf '%TY-%Tm-%Td %TH:%TM  %p\n' 2>/dev/null | sort -r | head -30
+find '{evidence}/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f -printf '%TY-%Tm-%Td %TH:%TM  %p\n' 2>/dev/null | sort -r | head -30
 
 # Find all automatic jump list files for all users
-find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null
+find '{evidence}/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null
 
 # Extract file paths from ONE jump list (Pattern A: variable, then strings)
-JL=$(find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | head -1); strings "$JL" | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip' | sort -u | head -40
+JL=$(find '{evidence}/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | head -1); strings "$JL" | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip' | sort -u | head -40
 
 # Most frequently used applications: the AppID IS the filename — NEVER grep inside files for AppID
 # Full path structure: <user>/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/<APPID>.automaticDestinations-ms
 # ALWAYS use find -path to discover the correct path — NEVER construct it manually
-find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | sed 's|.*/AutomaticDestinations/||' | sort | uniq -c | sort -rn | head -20
+find '{evidence}/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | sed 's|.*/AutomaticDestinations/||' | sort | uniq -c | sort -rn | head -20
 
 # Find ALL files opened by a specific user (all their jump lists)
-find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | while read f; do strings "$f" | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip'; done | sort -u | head -100
+find '{evidence}/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | while read f; do strings "$f" | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip'; done | sort -u | head -100
 
 # Recover deleted file paths: use strings + grep ':' (colon = drive letter like C:\ or D:\)
 # Jump lists store paths even after the original file was deleted
-find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | while read f; do strings "$f" | grep ':' | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip'; done | sort -u | head -100
+find '{evidence}/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | while read f; do strings "$f" | grep ':' | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip'; done | sort -u | head -100
 
 # Save all extracted paths to exports (use ls -lh to confirm, NOT echo "..." — double quotes break JSON)
-find '/forensics/part006/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | while read f; do strings "$f" | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip'; done | sort -u > /exports/jump_list_paths.txt; ls -lh /exports/jump_list_paths.txt
+find '{evidence}/USERS' -path '*/AutomaticDestinations/*.automaticDestinations-ms' -type f 2>/dev/null | while read f; do strings "$f" | grep -iE 'docx|pdf|xlsx|txt|jpg|png|exe|zip'; done | sort -u > /exports/jump_list_paths.txt; ls -lh /exports/jump_list_paths.txt
 
 # Also check CustomDestinations
-find '/forensics/part006/USERS' -path '*/CustomDestinations/*.customDestinations-ms' -type f 2>/dev/null | while read f; do strings "$f" | grep ':' | head -10; done
+find '{evidence}/USERS' -path '*/CustomDestinations/*.customDestinations-ms' -type f 2>/dev/null | while read f; do strings "$f" | grep ':' | head -10; done
 ```
 
 ## Tips

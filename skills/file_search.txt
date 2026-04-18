@@ -9,25 +9,25 @@ KEYWORDS: encontrar ficheiro, procurar ficheiro, search file, find file, localiz
 ## Usage examples
 ```bash
 # Find all PDF files (case-insensitive)
-find '/forensics/part006' -iname '*.pdf' -type f 2>/dev/null
+find '{evidence}' -iname '*.pdf' -type f 2>/dev/null
 
 # Find files by name pattern
-find '/forensics/part006' -iname '*password*' -type f 2>/dev/null
+find '{evidence}' -iname '*password*' -type f 2>/dev/null
 
 # Find all executable files
-find '/forensics/part006/USERS' -iname '*.exe' -o -iname '*.bat' -o -iname '*.ps1' 2>/dev/null | head -50
+find '{evidence}/USERS' -iname '*.exe' -o -iname '*.bat' -o -iname '*.ps1' 2>/dev/null | head -50
 
 # Find large files (over 50MB) — useful for hidden media
-find '/forensics/part006/USERS' -type f -size +50M 2>/dev/null
+find '{evidence}/USERS' -type f -size +50M 2>/dev/null
 
 # Identify true file type of a suspicious file (ignores extension)
-file '/forensics/part006/USERS/Jimmy Wilson/Desktop/document.pdf'
+file '{evidence}/USERS/<username>/Desktop/<document.pdf>'
 
 # Find all Office documents
-find '/forensics/part006/USERS' \( -iname '*.doc' -o -iname '*.docx' -o -iname '*.xls' -o -iname '*.xlsx' \) -type f 2>/dev/null
+find '{evidence}/USERS' \( -iname '*.doc' -o -iname '*.docx' -o -iname '*.xls' -o -iname '*.xlsx' \) -type f 2>/dev/null
 
 # Find recently created files in user folders
-find '/forensics/part006/USERS' -type f -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort -r | head -30
+find '{evidence}/USERS' -type f -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort -r | head -30
 ```
 
 ## Tips

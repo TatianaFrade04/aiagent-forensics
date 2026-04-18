@@ -207,11 +207,11 @@ def _extract_examples(content: str, max_commands: int = 2) -> str:
     return " ; ".join(commands)
 
 
-def format_skills_context(skills: list[Skill], evidence: str = "/forensics/part006") -> str:
+def format_skills_context(skills: list[Skill], evidence: str = "{evidence}") -> str:
     """Formata as skills para serem injetadas no system prompt.
 
     Injeta o conteúdo completo de cada skill selecionada (tabelas, avisos, exemplos).
-    Os caminhos hardcoded /forensics/part006 nos ficheiros de skill são substituídos
+    Os caminhos hardcoded {evidence} nos ficheiros de skill são substituídos
     pelo caminho de evidência real antes da injeção no prompt.
     """
     if not skills:
@@ -219,6 +219,6 @@ def format_skills_context(skills: list[Skill], evidence: str = "/forensics/part0
 
     parts = []
     for skill in skills:
-        content = skill.content.replace("/forensics/part006", evidence)
+        content = skill.content.replace("{evidence}", evidence)
         parts.append(f"### SKILL: {skill.name}\n{content}")
     return "\n\n".join(parts)
