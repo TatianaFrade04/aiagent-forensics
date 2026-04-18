@@ -24,25 +24,25 @@ Every file on NTFS has four timestamps: Created, Modified, Accessed, and MFT Ent
 ## Usage examples
 ```bash
 # Find files modified in a date range — ALWAYS use -printf to include dates in output
-find '/forensics/part006' -type f -newermt '2015-05-24' ! -newermt '2015-05-28' -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort
+find '{evidence}' -type f -newermt '2015-05-24' ! -newermt '2015-05-28' -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort
 
 # Get all timestamps for a specific file
-stat '/forensics/part006/Users/Jimmy Wilson/Documents/file.txt'
+stat '{evidence}/Users/<username>/Documents/<file.txt>'
 
 # Find files with timestamps and sort chronologically (all user files)
-find /forensics/part006/Users -type f -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort | tail -50
+find {evidence}/Users -type f -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort | tail -50
 
 # Find files accessed in the last phase of activity (newest first)
-find /forensics/part006/Users -type f -printf '%AY-%Am-%Ad %AH:%AM %p\n' 2>/dev/null | sort -r | head -30
+find {evidence}/Users -type f -printf '%AY-%Am-%Ad %AH:%AM %p\n' 2>/dev/null | sort -r | head -30
 
 # Search for files created within a specific date range
-find /forensics/part006 -type f -newer /forensics/part006/Windows -not -newer /forensics/part006/Windows/System32 2>/dev/null | head -30
+find {evidence} -type f -newer {evidence}/Windows -not -newer {evidence}/Windows/System32 2>/dev/null | head -30
 
 # Use sleuthkit fls to list files with NTFS MFT timestamps (if available)
-fls -r -l '/forensics/part006' 2>/dev/null | head -50
+fls -r -l '{evidence}' 2>/dev/null | head -50
 
 # Save a full timestamp listing of user files
-find /forensics/part006/Users -type f -printf '%TY-%Tm-%Td %TH:%TM\t%p\n' 2>/dev/null | sort > /exports/file_timeline.txt
+find {evidence}/Users -type f -printf '%TY-%Tm-%Td %TH:%TM\t%p\n' 2>/dev/null | sort > /exports/file_timeline.txt
 ```
 
 ## Tips

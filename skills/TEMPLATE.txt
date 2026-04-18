@@ -18,10 +18,10 @@ KEYWORDS: <comma-separated list of keywords that trigger this skill — include 
 ## Usage examples
 ```bash
 # <Description of example>
-<command> /forensics/part006/path/to/target
+<command> {evidence}/path/to/target
 
 # <Description of example>
-<command> <flags> /forensics/part006/path/to/target
+<command> <flags> {evidence}/path/to/target
 ```
 
 ## Tips

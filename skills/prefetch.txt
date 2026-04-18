@@ -13,17 +13,17 @@ Prefetch files are named after the **executable** (e.g., `CMD.EXE-089F261A.pf`).
 
 **List all programs executed / find suspicious tools / find malware evidence:**
 ```bash
-find '/forensics/part006' -ipath '*/Prefetch/*.pf' -printf '%TY-%Tm-%Td %TH:%TM  %f\n' 2>/dev/null | sort -r | head -50
+find '{evidence}' -ipath '*/Prefetch/*.pf' -printf '%TY-%Tm-%Td %TH:%TM  %f\n' 2>/dev/null | sort -r | head -50
 ```
 
-**Check if a specific program was executed (e.g., BCTextEncoder):**
+**Check if a specific program was executed (e.g., suspicious tool):**
 ```bash
-find '/forensics/part006' -ipath '*/Prefetch/*.pf' -iname '*BCTEXT*' 2>/dev/null
+find '{evidence}' -ipath '*/Prefetch/*.pf' -iname '*SUSPICIOUS_TOOL*' 2>/dev/null
 ```
 
 **Save prefetch timeline to exports:**
 ```bash
-find '/forensics/part006' -ipath '*/Prefetch/*.pf' -printf '%TY-%Tm-%Td %TH:%TM  %f\n' 2>/dev/null | sort -r > /exports/prefetch_timeline.txt; ls -lh /exports/prefetch_timeline.txt
+find '{evidence}' -ipath '*/Prefetch/*.pf' -printf '%TY-%Tm-%Td %TH:%TM  %f\n' 2>/dev/null | sort -r > /exports/prefetch_timeline.txt; ls -lh /exports/prefetch_timeline.txt
 ```
 
 ## Tips

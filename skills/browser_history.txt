@@ -23,8 +23,8 @@ Browsers store visited URLs, search queries, downloads, and cookies in SQLite da
 | IE | index.dat | `USERS/<user>/AppData/Local/Microsoft/Windows/History/` |
 
 ## CRITICAL: copy pattern — NEVER use wildcards in cp paths
-WRONG: cp '/forensics/part006/USERS/*/AppData/.../places.sqlite' /exports/
-RIGHT: DB=$(find '/forensics/part006/USERS' -iname 'places.sqlite' 2>/dev/null | head -1); cp "$DB" /exports/firefox_places.db
+WRONG: cp '{evidence}/USERS/*/AppData/.../places.sqlite' /exports/
+RIGHT: DB=$(find '{evidence}/USERS' -iname 'places.sqlite' 2>/dev/null | head -1); cp "$DB" /exports/firefox_places.db
 The shell does NOT expand * inside single quotes. ALWAYS use find to get the exact path first.
 
 ## CRITICAL: SQL quoting — ALWAYS double quotes around SQL
@@ -34,23 +34,23 @@ RIGHT: sqlite3 db "SELECT ... LIKE '%search%';"
 ## Usage examples
 ```bash
 # Find which browsers exist on the evidence
-find '/forensics/part006/USERS' -iname 'History' \( -path '*/Chrome/*' -o -path '*/Edge/*' \) 2>/dev/null ; find '/forensics/part006/USERS' -iname 'places.sqlite' 2>/dev/null
+find '{evidence}/USERS' -iname 'History' \( -path '*/Chrome/*' -o -path '*/Edge/*' \) 2>/dev/null ; find '{evidence}/USERS' -iname 'places.sqlite' 2>/dev/null
 
 # Firefox: copy and query visited URLs (find exact path first, then cp)
-FIREFOX_DB=$(find '/forensics/part006/USERS' -iname 'places.sqlite' 2>/dev/null | head -1); cp "$FIREFOX_DB" /exports/firefox_places.db; sqlite3 /exports/firefox_places.db "SELECT url, title, visit_count, datetime(last_visit_date/1000000,'unixepoch') as last_visit FROM moz_places WHERE visit_count > 0 ORDER BY last_visit_date DESC LIMIT 50;"
+FIREFOX_DB=$(find '{evidence}/USERS' -iname 'places.sqlite' 2>/dev/null | head -1); cp "$FIREFOX_DB" /exports/firefox_places.db; sqlite3 /exports/firefox_places.db "SELECT url, title, visit_count, datetime(last_visit_date/1000000,'unixepoch') as last_visit FROM moz_places WHERE visit_count > 0 ORDER BY last_visit_date DESC LIMIT 50;"
 
 # Firefox: downloads (stored in moz_annos in Firefox 26+, no moz_downloads table)
 sqlite3 /exports/firefox_places.db "SELECT p.url, a.content, datetime(a.lastModified/1000000,'unixepoch') as download_time FROM moz_annos a JOIN moz_places p ON a.place_id = p.id WHERE a.anno_attribute_id IN (SELECT id FROM moz_anno_attributes WHERE name LIKE 'downloads/%') ORDER BY a.lastModified DESC LIMIT 30;"
 
 # Firefox: saved credentials — MUST find and copy first; table is moz_logins (NOT logins, NOT users)
 # WARNING: sqlite3 creates an empty file if given a non-existent path — always copy before querying
-SIGNONS=$(find '/forensics/part006/USERS' -iname 'signons.sqlite' 2>/dev/null | head -1); cp "$SIGNONS" /exports/signons.db && sqlite3 /exports/signons.db "SELECT hostname, encryptedUsername, encryptedPassword FROM moz_logins;"
+SIGNONS=$(find '{evidence}/USERS' -iname 'signons.sqlite' 2>/dev/null | head -1); cp "$SIGNONS" /exports/signons.db && sqlite3 /exports/signons.db "SELECT hostname, encryptedUsername, encryptedPassword FROM moz_logins;"
 
 # Firefox: extract search queries from URL history (keyword_search_terms does NOT exist in Firefox — Chrome only)
 sqlite3 /exports/firefox_places.db "SELECT url, title, datetime(last_visit_date/1000000,'unixepoch') as searched_at FROM moz_places WHERE (url LIKE '%google%search%' OR url LIKE '%bing%search%' OR url LIKE '%q=%') AND visit_count > 0 ORDER BY last_visit_date DESC LIMIT 30;"
 
 # Chrome: copy and query visited URLs (find exact path first)
-CHROME_DB=$(find '/forensics/part006/USERS' -path '*/Chrome/User Data/Default/History' 2>/dev/null | head -1); cp "$CHROME_DB" /exports/chrome_history.db; sqlite3 /exports/chrome_history.db "SELECT url, title, visit_count, datetime(last_visit_time/1000000-11644473600,'unixepoch') as last_visit FROM urls ORDER BY last_visit_time DESC LIMIT 50;"
+CHROME_DB=$(find '{evidence}/USERS' -path '*/Chrome/User Data/Default/History' 2>/dev/null | head -1); cp "$CHROME_DB" /exports/chrome_history.db; sqlite3 /exports/chrome_history.db "SELECT url, title, visit_count, datetime(last_visit_time/1000000-11644473600,'unixepoch') as last_visit FROM urls ORDER BY last_visit_time DESC LIMIT 50;"
 
 # Chrome: downloads
 sqlite3 /exports/chrome_history.db "SELECT target_path, tab_url, datetime(start_time/1000000-11644473600,'unixepoch') as download_time FROM downloads ORDER BY start_time DESC LIMIT 20;"

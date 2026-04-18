@@ -9,22 +9,22 @@ KEYWORDS: grep, strings, procurar texto, search text, encontrar texto, find text
 ## Usage examples
 ```bash
 # Search all user documents for a keyword (case-insensitive, recursive)
-grep -ri 'password' '/forensics/part006/USERS/Jimmy Wilson/Documents/' 2>/dev/null | head -50
+grep -ri 'password' '{evidence}/USERS/<username>/Documents/' 2>/dev/null | head -50
 
 # Search for email addresses across all user files
-grep -rEi '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' '/forensics/part006/USERS/Jimmy Wilson/' 2>/dev/null | head -30
+grep -rEi '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' '{evidence}/USERS/<username>/' 2>/dev/null | head -30
 
 # Extract all printable strings from a suspicious binary
-strings '/forensics/part006/USERS/Jimmy Wilson/AppData/Local/Temp/suspicious.exe' | head -100
+strings '{evidence}/USERS/<username>/AppData/Local/Temp/<suspicious_file>' | head -100
 
 # Search for URLs in browser cache or documents
-grep -rEoi 'https?://[^ "]+' '/forensics/part006/USERS/Jimmy Wilson/Documents/' 2>/dev/null | head -30
+grep -rEoi 'https?://[^ "]+' '{evidence}/USERS/<username>/Documents/' 2>/dev/null | head -30
 
 # Search specific file types for a keyword
-find '/forensics/part006/USERS' -iname '*.txt' -exec grep -li 'confidential' {} \; 2>/dev/null
+find '{evidence}/USERS' -iname '*.txt' -exec grep -li 'confidential' {} \; 2>/dev/null
 
 # Search for IP addresses in files
-grep -rEo '([0-9]{1,3}\.){3}[0-9]{1,3}' '/forensics/part006/USERS/Jimmy Wilson/' 2>/dev/null | head -20
+grep -rEo '([0-9]{1,3}\.){3}[0-9]{1,3}' '{evidence}/USERS/<username>/' 2>/dev/null | head -20
 ```
 
 ## Tips
@@ -32,5 +32,5 @@ grep -rEo '([0-9]{1,3}\.){3}[0-9]{1,3}' '/forensics/part006/USERS/Jimmy Wilson/'
 - For binary files (exe, dll, dat) use `strings` instead of `grep` — grep may choke on binary data
 - Large recursive greps over system directories can be very slow — limit to user directories (`/USERS/`) when possible
 - `grep -E` uses extended regex (useful for email, URL, IP patterns)
-- Save results to exports: `grep -ri 'keyword' '/forensics/part006/USERS/' 2>/dev/null > /exports/grep_results.txt`
+- Save results to exports: `grep -ri 'keyword' '{evidence}/USERS/' 2>/dev/null > /exports/grep_results.txt`
 - If a file has unusual encoding (UTF-16), add `strings -e l` for little-endian Unicode

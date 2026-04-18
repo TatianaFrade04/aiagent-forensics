@@ -97,7 +97,7 @@ python agent/main.py
 ```
 Tu: Quais são os utilizadores existentes?
 Tu: Quantos utilizadores existem?
-Tu: Lista os ficheiros do desktop de Jimmy Wilson
+Tu: Lista os ficheiros do desktop de <username>
 Tu: Encontra todos os ficheiros PDF
 Tu: Qual é o MD5 do ficheiro R40599.pdf?
 Tu: Qual é o esquema de partições do disco?
@@ -127,9 +127,9 @@ Tu: Recover file paths even if the files were later deleted
 Tu: Build a timeline of user activity
 
 string_search
-Tu: Find all email addres in jimmy wilsons files
+Tu: Find all email addresses in user files
 Tu: search for the word "password" in all documents
-Tu: find all URLs in jimmy wilsons documents
+Tu: find all URLs in user documents
 Tu: search for ip address across all user files
 Tu: extract all strings from a suspicious executable on the desktop
 
@@ -138,7 +138,7 @@ Tu: Prove that CMD.exe was executed on the system
 Tu: When was the last time a program ran?
 Tu: Find evidence of suspicious tools or malware that were run
 Tu: What programs were executed most recently
-Tu: Was BCTextEncoder.exe ever executed
+Tu: Was <suspicious_tool.exe> ever executed
 ```
 Pergunta teste sumario: faz analise completa de utilizadores, programas instalados, ficheiros recentes e dispositivos usb
 
@@ -195,7 +195,7 @@ aiagent-forensics/
 - O `entrypoint.sh` detecta automaticamente o tipo de imagem, monta o E01 via `ewfmount`, identifica as partições com `mmls` e monta cada partição NTFS via `losetup` + kernel NTFS driver
 - O agente implementa um loop ReAct manual: invoca o LLM, extrai tool calls (nativo ou fallback JSON), executa no container, injeta o resultado como `ToolMessage` e repete até o modelo responder sem tool calls
 - Inclui detecção de loops: se o modelo repetir o mesmo comando consecutivamente, é injectado um nudge para forçar uma abordagem diferente
-- O `docker exec` usa `bash -c` para preservar espaços em paths (ex: `Jimmy Wilson`)
+- O `docker exec` usa `bash -c` para preservar espaços em paths (ex: nomes com espaços)
 - Output acima de 100 linhas é guardado em `/tmp/` dentro do container; o modelo recebe as primeiras 100 linhas e instruções para usar `grep`/`head`
 
 ---

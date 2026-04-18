@@ -22,14 +22,14 @@ If you pass the wrong file you will get: ERROR: Failed to open hive.
 
 COMPLETE EXAMPLE (both steps in sequence):
 ```bash
-SOFTWARE_HIVE=$(find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1)
+SOFTWARE_HIVE=$(find {evidence} -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1)
 reglookup -p '/Microsoft/Windows/CurrentVersion/Run' "$SOFTWARE_HIVE"
 ```
 Replace the hive path in the second command with whatever `find` returned.
 
 NTUSER.DAT discovery:
 ```bash
-find /forensics/part006 -iname 'NTUSER.DAT' 2>/dev/null
+find {evidence} -iname 'NTUSER.DAT' 2>/dev/null
 ```
 
 ## REGISTRY HIVE MAP — always use the correct hive for the key path
@@ -72,10 +72,10 @@ reglookup is a command-line utility for reading and querying Windows Registry hi
 ## Usage examples
 ```bash
 # Step 1: discover the real hive path (case-insensitive search)
-find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' 2>/dev/null | head -3
+find {evidence} -iname 'SOFTWARE' -not -path '*/Users/*' 2>/dev/null | head -3
 
 # Step 2: use the exact path returned above, e.g.:
-SOFTWARE_HIVE=$(find /forensics/part006 -iname 'SOFTWARE' -not -path '*/Users/*' 2>/dev/null | head -1)
+SOFTWARE_HIVE=$(find {evidence} -iname 'SOFTWARE' -not -path '*/Users/*' 2>/dev/null | head -1)
 
 # Search for Run keys (autostart programs)
 reglookup -p '/Microsoft/Windows/CurrentVersion/Run' "$SOFTWARE_HIVE"
@@ -84,7 +84,7 @@ reglookup -p '/Microsoft/Windows/CurrentVersion/Run' "$SOFTWARE_HIVE"
 reglookup -p '/Microsoft/Windows/CurrentVersion/Uninstall' "$SOFTWARE_HIVE"
 
 # Query NTUSER.DAT for recent documents
-NTUSER=$(find /forensics/part006 -iname 'NTUSER.DAT' 2>/dev/null | grep -i 'Jimmy' | head -1)
+NTUSER=$(find {evidence} -iname 'NTUSER.DAT' 2>/dev/null | grep -i '<username>' | head -1)
 reglookup -p '/Software/Microsoft/Windows/CurrentVersion/Explorer/RecentDocs' "$NTUSER"
 
 # Save filtered output

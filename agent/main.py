@@ -15,6 +15,11 @@ try:
 except ImportError:
     pass  # Windows sem pyreadline — silencioso
 
+# Add project root to path to enable imports of rag module
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from dotenv import load_dotenv
 
 from langchain_ollama import ChatOllama
@@ -26,9 +31,11 @@ from langchain.agents import create_agent
 from .tools import run_in_sandbox, stop_container, start_container
 from .skills import load_skills, select_skills, format_skills_context
 
-load_dotenv()
+# RAG imports
+from rag.indexer import ingest_pdf, is_document_indexed
+from rag.generator import answer_with_rag
 
-atexit.register(stop_container)
+load_dotenv()
 
 # ─── Ferramenta exposta ao agente ─────────────────────────────────────────────
 
@@ -48,7 +55,112 @@ def run_forensics_command(command: str) -> str:
     return run_in_sandbox(command)
 
 
-TOOLS = [run_forensics_command]
+@tool
+def ingest_pdf_document(filename: str) -> str:
+    """
+    Index a PDF document in the RAG vector store for later querying.
+    
+    Args:
+        filename: Path to the PDF file (relative to current directory or absolute path).
+        
+    Returns:
+        Status message indicating success, failure, or if already indexed.
+    """
+    import os
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Check if file exists
+        if not os.path.isfile(filename):
+            return f"Error: PDF file '{filename}' not found."
+        
+        # Check if already indexed (by filename only)
+        basename = os.path.basename(filename)
+        if is_document_indexed(basename):
+            return f"Document '{basename}' is already indexed. Use query_rag_documents to search it."
+        
+        # Ingest the document
+        result = ingest_pdf(filename)
+        
+        if result["status"] == "indexed":
+            return f"Successfully indexed '{basename}' with doc_id={result['doc_id']} ({result['chunks']} chunks)."
+        elif result["status"] == "already_indexed":
+            return f"Document '{basename}' was already indexed with doc_id={result['doc_id']}."
+        else:
+            return f"Unknown status: {result}"
+            
+    except FileNotFoundError as e:
+        return f"Error: {e}"
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        logger.error("Error in ingest_pdf_document: %s", e)
+        return f"Error indexing document: {e}"
+
+
+@tool
+def query_rag_documents(query: str, top_k: int = 5, filename: str | None = None) -> str:
+    """
+    Query the indexed PDF documents using the RAG pipeline.
+    
+    Args:
+        query: Natural language question about the documents.
+        top_k: Number of relevant chunks to retrieve (default: 5).
+        filename: Optional filename to filter results to a specific document.
+                 Agent should auto-detect filename from user messages containing
+                 "Com base no ficheiro X" or similar patterns.
+        
+    Returns:
+        Answer based on indexed document content with source citations.
+    """
+    import logging
+    import re
+    
+    logger = logging.getLogger(__name__)
+    
+    # Auto-detect filename from query if not provided
+    if not filename:
+        # Look for patterns like "Com base no ficheiro X" or "ficheiro X"
+        filename_patterns = [
+            r'(?:com base no|ficheiro|arquivo|documento)\s+([a-zA-Z0-9_\-.]+\.pdf)',
+            r'([a-zA-Z0-9_\-.]+\.pdf)',
+        ]
+        
+        for pattern in filename_patterns:
+            match = re.search(pattern, query, re.IGNORECASE)
+            if match:
+                detected_filename = match.group(1)
+                logger.info("Auto-detected filename: %s", detected_filename)
+                filename = detected_filename
+                break
+    
+    try:
+        result = answer_with_rag(query, top_k=top_k, filename=filename)
+        
+        answer = result["answer"]
+        sources = result["sources"]
+        
+        # Format response with sources
+        response_parts = [answer]
+        
+        if sources:
+            response_parts.append("\n\nSources:")
+            for i, source in enumerate(sources, 1):
+                doc_id = source.get("doc_id", "")
+                filename_src = source.get("filename", "")
+                page = source.get("page", "")
+                response_parts.append(f"{i}. {filename_src} [doc_id: {doc_id}, page: {page}]")
+        
+        return "\n".join(response_parts)
+        
+    except Exception as e:
+        logger.error("Error in query_rag_documents: %s", e)
+        return f"Error querying documents: {e}"
+
+
+TOOLS = [run_forensics_command, ingest_pdf_document, query_rag_documents]
 
 # ─── System prompt ────────────────────────────────────────────────────────────
 
@@ -91,11 +203,11 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "   Do NOT announce what you are about to do. Do NOT ask for clarification. Just call the tool.\n"
     "2. NEVER invent or hallucinate results — only report what the tool returns.\n"
     "3. CRITICAL — EVERY path under /forensics/ MUST be wrapped in single quotes. No exceptions.\n"
-    "   WRONG: stat {evidence}/USERS/Jimmy Wilson/file.txt\n"
-    "   WRONG: stat {evidence}/USERS/Jimmy\\ Wilson/file.txt\n"
-    "   RIGHT: stat '{evidence}/USERS/Jimmy Wilson/file.txt'\n"
+    "   WRONG: stat {evidence}/USERS/<username>/file.txt\n"
+    "   WRONG: stat {evidence}/USERS/<username>\\ file.txt\n"
+    "   RIGHT: stat '{evidence}/USERS/<username>/file.txt'\n"
     "   RIGHT: find '{evidence}' -name '*.pdf'\n"
-    "   RIGHT: exiftool '{evidence}/USERS/Jimmy Wilson/Documents/photo.jpg'\n"
+    "   RIGHT: exiftool '{evidence}/USERS/<username>/Documents/photo.jpg'\n"
     "4. /forensics is READ-ONLY. NEVER redirect or write there.\n"
     "5. NEVER use: rm, mv, dd, shred, find -delete, sed -i.\n"
     "6. To save output to a file: command > /exports/file.txt\n"
@@ -189,6 +301,9 @@ def parse_args() -> argparse.Namespace:
 
 def main():
     args = parse_args()
+    
+    # Register cleanup function only when main program runs
+    atexit.register(stop_container)
 
     print(BANNER)
     print(f"[*] Modelo   : {args.model} via {args.url}")

@@ -28,22 +28,22 @@ ExifTool is a powerful command-line utility for reading, writing, and editing me
 ## Usage examples
 ```bash
 # Show all metadata of a file
-exiftool '/forensics/part006/USERS/Jimmy Wilson/Pictures/photo.jpg'
+exiftool '{evidence}/USERS/<username>/Pictures/<photo.jpg>'
 
 # Extract only GPS coordinates
-exiftool -gps:all '/forensics/part006/USERS/Jimmy Wilson/Pictures/photo.jpg'
+exiftool -gps:all '{evidence}/USERS/<username>/Pictures/<photo.jpg>'
 
 # Extract all timestamps
-exiftool -time:all '/forensics/part006/USERS/Jimmy Wilson/Documents/report.pdf'
+exiftool -time:all '{evidence}/USERS/<username>/Documents/<report.pdf>'
 
 # Show metadata for all JPEG files recursively
-exiftool -r '/forensics/part006/USERS/Jimmy Wilson/Pictures/'
+exiftool -r '{evidence}/USERS/<username>/Pictures/'
 
 # Export metadata of all images to CSV
-exiftool -csv -r '/forensics/part006/USERS/Jimmy Wilson/Pictures/' > /exports/metadata.csv
+exiftool -csv -r '{evidence}/USERS/<username>/Pictures/' > /exports/metadata.csv
 
 # Show author and creation date of Office documents
-find '/forensics/part006/USERS/Jimmy Wilson/Documents' -iname '*.docx' -exec exiftool -Author -CreateDate -ModifyDate {} +
+find '{evidence}/USERS/<username>/Documents' -iname '*.docx' -exec exiftool -Author -CreateDate -ModifyDate {} +
 ```
 
 ## Tips
