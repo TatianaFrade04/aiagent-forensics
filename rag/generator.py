@@ -108,7 +108,10 @@ def answer_with_rag(query: str, top_k: int = 5, filename: str | None = None) -> 
         | StrOutputParser()
     )
 
-    answer = rag_chain.invoke(query)
+    try:
+        answer = rag_chain.invoke(query)
+    except Exception as e:
+        return {"answer": f"Error: RAG LLM invocation failed: {e}", "sources": []}
 
     # Extrair fontes únicas -> se dois chunls vieram da mesma pagina, cita essa pagina apenas uma vez
     sources: list[dict] = []

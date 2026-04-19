@@ -79,6 +79,9 @@ def start_container() -> bool:
 
         return True
 
+    except FileNotFoundError:
+        print("[!] Erro ao iniciar container: Docker não encontrado. Verifica se está instalado.")
+        return False
     except subprocess.CalledProcessError as e:
         print(f"[!] Erro ao iniciar container: {e.stderr.decode()}")
         return False
@@ -138,6 +141,8 @@ def run_in_sandbox(command: str) -> str:
                 docker_cmd,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=60
             )
             stdout = result.stdout
@@ -168,7 +173,8 @@ def run_in_sandbox(command: str) -> str:
                 subprocess.run(
                     ["docker", "exec", "-i", CONTAINER_NAME, "bash", "-c", f"cat > {out_file}"],
                     input=output,
-                    capture_output=True, text=True, timeout=15
+                    capture_output=True, text=True, encoding='utf-8',
+                    errors='replace', timeout=15
                 )
                 return (
                     f"[Output grande: {len(lines)} linhas — guardado em {out_file}]\n"
