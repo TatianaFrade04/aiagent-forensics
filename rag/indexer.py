@@ -12,7 +12,6 @@ import os
 
 import chromadb
 from langchain_community.document_loaders import PDFPlumberLoader
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -28,10 +27,11 @@ logger = logging.getLogger(__name__)
 
 # ─── Singleton de embeddings (evita recarregar o modelo em cada chamada) ────────────
 
-_embeddings_instance: HuggingFaceEmbeddings | None = None
+_embeddings_instance = None
 
 
-def _embeddings() -> HuggingFaceEmbeddings:
+def _embeddings():
+    from langchain_huggingface import HuggingFaceEmbeddings
     global _embeddings_instance
     if _embeddings_instance is None:
         _embeddings_instance = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
@@ -187,6 +187,21 @@ def list_indexed_documents() -> list[dict]:
             }
 
     return list(seen.values())
+
+
+def clear_collection() -> int:
+    """Remove todos os documentos indexados. Devolve o numero de chunks removidos."""
+    try:
+        col = _chroma_collection()
+        result = col.get(include=[])
+        count = len(result["ids"]) if result["ids"] else 0
+        if count:
+            col.delete(ids=result["ids"])
+        logger.info("Cleared %d chunks from collection.", count)
+        return count
+    except Exception as e:
+        logger.error("Failed to clear collection: %s", e)
+        return 0
 
 
 def is_document_indexed(filename: str) -> bool:

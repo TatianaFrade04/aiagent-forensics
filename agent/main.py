@@ -9,6 +9,8 @@ import atexit
 import os
 import re
 import sys
+from time import time
+import time
 
 try:
     import readline  # activa setas, histórico e edição no input() — Linux/macOS
@@ -269,6 +271,7 @@ BANNER = """
 ║    'sair' / 'exit'  -> termina o programa                ║
 ║    'limpar'         -> limpa o historico de conversa     ║
 ║    'estrutura'      -> mostra o que esta montado         ║
+║    'limpar_rag'     -> limpa documentos RAG indexados    ║
 ╚══════════════════════════════════════════════════════════╝
 """
 
@@ -296,6 +299,9 @@ def parse_args() -> argparse.Namespace:
                         help="Activa modo de raciocínio do modelo (reasoning=True)")
     parser.add_argument("--debug", action="store_true", default=False,
                         help="Mostra campos raw do AIMessage para inspecção")
+    parser.add_argument("--no-clear-rag", dest="clear_rag", action="store_false",
+                        help="Mantém documentos RAG indexados de sessões anteriores")
+    parser.set_defaults(clear_rag=True)
     return parser.parse_args()
 
 
@@ -327,6 +333,16 @@ def main():
 
     all_skills = load_skills()
     print(f"[*] Skills carregadas: {len(all_skills)} ({', '.join(s.name for s in all_skills)})")
+
+    from rag.indexer import clear_collection, list_indexed_documents
+    indexed = list_indexed_documents()
+    if args.clear_rag and indexed:
+        n = clear_collection()
+        print(f"[*] RAG: coleccao limpa ({n} chunks removidos). Use --no-clear-rag para manter.")
+    elif indexed:
+        print(f"[*] RAG: {len(indexed)} documento(s) indexado(s): {', '.join(indexed)}")
+    else:
+        print("[*] RAG: coleccao vazia.")
 
     llm = ChatOllama(
         model=args.model,
@@ -362,6 +378,11 @@ def main():
         if user_input.lower() == "estrutura":
             print("\n[Estrutura montada]\n" + run_in_sandbox("find /forensics -maxdepth 3 -type d"))
             continue
+        if user_input.lower() == "limpar_rag":
+            from rag.indexer import clear_collection
+            n = clear_collection()
+            print(f"[*] RAG: coleccao limpa ({n} chunks removidos).\n")
+            continue
 
         # Skills
         selected = select_skills(user_input, all_skills)
@@ -392,36 +413,60 @@ def main():
                 for node_output in chunk.values():
                     for msg in node_output.get("messages", []):
                         new_messages.append(msg)
-                        print(f"\n{'─'*60}")
-
+                        
                         if isinstance(msg, AIMessage):
                             raw = msg.content if isinstance(msg.content, str) else ""
+                            
                             if args.debug:
+                                print(f"\n{'─'*60}")
                                 print(f"  [DEBUG] additional_kwargs={msg.additional_kwargs}")
                                 print(f"  [DEBUG] response_metadata={msg.response_metadata}")
+                            
                             # Pensamento via reasoning_content (reasoning=True) ou tags <think> inline
                             thought = (getattr(msg, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
                             if not thought:
                                 think_match = re.search(r"<think>(.*?)</think>", raw, re.DOTALL)
                                 if think_match:
                                     thought = think_match.group(1).strip()
+                            
                             if thought:
-                                print(f"  [Pensamento]\n{thought}")
+                                if args.debug:
+                                    print(f"  [Pensamento]\n{thought}")
+                                else:
+                                    # Modo normal: primeira frase truncada a 80 chars
+                                    lines = [l.strip() for l in thought.strip().splitlines() if l.strip()]
+                                    # Mostrar apenas linhas de ação (que começam por verbos de ação)
+                                    action_lines = [
+                                        l for l in lines
+                                        if l and not l[0].isdigit() and not l.startswith('-')
+                                    ]
+                                    # Mostrar no máximo as 2 primeiras linhas de ação
+                                    for line in action_lines[:2]:
+                                        print(f"⟳ ", end="", flush=True)
+                                        for word in line.split():
+                                            print(word, end=" ", flush=True)
+                                            time.sleep(0.03)
+                                        print()
+                            
                             visible = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
                             tool_calls = getattr(msg, "tool_calls", None) or []
-                            print(f"  [AIMessage] content={visible!r}")
-                            if tool_calls:
-                                print(f"  [tool_calls]")
-                            for tc in tool_calls:
-                                print(f"    → {tc['name']}({tc['args']})")
+                            
+                            if args.debug:
+                                print(f"  [AIMessage] content={visible!r}")
+                                if tool_calls:
+                                    print(f"  [tool_calls]")
+                                for tc in tool_calls:
+                                    print(f"    → {tc['name']}({tc['args']})")
 
                         elif isinstance(msg, ToolMessage):
-                            out = msg.content[:300] if isinstance(msg.content, str) else str(msg.content)[:300]
-                            suffix = "…" if isinstance(msg.content, str) and len(msg.content) > 300 else ""
-                            print(f"  [resultado] {out!r}{suffix}")
                             tool_call_count += 1
+                            if args.debug:
+                                out = msg.content[:300] if isinstance(msg.content, str) else str(msg.content)[:300]
+                                suffix = "…" if isinstance(msg.content, str) and len(msg.content) > 300 else ""
+                                print(f"  [resultado] {out!r}{suffix}")
 
-                        print(f"{'─'*60}", flush=True)
+                        if args.debug and isinstance(msg, (AIMessage, ToolMessage)):
+                            print(f"{'─'*60}", flush=True)
 
                 if tool_call_count >= args.max_iter:
                     limit_reached = True
@@ -435,32 +480,34 @@ def main():
             if last_ai and getattr(last_ai, "usage_metadata", None):
                 u = last_ai.usage_metadata
                 pct = round(u["total_tokens"] / args.ctx * 100)
-                print(f"\n[Contexto: {u['input_tokens']} in + {u['output_tokens']} out = {u['total_tokens']}/{args.ctx} tokens ({pct}%)]")
+                if args.debug:
+                    print(f"\n[Contexto: {u['input_tokens']} in + {u['output_tokens']} out = {u['total_tokens']}/{args.ctx} tokens ({pct}%)]")
 
             if limit_reached:
-                print(f"\n[!] Limite de {args.max_iter} iterações atingido. A pedir sumário...")
+                if args.debug:
+                    print(f"\n[!] Limite de {args.max_iter} iterações atingido. A pedir sumário...")
                 conversation.append(HumanMessage(content=(
                     "You have reached the maximum number of tool calls. "
                     "Based on the evidence collected so far, provide a concise summary of your findings. "
                     "Do NOT call any more tools."
                 )))
-                summary_msgs = []
-                for chunk in agent.stream({"messages": conversation}, {"recursion_limit": 5}):
-                    for node_output in chunk.values():
-                        summary_msgs.extend(node_output.get("messages", []))
-                conversation.extend(summary_msgs)
-                answer = next(
-                    (m for m in reversed(summary_msgs)
-                     if isinstance(m, AIMessage) and not (getattr(m, "tool_calls", None) or [])),
-                    None,
-                )
-                if answer:
-                    content = answer.content if isinstance(answer.content, str) else str(answer.content)
-                    print(f"\n{'='*60}")
-                    print(f"Agente (sumário): {content}")
-                    print(f"{'='*60}\n")
-                else:
-                    print("    Sem sumário disponível.\n")
+                summary_response = llm.invoke(conversation)
+                conversation.append(summary_response)
+                if args.debug:
+                    print(f"\n{'─'*60}")
+                    print(f"  [DEBUG] additional_kwargs={summary_response.additional_kwargs}")
+                content = summary_response.content if isinstance(summary_response.content, str) else str(summary_response.content)
+                if not content.strip():
+                    content = (getattr(summary_response, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
+                print(f"\n{'='*60}")
+                print(f"Agente (sumário): {content}")
+                print(f"{'='*60}\n")
+                import base64 as _b64
+                ts = int(time.time())
+                out_file = f"/exports/investigation_summary_{ts}.txt"
+                b64 = _b64.b64encode(content.encode("utf-8")).decode()
+                run_in_sandbox(f"echo '{b64}' | base64 -d > {out_file}")
+                print(f"[*] Sumário guardado em: {out_file}\n")
             else:
                 # Resposta final — último AIMessage sem tool calls
                 answer = next(
@@ -470,6 +517,8 @@ def main():
                 )
                 if answer:
                     content = answer.content if isinstance(answer.content, str) else str(answer.content)
+                    if not content.strip():
+                        content = (getattr(answer, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
                     print(f"\n{'='*60}")
                     print(f"Agente: {content}")
                     print(f"{'='*60}\n")

@@ -7,7 +7,6 @@ Busca semantica
 import logging
 import os
 
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.vectorstores import VectorStoreRetriever
@@ -22,10 +21,11 @@ logger = logging.getLogger(__name__)
 
 # ─── Singleton de embeddings ──────────────────────────────────────────────────────────────────
 
-_embeddings_instance: HuggingFaceEmbeddings | None = None
+_embeddings_instance = None
 
 
-def _embeddings() -> HuggingFaceEmbeddings:
+def _embeddings():
+    from langchain_huggingface import HuggingFaceEmbeddings
     global _embeddings_instance
     if _embeddings_instance is None:
         _embeddings_instance = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
@@ -61,25 +61,26 @@ def retrieve(query: str, top_k: int = 5, filename: str | None = None) -> list[Do
         logger.info("Retrieving top-%d chunks for query: %r (filtered by file: %s)", top_k, query, filename)
     else:
         logger.info("Retrieving top-%d chunks for query: %r (all documents)", top_k, query)
-    
-    vs = _vectorstore()
-    
-    # Se um filename específico foi pedido, aplicar filtro de metadata
-    if filename:
-        # Usar similarity_search_with_score com filtro de metadata
-        docs_with_scores = vs.similarity_search_with_score(
-            query,
-            k=top_k,
-            filter={"filename": {"$eq": filename}}
-        )
-        docs = [doc for doc, score in docs_with_scores]
-    else:
-        # Comportamento original - buscar em todos os documentos
-        retriever = vs.as_retriever(search_kwargs={"k": top_k})
-        docs = retriever.invoke(query)
-    
-    logger.info("Retrieved %d chunks.", len(docs))
-    return docs
+
+    try:
+        vs = _vectorstore()
+
+        if filename:
+            docs_with_scores = vs.similarity_search_with_score(
+                query,
+                k=top_k,
+                filter={"filename": {"$eq": filename}}
+            )
+            docs = [doc for doc, score in docs_with_scores]
+        else:
+            retriever = vs.as_retriever(search_kwargs={"k": top_k})
+            docs = retriever.invoke(query)
+
+        logger.info("Retrieved %d chunks.", len(docs))
+        return docs
+    except Exception as e:
+        logger.error("ChromaDB retrieval failed: %s", e)
+        return []
 
 
 def get_retriever(top_k: int = 5, filename: str | None = None) -> VectorStoreRetriever:
