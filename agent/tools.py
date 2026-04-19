@@ -170,12 +170,17 @@ def run_in_sandbox(command: str) -> str:
             if len(lines) > MAX_LINES:
                 ts = int(time.time())
                 out_file = f"/tmp/cmd_output_{ts}.txt"
-                subprocess.run(
+                save_result = subprocess.run(
                     ["docker", "exec", "-i", CONTAINER_NAME, "bash", "-c", f"cat > {out_file}"],
                     input=output,
                     capture_output=True, text=True, encoding='utf-8',
                     errors='replace', timeout=15
                 )
+                if save_result.returncode != 0:
+                    return (
+                        f"[Output grande: {len(lines)} linhas — truncado a {MAX_LINES}]\n"
+                        + "\n".join(lines[:MAX_LINES])
+                    )
                 return (
                     f"[Output grande: {len(lines)} linhas — guardado em {out_file}]\n"
                     f"Usa grep, head ou tail para analisar:\n"

@@ -7,6 +7,7 @@ Busca semantica
 import logging
 import os
 
+import chromadb
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.vectorstores import VectorStoreRetriever
@@ -101,28 +102,27 @@ def get_retriever(top_k: int = 5, filename: str | None = None) -> VectorStoreRet
     return _vectorstore().as_retriever(search_kwargs=search_kwargs)
 
 
+def _chroma_collection() -> chromadb.Collection:
+    os.makedirs(CHROMA_PERSIST_DIR, exist_ok=True)
+    client = chromadb.PersistentClient(path=CHROMA_PERSIST_DIR)
+    return client.get_or_create_collection(COLLECTION_NAME)
+
+
 def list_indexed_documents() -> list[str]:
     """
     List all unique document filenames that have been indexed.
-    
+
     Returns:
         List of unique document filenames in the vector store.
     """
     logger.info("Retrieving list of indexed documents")
-    
-    vs = _vectorstore()
-    
-    # Get all documents from the collection
-    collection = vs._collection
-    result = collection.get(include=["metadatas"])
-    
-    # Extract unique filenames from metadata
+    col = _chroma_collection()
+    result = col.get(include=["metadatas"])
     filenames = set()
     if result and result["metadatas"]:
         for metadata in result["metadatas"]:
             if metadata and "filename" in metadata:
                 filenames.add(metadata["filename"])
-    
     unique_files = sorted(list(filenames))
     logger.info("Found %d unique indexed documents", len(unique_files))
     return unique_files

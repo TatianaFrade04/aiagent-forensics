@@ -231,6 +231,11 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "11. To list Windows users on the evidence image, ALWAYS use:\n"
     "   find '{evidence}/USERS' -mindepth 1 -maxdepth 1 -type d\n"
     "   NEVER use registry hives (SAM, regripper, reglookup) for this operation.\n"
+    "12. RAG tools (ingest_pdf_document, query_rag_documents) are ONLY for PDF documents\n"
+    "   provided EXTERNALLY by the investigator — never for files inside the forensic image.\n"
+    "   To read any file inside /forensics/ (.txt, .doc, .csv, etc.), ALWAYS use\n"
+    "   run_forensics_command with cat, strings, or head.\n"
+    "   NEVER use ingest_pdf_document on files found inside /forensics/.\n"
 )
 
 

@@ -21,3 +21,6 @@ forensics_image/
 
 # Ficheiros criados durante a análise forense (nunca commitar)
 exports/
+
+# ChromaDB — base de dados vectorial local (gerada em runtime)
+chroma_store/
