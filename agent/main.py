@@ -6,6 +6,7 @@ Politécnico de Leiria — ESTG | Licenciatura em Engenharia Informática
 
 import argparse
 import atexit
+import base64 as _b64
 import os
 import re
 import sys
@@ -296,8 +297,6 @@ def parse_args() -> argparse.Namespace:
                         help="Temperatura do modelo (default: 0.3)")
     parser.add_argument("--evidence", default=None,
                         help="Directoria da particao forense (default: auto-detectada)")
-    parser.add_argument("--max-iter", dest="max_iter", type=int, default=15,
-                        help="Máximo de iterações por pergunta (default: 15)")
     parser.add_argument("--dir", default=_default_evidence_dir,
                         help=f"Directoria host com a imagem forense (default: {_default_evidence_dir})")
     parser.add_argument("--think", action="store_true", default=True,
@@ -406,130 +405,210 @@ def main():
 
         print()
 
-        tool_call_count = 0
-        limit_reached = False
-        new_messages = []
+        original_query_msg = conversation[-1]
+        ts_query = int(time.time())
+        out_file = f"/exports/investigation_summary_{ts_query}.txt"
+        intermediate_files: list[str] = []
+        MAX_COMPRESSIONS = 20
 
+        def _llm_content(resp) -> str:
+            c = resp.content if isinstance(resp.content, str) else str(resp.content)
+            if not c.strip():
+                c = (getattr(resp, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
+            return c
+
+        def _consolidate() -> str:
+            exports_dir = sys.modules["agent.tools"].EXPORTS_PATH
+            parts = []
+            for f in intermediate_files:
+                local = os.path.join(exports_dir, os.path.basename(f))
+                try:
+                    with open(local, "r", encoding="utf-8", errors="replace") as fp:
+                        parts.append(fp.read())
+                except Exception:
+                    pass
+            if parts:
+                combined = "\n\n".join(parts)
+                prompt = [
+                    conversation[0],
+                    original_query_msg,
+                    HumanMessage(content=(
+                        "Based on the following intermediate investigation reports, "
+                        "produce a comprehensive final investigation report. "
+                        "Consolidate all findings, eliminate duplicates, and provide "
+                        "a clear structured conclusion. Do NOT call any tools.\n\n"
+                        + combined
+                    )),
+                ]
+            else:
+                prompt = conversation + [HumanMessage(content=(
+                    "Based on the evidence collected so far, provide a concise final summary "
+                    "of your findings. Do NOT call any more tools."
+                ))]
+            return _llm_content(llm.invoke(prompt))
+
+        agent_active = True
         try:
-            for chunk in agent.stream(
-                {"messages": conversation},
-                {"recursion_limit": 999},
-            ):
-                for node_output in chunk.values():
-                    for msg in node_output.get("messages", []):
-                        new_messages.append(msg)
-                        
-                        if isinstance(msg, AIMessage):
-                            raw = msg.content if isinstance(msg.content, str) else ""
-                            
-                            if args.debug:
-                                print(f"\n{'─'*60}")
-                                print(f"  [DEBUG] additional_kwargs={msg.additional_kwargs}")
-                                print(f"  [DEBUG] response_metadata={msg.response_metadata}")
-                            
-                            # Pensamento via reasoning_content (reasoning=True) ou tags <think> inline
-                            thought = (getattr(msg, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
-                            if not thought:
-                                think_match = re.search(r"<think>(.*?)</think>", raw, re.DOTALL)
-                                if think_match:
-                                    thought = think_match.group(1).strip()
-                            
-                            if thought:
+            while agent_active:
+                needs_compress = False
+                new_messages = []
+                last_usage = None
+                pending_tool_calls = 0
+
+                for chunk in agent.stream(
+                    {"messages": conversation},
+                    {"recursion_limit": 999},
+                ):
+                    for node_output in chunk.values():
+                        for msg in node_output.get("messages", []):
+                            new_messages.append(msg)
+
+                            if isinstance(msg, AIMessage):
+                                raw = msg.content if isinstance(msg.content, str) else ""
+
                                 if args.debug:
-                                    print(f"  [Pensamento]\n{thought}")
-                                else:
-                                    # Modo normal: primeira frase truncada a 80 chars
-                                    lines = [l.strip() for l in thought.strip().splitlines() if l.strip()]
-                                    # Mostrar apenas linhas de ação (que começam por verbos de ação)
-                                    action_lines = [
-                                        l for l in lines
-                                        if l and not l[0].isdigit() and not l.startswith('-')
-                                    ]
-                                    # Mostrar no máximo as 2 primeiras linhas de ação
-                                    for line in action_lines[:2]:
-                                        print(f"⟳ ", end="", flush=True)
-                                        for word in line.split():
-                                            print(word, end=" ", flush=True)
-                                            time.sleep(0.03)
-                                        print()
-                            
-                            visible = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-                            tool_calls = getattr(msg, "tool_calls", None) or []
-                            
-                            if args.debug:
-                                print(f"  [AIMessage] content={visible!r}")
-                                if tool_calls:
-                                    print(f"  [tool_calls]")
-                                for tc in tool_calls:
-                                    print(f"    → {tc['name']}({tc['args']})")
+                                    print(f"\n{'─'*60}")
+                                    print(f"  [DEBUG] additional_kwargs={msg.additional_kwargs}")
+                                    print(f"  [DEBUG] response_metadata={msg.response_metadata}")
 
-                        elif isinstance(msg, ToolMessage):
-                            tool_call_count += 1
-                            if args.debug:
-                                out = msg.content[:300] if isinstance(msg.content, str) else str(msg.content)[:300]
-                                suffix = "…" if isinstance(msg.content, str) and len(msg.content) > 300 else ""
-                                print(f"  [resultado] {out!r}{suffix}")
+                                thought = (getattr(msg, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
+                                if not thought:
+                                    think_match = re.search(r"<think>(.*?)</think>", raw, re.DOTALL)
+                                    if think_match:
+                                        thought = think_match.group(1).strip()
 
-                        if args.debug and isinstance(msg, (AIMessage, ToolMessage)):
-                            print(f"{'─'*60}", flush=True)
+                                if thought:
+                                    if args.debug:
+                                        print(f"  [Pensamento]\n{thought}")
+                                    else:
+                                        lines = [l.strip() for l in thought.strip().splitlines() if l.strip()]
+                                        action_lines = [
+                                            l for l in lines
+                                            if l and not l[0].isdigit() and not l.startswith('-')
+                                        ]
+                                        for line in action_lines[:2]:
+                                            print(f"⟳ ", end="", flush=True)
+                                            for word in line.split():
+                                                print(word, end=" ", flush=True)
+                                                time.sleep(0.03)
+                                            print()
 
-                if tool_call_count >= args.max_iter:
-                    limit_reached = True
-                    break
+                                visible = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+                                tool_calls = getattr(msg, "tool_calls", None) or []
+                                pending_tool_calls += len(tool_calls)
 
-            # Actualizar conversation com os novos passos
-            conversation.extend(new_messages)
+                                if args.debug:
+                                    print(f"  [AIMessage] content={visible!r}")
+                                    if tool_calls:
+                                        print(f"  [tool_calls]")
+                                    for tc in tool_calls:
+                                        print(f"    → {tc['name']}({tc['args']})")
 
-            # Token usage (último AIMessage)
-            last_ai = next((m for m in reversed(new_messages) if isinstance(m, AIMessage)), None)
-            if last_ai and getattr(last_ai, "usage_metadata", None):
-                u = last_ai.usage_metadata
-                pct = round(u["total_tokens"] / args.ctx * 100)
-                if args.debug:
+                                if getattr(msg, "usage_metadata", None):
+                                    last_usage = msg.usage_metadata
+                                    ratio = last_usage["total_tokens"] / args.ctx
+                                    if ratio >= 0.70:
+                                        needs_compress = True
+
+                            elif isinstance(msg, ToolMessage):
+                                pending_tool_calls = max(0, pending_tool_calls - 1)
+                                if args.debug:
+                                    out = msg.content[:300] if isinstance(msg.content, str) else str(msg.content)[:300]
+                                    suffix = "…" if isinstance(msg.content, str) and len(msg.content) > 300 else ""
+                                    print(f"  [resultado] {out!r}{suffix}")
+
+                            if args.debug and isinstance(msg, (AIMessage, ToolMessage)):
+                                print(f"{'─'*60}", flush=True)
+
+                    over_limit = last_usage is not None and last_usage["total_tokens"] / args.ctx >= 0.85
+                    if (needs_compress and pending_tool_calls == 0) or over_limit:
+                        break
+
+                conversation.extend(new_messages)
+
+                if last_usage and args.debug:
+                    u = last_usage
+                    pct = round(u["total_tokens"] / args.ctx * 100)
                     print(f"\n[Contexto: {u['input_tokens']} in + {u['output_tokens']} out = {u['total_tokens']}/{args.ctx} tokens ({pct}%)]")
 
-            if limit_reached:
-                if args.debug:
-                    print(f"\n[!] Limite de {args.max_iter} iterações atingido. A pedir sumário...")
-                conversation.append(HumanMessage(content=(
-                    "You have reached the maximum number of tool calls. "
-                    "Based on the evidence collected so far, provide a concise summary of your findings. "
-                    "Do NOT call any more tools."
-                )))
-                summary_response = llm.invoke(conversation)
-                conversation.append(summary_response)
-                if args.debug:
-                    print(f"\n{'─'*60}")
-                    print(f"  [DEBUG] additional_kwargs={summary_response.additional_kwargs}")
-                content = summary_response.content if isinstance(summary_response.content, str) else str(summary_response.content)
-                if not content.strip():
-                    content = (getattr(summary_response, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
-                print(f"\n{'='*60}")
-                print(f"Agente (sumário): {content}")
-                print(f"{'='*60}\n")
-                import base64 as _b64
-                ts = int(time.time())
-                out_file = f"/exports/investigation_summary_{ts}.txt"
-                b64 = _b64.b64encode(content.encode("utf-8")).decode()
-                run_in_sandbox(f"echo '{b64}' | base64 -d > {out_file}")
-                print(f"[*] Sumário guardado em: {out_file}\n")
-            else:
-                # Resposta final — último AIMessage sem tool calls
-                answer = next(
-                    (m for m in reversed(new_messages)
-                     if isinstance(m, AIMessage) and not (getattr(m, "tool_calls", None) or [])),
-                    None,
-                )
-                if answer:
-                    content = answer.content if isinstance(answer.content, str) else str(answer.content)
-                    if not content.strip():
-                        content = (getattr(answer, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
-                    print(f"\n{'='*60}")
-                    print(f"Agente: {content}")
-                    print(f"{'='*60}\n")
+                if needs_compress:
+                    part_n = len(intermediate_files) + 1
+                    inter_file = f"/exports/investigation_part_{ts_query}_{part_n:02d}.txt"
+                    reason = f"Contexto a {round(last_usage['total_tokens']/args.ctx*100)}%"
+                    print(f"\n[*] {reason} — a guardar relatório intermédio {part_n} e continuar...")
+
+                    if len(intermediate_files) >= MAX_COMPRESSIONS:
+                        agent_active = False
+                        print(f"[!] Limite de {MAX_COMPRESSIONS} compressões atingido. A gerar relatório final...")
+                        content = _consolidate()
+                        print(f"\n{'='*60}")
+                        print(f"Agente: {content}")
+                        print(f"{'='*60}\n")
+                        b64 = _b64.b64encode(content.encode("utf-8")).decode()
+                        run_in_sandbox(f"echo '{b64}' | base64 -d > {out_file}")
+                        print(f"[*] Relatório final guardado em: {out_file}\n")
+                    else:
+                        # Call 1: sumário completo → ficheiro intermédio
+                        full_resp = llm.invoke(conversation + [HumanMessage(content=(
+                            "Write a comprehensive intermediate investigation report of ALL evidence found so far.\n"
+                            "BEGIN IMMEDIATELY with the report content — do NOT explain what you are about to do.\n"
+                            "Do NOT use phrases like 'The user is asking me to...', 'Let me review...', 'I should...'.\n"
+                            "Do NOT call any tools. Do NOT include bash commands or code blocks.\n"
+                            "Structure: users found, key files and their content, suspicious items, registry/system findings, timestamps.\n"
+                            "Be thorough and specific — exact file paths, usernames, timestamps, hash values, suspicious content.\n"
+                            "ONLY report findings from actual tool results already in this conversation.\n"
+                            "End with a brief list of areas not yet explored."
+                        ))])
+                        full_summary = _llm_content(full_resp)
+                        header = f"=== Relatório Intermédio {part_n} [{int(time.time())}] ===\n"
+                        b64 = _b64.b64encode((header + full_summary).encode("utf-8")).decode()
+                        run_in_sandbox(f"echo '{b64}' | base64 -d > {inter_file}")
+                        intermediate_files.append(inter_file)
+                        print(f"[*] Relatório {part_n} guardado em: {inter_file}")
+
+                        # Call 2: sumário curto → conversa comprimida
+                        short_resp = llm.invoke(conversation + [HumanMessage(content=(
+                            "Summarise the investigation so far in 3-5 bullet points (maximum 100 words). "
+                            "Include only the most important confirmed findings from tool results. "
+                            "Do NOT include bash commands or code blocks."
+                        ))])
+                        short_summary = _llm_content(short_resp)
+
+                        conversation = [
+                            conversation[0],
+                            original_query_msg,
+                            AIMessage(content=(
+                                f"[Investigation part {part_n} saved to {inter_file}]\n\n"
+                                f"Key findings so far:\n{short_summary}"
+                            )),
+                            HumanMessage(content=(
+                                "Continue the investigation from where you left off. "
+                                "Focus on areas not yet fully explored. "
+                                f"Detailed findings so far are in {inter_file}."
+                            )),
+                        ]
+
                 else:
+                    agent_active = False
+                    answer = next(
+                        (m for m in reversed(new_messages)
+                         if isinstance(m, AIMessage) and not (getattr(m, "tool_calls", None) or [])),
+                        None,
+                    )
+                    content = ""
+                    if answer:
+                        content = answer.content if isinstance(answer.content, str) else str(answer.content)
+                        if not content.strip():
+                            content = (getattr(answer, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
+
+                    if intermediate_files:
+                        content = _consolidate()
+                        b64 = _b64.b64encode(content.encode("utf-8")).decode()
+                        run_in_sandbox(f"echo '{b64}' | base64 -d > {out_file}")
+                        print(f"[*] Relatório final guardado em: {out_file}\n")
+
                     print(f"\n{'='*60}")
-                    print("Agente: Não foi possível obter uma resposta final.")
+                    print(f"Agente: {content}" if content else "Agente: Não foi possível obter uma resposta final.")
                     print(f"{'='*60}\n")
 
         except KeyboardInterrupt:
