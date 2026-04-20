@@ -9,6 +9,9 @@ import atexit
 import base64 as _b64
 import os
 import re
+
+_ORANGE = "\033[38;5;208m"
+_RESET  = "\033[0m"
 import sys
 from time import time
 import time
@@ -467,9 +470,9 @@ def main():
                                 raw = msg.content if isinstance(msg.content, str) else ""
 
                                 if args.debug:
-                                    print(f"\n{'─'*60}")
-                                    print(f"  [DEBUG] additional_kwargs={msg.additional_kwargs}")
-                                    print(f"  [DEBUG] response_metadata={msg.response_metadata}")
+                                    print(f"{_ORANGE}\n{'─'*60}{_RESET}")
+                                    print(f"{_ORANGE}  [DEBUG] additional_kwargs={msg.additional_kwargs}{_RESET}")
+                                    print(f"{_ORANGE}  [DEBUG] response_metadata={msg.response_metadata}{_RESET}")
 
                                 thought = (getattr(msg, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
                                 if not thought:
@@ -498,11 +501,11 @@ def main():
                                 pending_tool_calls += len(tool_calls)
 
                                 if args.debug:
-                                    print(f"  [AIMessage] content={visible!r}")
+                                    print(f"{_ORANGE}  [AIMessage] content={visible!r}{_RESET}")
                                     if tool_calls:
-                                        print(f"  [tool_calls]")
+                                        print(f"{_ORANGE}  [tool_calls]{_RESET}")
                                     for tc in tool_calls:
-                                        print(f"    → {tc['name']}({tc['args']})")
+                                        print(f"{_ORANGE}    → {tc['name']}({tc['args']}){_RESET}")
 
                                 if getattr(msg, "usage_metadata", None):
                                     last_usage = msg.usage_metadata
@@ -515,10 +518,10 @@ def main():
                                 if args.debug:
                                     out = msg.content[:300] if isinstance(msg.content, str) else str(msg.content)[:300]
                                     suffix = "…" if isinstance(msg.content, str) and len(msg.content) > 300 else ""
-                                    print(f"  [resultado] {out!r}{suffix}")
+                                    print(f"{_ORANGE}  [resultado] {out!r}{suffix}{_RESET}")
 
                             if args.debug and isinstance(msg, (AIMessage, ToolMessage)):
-                                print(f"{'─'*60}", flush=True)
+                                print(f"{_ORANGE}{'─'*60}{_RESET}", flush=True)
 
                     over_limit = last_usage is not None and last_usage["total_tokens"] / args.ctx >= 0.85
                     if (needs_compress and pending_tool_calls == 0) or over_limit:
@@ -526,10 +529,11 @@ def main():
 
                 conversation.extend(new_messages)
 
-                if last_usage and args.debug:
+                if last_usage:
                     u = last_usage
                     pct = round(u["total_tokens"] / args.ctx * 100)
-                    print(f"\n[Contexto: {u['input_tokens']} in + {u['output_tokens']} out = {u['total_tokens']}/{args.ctx} tokens ({pct}%)]")
+                    color, reset = (_ORANGE, _RESET) if args.debug else ("", "")
+                    print(f"{color}\n[Contexto: {u['input_tokens']} in + {u['output_tokens']} out = {u['total_tokens']}/{args.ctx} tokens ({pct}%)]{reset}")
 
                 if needs_compress:
                     part_n = len(intermediate_files) + 1
