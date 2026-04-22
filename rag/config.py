@@ -27,5 +27,5 @@ CHUNK_OVERLAP: int = 50
 
 # ─── LLM (Ollama local) ──────────────────────────────────────────────────────
 
-OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
+OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "gemma4:e4b")
 OLLAMA_URL: str   = os.getenv("OLLAMA_URL",   "http://localhost:11434")

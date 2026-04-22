@@ -9,12 +9,12 @@ import atexit
 import base64 as _b64
 import os
 import re
-
-_ORANGE = "\033[38;5;208m"
-_RESET  = "\033[0m"
 import sys
 from time import time
 import time
+
+_ORANGE = "\033[38;5;208m"
+_RESET  = "\033[0m"
 
 try:
     import readline  # activa setas, histórico e edição no input() — Linux/macOS
@@ -290,7 +290,7 @@ _default_evidence_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="AIAgent@forensics — Agente LLM para investigação forense")
-    parser.add_argument("--model",    default=os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
+    parser.add_argument("--model",    default=os.getenv("OLLAMA_MODEL", "gemma4:e4b"),
                         help="Modelo Ollama (default: llama3.2:9b)")
     parser.add_argument("--url",      default=os.getenv("OLLAMA_URL", "http://localhost:11434"),
                         help="URL do servidor Ollama (default: http://localhost:11434)")
@@ -413,6 +413,8 @@ def main():
         out_file = f"/exports/investigation_summary_{ts_query}.txt"
         intermediate_files: list[str] = []
         MAX_COMPRESSIONS = 20
+        forced_continuations = 0
+        MAX_FORCED = 3
 
         def _llm_content(resp) -> str:
             c = resp.content if isinstance(resp.content, str) else str(resp.content)
@@ -536,84 +538,110 @@ def main():
                     print(f"{color}\n[Contexto: {u['input_tokens']} in + {u['output_tokens']} out = {u['total_tokens']}/{args.ctx} tokens ({pct}%)]{reset}")
 
                 if needs_compress:
-                    part_n = len(intermediate_files) + 1
-                    inter_file = f"/exports/investigation_part_{ts_query}_{part_n:02d}.txt"
-                    reason = f"Contexto a {round(last_usage['total_tokens']/args.ctx*100)}%"
-                    print(f"\n[*] {reason} — a guardar relatório intermédio {part_n} e continuar...")
+                    has_tool_results = any(isinstance(m, ToolMessage) for m in new_messages)
 
-                    if len(intermediate_files) >= MAX_COMPRESSIONS:
-                        agent_active = False
-                        print(f"[!] Limite de {MAX_COMPRESSIONS} compressões atingido. A gerar relatório final...")
-                        content = _consolidate()
-                        print(f"\n{'='*60}")
-                        print(f"Agente: {content}")
-                        print(f"{'='*60}\n")
-                        b64 = _b64.b64encode(content.encode("utf-8")).decode()
-                        run_in_sandbox(f"echo '{b64}' | base64 -d > {out_file}")
-                        print(f"[*] Relatório final guardado em: {out_file}\n")
-                    else:
-                        # Call 1: sumário completo → ficheiro intermédio
-                        full_resp = llm.invoke(conversation + [HumanMessage(content=(
-                            "Write a comprehensive intermediate investigation report of ALL evidence found so far.\n"
-                            "BEGIN IMMEDIATELY with the report content — do NOT explain what you are about to do.\n"
-                            "Do NOT use phrases like 'The user is asking me to...', 'Let me review...', 'I should...'.\n"
-                            "Do NOT call any tools. Do NOT include bash commands or code blocks.\n"
-                            "Structure: users found, key files and their content, suspicious items, registry/system findings, timestamps.\n"
-                            "Be thorough and specific — exact file paths, usernames, timestamps, hash values, suspicious content.\n"
-                            "ONLY report findings from actual tool results already in this conversation.\n"
-                            "End with a brief list of areas not yet explored."
-                        ))])
-                        full_summary = _llm_content(full_resp)
-                        header = f"=== Relatório Intermédio {part_n} [{int(time.time())}] ===\n"
-                        b64 = _b64.b64encode((header + full_summary).encode("utf-8")).decode()
-                        run_in_sandbox(f"echo '{b64}' | base64 -d > {inter_file}")
-                        intermediate_files.append(inter_file)
-                        print(f"[*] Relatório {part_n} guardado em: {inter_file}")
-
-                        # Call 2: sumário curto → conversa comprimida
-                        short_resp = llm.invoke(conversation + [HumanMessage(content=(
-                            "Summarise the investigation so far in 3-5 bullet points (maximum 100 words). "
-                            "Include only the most important confirmed findings from tool results. "
-                            "Do NOT include bash commands or code blocks."
-                        ))])
-                        short_summary = _llm_content(short_resp)
-
+                    if not has_tool_results:
                         conversation = [
                             conversation[0],
                             original_query_msg,
-                            AIMessage(content=(
-                                f"[Investigation part {part_n} saved to {inter_file}]\n\n"
-                                f"Key findings so far:\n{short_summary}"
-                            )),
-                            HumanMessage(content=(
-                                "Continue the investigation from where you left off. "
-                                "Focus on areas not yet fully explored. "
-                                f"Detailed findings so far are in {inter_file}."
-                            )),
+                            HumanMessage(content="Continue the investigation."),
                         ]
+                    else:
+                        part_n = len(intermediate_files) + 1
+                        inter_file = f"/exports/investigation_part_{ts_query}_{part_n:02d}.txt"
+                        reason = f"Contexto a {round(last_usage['total_tokens']/args.ctx*100)}%"
+                        print(f"\n[*] {reason} — a guardar relatório intermédio {part_n} e continuar...")
+
+                        if len(intermediate_files) >= MAX_COMPRESSIONS:
+                            agent_active = False
+                            print(f"[!] Limite de {MAX_COMPRESSIONS} compressões atingido. A gerar relatório final...")
+                            content = _consolidate()
+                            print(f"\n{'='*60}")
+                            print(f"Agente: {content}")
+                            print(f"{'='*60}\n")
+                            b64 = _b64.b64encode(content.encode("utf-8")).decode()
+                            run_in_sandbox(f"echo '{b64}' | base64 -d > {out_file}")
+                            print(f"[*] Relatório final guardado em: {out_file}\n")
+                        else:
+                            # Call 1: sumário completo → ficheiro intermédio
+                            full_resp = llm.invoke(conversation + [HumanMessage(content=(
+                                "Write a comprehensive intermediate investigation report of ALL evidence found so far.\n"
+                                "BEGIN IMMEDIATELY with the report content — do NOT explain what you are about to do.\n"
+                                "Do NOT use phrases like 'The user is asking me to...', 'Let me review...', 'I should...'.\n"
+                                "Do NOT call any tools. Do NOT include bash commands or code blocks.\n"
+                                "Structure: users found, key files and their content, suspicious items, registry/system findings, timestamps.\n"
+                                "Be thorough and specific — exact file paths, usernames, timestamps, hash values, suspicious content.\n"
+                                "ONLY report findings from actual tool results already in this conversation.\n"
+                                "End with a brief list of areas not yet explored."
+                            ))])
+                            full_summary = _llm_content(full_resp)
+                            header = f"=== Relatório Intermédio {part_n} [{int(time.time())}] ===\n"
+                            b64 = _b64.b64encode((header + full_summary).encode("utf-8")).decode()
+                            run_in_sandbox(f"echo '{b64}' | base64 -d > {inter_file}")
+                            intermediate_files.append(inter_file)
+                            print(f"[*] Relatório {part_n} guardado em: {inter_file}")
+
+                            # Call 2: sumário curto → conversa comprimida
+                            short_resp = llm.invoke(conversation + [HumanMessage(content=(
+                                "Summarise the investigation so far in 3-5 bullet points (maximum 100 words). "
+                                "Include only the most important confirmed findings from tool results. "
+                                "Do NOT include bash commands or code blocks."
+                            ))])
+                            short_summary = _llm_content(short_resp)
+
+                            conversation = [
+                                conversation[0],
+                                original_query_msg,
+                                AIMessage(content=(
+                                    f"[Investigation part {part_n} saved to {inter_file}]\n\n"
+                                    f"Key findings so far:\n{short_summary}"
+                                )),
+                                HumanMessage(content=(
+                                    "Continue the forensic investigation. "
+                                    "Do NOT provide a final answer or summary yet — keep running commands.\n"
+                                    "Investigate areas NOT yet covered: browser history databases, "
+                                    "email content and attachments, encoded/encrypted files (decode them), "
+                                    "registry hives (USB history, installed software, user activity), "
+                                    "other user profiles, Recycle Bin contents, and any suspicious files.\n"
+                                    f"Detailed findings so far are in {inter_file}. "
+                                    "Run commands until you have exhausted all leads."
+                                )),
+                            ]
 
                 else:
-                    agent_active = False
-                    answer = next(
-                        (m for m in reversed(new_messages)
-                         if isinstance(m, AIMessage) and not (getattr(m, "tool_calls", None) or [])),
-                        None,
-                    )
-                    content = ""
-                    if answer:
-                        content = answer.content if isinstance(answer.content, str) else str(answer.content)
-                        if not content.strip():
-                            content = (getattr(answer, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
+                    low_usage = (last_usage is not None and
+                                 last_usage["total_tokens"] / args.ctx < 0.25)
+                    if low_usage and intermediate_files and forced_continuations < MAX_FORCED:
+                        forced_continuations += 1
+                        conversation.extend(new_messages)
+                        conversation.append(HumanMessage(content=(
+                            "You stopped investigating too early. There are still unexplored areas. "
+                            "Continue running forensic commands — do NOT summarize yet."
+                        )))
+                        print(f"[*] Investigação terminou cedo ({round(last_usage['total_tokens']/args.ctx*100)}% ctx) "
+                              f"— a forçar continuação ({forced_continuations}/{MAX_FORCED})...")
+                    else:
+                        agent_active = False
+                        answer = next(
+                            (m for m in reversed(new_messages)
+                             if isinstance(m, AIMessage) and not (getattr(m, "tool_calls", None) or [])),
+                            None,
+                        )
+                        content = ""
+                        if answer:
+                            content = answer.content if isinstance(answer.content, str) else str(answer.content)
+                            if not content.strip():
+                                content = (getattr(answer, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
 
-                    if intermediate_files:
-                        content = _consolidate()
-                        b64 = _b64.b64encode(content.encode("utf-8")).decode()
-                        run_in_sandbox(f"echo '{b64}' | base64 -d > {out_file}")
-                        print(f"[*] Relatório final guardado em: {out_file}\n")
+                        if intermediate_files:
+                            content = _consolidate()
+                            b64 = _b64.b64encode(content.encode("utf-8")).decode()
+                            run_in_sandbox(f"echo '{b64}' | base64 -d > {out_file}")
+                            print(f"[*] Relatório final guardado em: {out_file}\n")
 
-                    print(f"\n{'='*60}")
-                    print(f"Agente: {content}" if content else "Agente: Não foi possível obter uma resposta final.")
-                    print(f"{'='*60}\n")
+                        print(f"\n{'='*60}")
+                        print(f"Agente: {content}" if content else "Agente: Não foi possível obter uma resposta final.")
+                        print(f"{'='*60}\n")
 
         except KeyboardInterrupt:
             print("\n[!] Agente cancelado. A voltar ao prompt...")
