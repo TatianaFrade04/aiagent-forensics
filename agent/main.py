@@ -245,6 +245,13 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "   To read any file inside /forensics/ (.txt, .doc, .csv, etc.), ALWAYS use\n"
     "   run_forensics_command with cat, strings, or head.\n"
     "   NEVER use ingest_pdf_document on files found inside /forensics/.\n"
+    "13. EVERY finding you report MUST include its exact source so the investigator can verify it.\n"
+    "   For filesystem findings: include the full path (e.g. '{evidence}/USERS/<username>/Documents/report.txt').\n"
+    "   For registry findings: include the hive file path AND the registry key\n"
+    "     (e.g. hive: '{evidence}/Windows/System32/config/SAM', key: '/SAM/Domains/Account/Users/Names/<username>').\n"
+    "   For database findings (SQLite, ESE, MDB): include the database file path and the table/query used.\n"
+    "   For metadata findings (exiftool, strings): include the exact file path the tool was run on.\n"
+    "   NEVER state a fact without saying where it was found. A finding without a source is inadmissible.\n"
 )
 
 
