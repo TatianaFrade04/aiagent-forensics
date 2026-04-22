@@ -43,6 +43,26 @@ def start_container() -> bool:
         if check.returncode != 0:
             break
         time.sleep(1)
+    img_check = subprocess.run(
+        ["docker", "image", "inspect", "forensics-sandbox"],
+        capture_output=True
+    )
+    if img_check.returncode != 0:
+        print("[*] Imagem 'forensics-sandbox' não encontrada. A fazer build...")
+        dockerfile_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "docker"))
+        try:
+            subprocess.run(
+                ["docker", "build", "-t", "forensics-sandbox", dockerfile_dir],
+                check=True
+            )
+            print("[+] Build concluído.")
+        except FileNotFoundError:
+            print("[!] Docker não encontrado. Verifica se está instalado.")
+            return False
+        except subprocess.CalledProcessError as e:
+            print(f"[!] Erro no build da imagem: {e}")
+            return False
+
     print("[*] A iniciar container forense...")
     try:
         docker_run_args = [
