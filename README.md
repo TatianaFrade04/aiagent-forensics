@@ -1,10 +1,10 @@
 # AIAgent@forensics
 
-**Politécnico de Leiria — ESTG | Licenciatura em Engenharia Informática**
+**Politécnico de Leiria — ESTG | Licenciatura em Engenharia Informática**  
 Projecto Final 2025–2026
 
 Agente LLM com paradigma **ReAct (Reason + Act)** para investigação forense digital.
-O agente raciocina autonomamente e executa comandos forenses dentro de um container Docker isolado.
+O agente raciocina autonomamente, executa comandos forenses dentro de um container Docker isolado e gera relatórios detalhados com as fontes de cada descoberta.
 
 ---
 
@@ -12,19 +12,25 @@ O agente raciocina autonomamente e executa comandos forenses dentro de um contai
 
 ```
 Windows (máquina local)
-├── Ollama  ← modelo LLM corre aqui
-├── Python/LangChain  ← agente corre aqui
-├── evidence/  ← coloca aqui a imagem forense
+├── Ollama            ← modelo LLM (local ou servidor remoto)
+├── Python / LangGraph  ← agente ReAct corre aqui
+├── RAG (ChromaDB)    ← índice de documentos PDF
+├── evidence/         ← coloca aqui a imagem forense (ou directório extraído)
+├── exports/          ← relatórios e ficheiros de output
 └── Container Docker (sandbox isolada)
-    ├── --network none      (sem internet)
-    ├── /forensics_raw/     (imagem original, read-only)
-    ├── /forensics_ewf/     (mount ewf para E01 → ewf1)
-    └── /forensics/partN/   (partições NTFS montadas)
+    ├── --network none           (sem internet)
+    ├── /forensics_raw/          (imagem original, read-only — modo normal)
+    ├── /forensics/              (directório de evidência — modo --no-mount)
+    ├── /forensics_ewf/          (mount ewf para E01 → ewf1)
+    ├── /forensics/partN/        (partições NTFS montadas automaticamente)
+    └── /exports/                (escrita de relatórios e ficheiros)
 ```
+
+O agente usa um **loop ReAct com janela deslizante**: quando o contexto atinge 70 % de ocupação, comprime o histórico para um relatório intermédio em disco e resume a investigação. A 85 % força a conclusão. Se o modelo terminar com menos de 25 % de contexto usado e ainda houver relatórios intermédios, o agente deteta a terminação prematura e força uma continuação (máx. 3 vezes).
 
 ---
 
-## Formatos suportados
+## Formatos de evidência suportados
 
 | Formato | Extensão | Ferramenta |
 |---------|----------|------------|
@@ -33,136 +39,164 @@ Windows (máquina local)
 | RAW / DD | `.dd .raw .img` | mount directo |
 | Virtual Hard Disk | `.vhd` | qemu-nbd |
 | VMware | `.vmdk` | qemu-nbd |
+| Directório já extraído | `pasta/` | `--no-mount` |
 
 ---
 
 ## Instalação
 
 ### Pré-requisitos
-- [Docker Desktop](https://www.docker.com/products/docker-desktop) (actualizado)
-- [Ollama](https://ollama.com/download) com `ollama pull qwen2.5:7b`
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop) (actualizado, a correr)
+- [Ollama](https://ollama.com/download) com o modelo desejado: `ollama pull gemma4:e4b`
 - [uv](https://docs.astral.sh/uv/) (gestor de pacotes Python recomendado)
 
-### 1. Construir a imagem Docker
+### 1. Instalar dependências Python
 
-```bash
-docker build -t forensics-sandbox ./docker
-```
-
-> Na primeira execução demora alguns minutos (instala ferramentas forenses).
-
-### 2. Instalar dependências Python
-
-Com `uv` (recomendado):
 ```bash
 uv sync
 ```
 
-Com `pip`:
-```bash
-pip install -r agent/requirements.txt
-```
+### 2. Colocar a evidência
 
-### 3. Colocar a imagem forense
+Imagem forense:
 ```
 evidence/
-└── imagem.E01   ← coloca aqui (ou .dd, .vhd, .vmdk)
+└── imagem.E01   ← (ou .dd, .vhd, .vmdk)
 ```
 
-### 4. Configurar o modelo (opcional)
-
-Criar ficheiro `.env` na raiz (ou em `agent/`):
+Ou directório já extraído (usar com `--no-mount`):
 ```
-OLLAMA_MODEL=qwen2.5:7b
+evidence/
+└── part006/
+    └── USERS/
+        └── ...
+```
+
+### 3. Configurar o modelo (opcional)
+
+Criar ficheiro `.env` na raiz ou em `agent/`:
+```env
+OLLAMA_MODEL=gemma4:e4b
 OLLAMA_URL=http://localhost:11434
-MAX_ITERATIONS=15
+FORENSICS_IMAGE_PATH=./evidence
 ```
+
+> A imagem Docker (`forensics-sandbox`) é construída automaticamente na primeira execução se não existir.
 
 ---
 
 ## Utilização
 
-Com `uv` (recomendado):
 ```bash
-uv run agent/main.py
+uv run forensics
 ```
 
-Com Python directamente:
+### Opções da linha de comandos
+
+| Opção | Tipo | Default | Descrição |
+|-------|------|---------|-----------|
+| `--model` | string | `gemma4:e4b` | Modelo Ollama a usar |
+| `--url` | string | `http://localhost:11434` | URL do servidor Ollama |
+| `--ctx` | int | `32768` | Tamanho do contexto em tokens |
+| `--temp` | float | `0.3` | Temperatura do modelo |
+| `--dir` | path | `./evidence` | Directório host com a imagem forense |
+| `--evidence` | path | auto | Partição dentro do container a usar (ex: `/forensics/part002`) |
+| `--no-mount` | flag | — | Monta o directório de evidência directamente em `/forensics` sem tentar montar imagem E01/DD |
+| `--no-clear-rag` | flag | — | Mantém documentos RAG indexados de sessões anteriores |
+| `--think` | flag | activado | Activa modo de raciocínio do modelo (reasoning) |
+| `--debug` | flag | — | Mostra campos raw do AIMessage para inspecção |
+
+### Exemplos
+
 ```bash
-python agent/main.py
+# Investigação normal com imagem E01
+uv run forensics --model gemma4:e4b --ctx 65536
+
+# Modelo noutro servidor
+uv run forensics --url http://192.168.1.100:11434 --model gemma4:e4b
+
+# Evidência já extraída como directório
+uv run forensics --no-mount
+
+# Reutilizar RAG de sessão anterior
+uv run forensics --no-clear-rag
 ```
 
-### Exemplos de perguntas ao agente
+### Comandos especiais no chat
+
+| Comando | Acção |
+|---------|-------|
+| `estrutura` | Mostra o que está montado em `/forensics` |
+| `limpar` | Limpa o histórico de conversa |
+| `sair` | Termina o programa |
+
+---
+
+## Exemplos de perguntas ao agente
 
 ```
-Tu: Quais são os utilizadores existentes?
-Tu: Quantos utilizadores existem?
-Tu: Lista os ficheiros do desktop de <username>
-Tu: Encontra todos os ficheiros PDF
-Tu: Qual é o MD5 do ficheiro R40599.pdf?
-Tu: Qual é o esquema de partições do disco?
-***Tu: Mostra os event logs do sistema***
-Tu: Mostra os metadados EXIF de uma fotografia
-Tu: Que chaves de registo estão configuradas para auto-arranque?
-Tu: Mostra os ficheiros modificados entre 25 e 27 de maio de 2015
-Tu: Que versão do Windows está instalada?
-
-Tu: Quando foi instalado o sistema operativo.
-Tu: Quando foi usado pela última vez.
-Tu: Quais os programas instalados no sistema operativo.
-Tu: Que sistema operativo é este?
-
-browser history
-Tu: Identify websites visited by a suspect
-Tu: Find file downloads and their source URLs
-Tu: Extract search queries entered in search engines
-Tu: Determine timeline of web activity
-Tu: Find saved credentials or form data (X) ### tem que ser trabalhada , key3.db/key4.db e de ferramentas específicas como o firefox_decrypt.
-
-Jump Lists
-Tu: Identify recently accessed documents, images, and files
-Tu: Find evidence that specific files were opened by a user
-Tu: Determine which applications were used most frequently
-Tu: Recover file paths even if the files were later deleted
-Tu: Build a timeline of user activity
-
-string_search
-Tu: Find all email addresses in user files
-Tu: search for the word "password" in all documents
-Tu: find all URLs in user documents
-Tu: search for ip address across all user files
-Tu: extract all strings from a suspicious executable on the desktop
-
-Prefecth
-Tu: Prove that CMD.exe was executed on the system
-Tu: When was the last time a program ran?
-Tu: Find evidence of suspicious tools or malware that were run
-Tu: What programs were executed most recently
-Tu: Was <suspicious_tool.exe> ever executed
+Que sistema operativo é este e quando foi instalado?
+Quantos utilizadores existem? (filesystem + registo SAM)
+Lista os ficheiros do desktop de <username>
+Que programas estão instalados no sistema?
+Quais os dispositivos USB que foram ligados?
+Que chaves de registo estão configuradas para auto-arranque?
+Mostra os ficheiros modificados entre 25 e 27 de maio de 2015
+Qual é o MD5 do ficheiro suspeito.exe?
+Mostra os metadados EXIF de uma fotografia
+Identifica websites visitados pelo suspeito (browser history)
+Mostra os ficheiros recentemente acedidos (Jump Lists)
+Prova que cmd.exe foi executado no sistema (Prefetch)
+Procura a palavra "password" em todos os documentos
+Faz análise completa de utilizadores, programas instalados, ficheiros recentes e dispositivos USB
 ```
-Pergunta teste sumario: faz analise completa de utilizadores, programas instalados, ficheiros recentes e dispositivos usb
-
-### Comandos especiais
-- `estrutura` — mostra o que está montado em /forensics
-- `limpar` — limpa o histórico de conversa
-- `sair` — termina o programa
 
 ---
 
 ## Sistema de Skills
 
-O agente usa um sistema de **skills modulares** para injetar conhecimento forense específico no contexto, apenas quando relevante para a pergunta do utilizador. Isto poupa contexto e foca o modelo na ferramenta certa.
+O agente usa **skills modulares** para injectar conhecimento forense específico no system prompt, apenas quando relevante para a pergunta. Isto poupa contexto e foca o modelo na ferramenta certa.
 
-As skills estão em `skills/*.txt` e são carregadas automaticamente no arranque. Para cada pergunta, o sistema seleciona a skill mais relevante por keyword matching e injeta os exemplos de uso no system prompt.
+As skills estão em `skills/*.txt` e são carregadas automaticamente no arranque. Para cada pergunta, o sistema seleciona a skill mais relevante por keyword matching.
 
 | Skill | Ferramenta | Casos de uso |
 |-------|-----------|--------------|
+| `browser_history` | sqlite3 | Histórico de navegação (Chrome, Firefox, Edge) |
 | `exiftool` | ExifTool | Metadados EXIF de imagens e documentos |
+| `file_search` | find / grep | Pesquisa de ficheiros por nome, data, conteúdo |
+| `jump_lists` | python-libjumplist | Ficheiros acedidos recentemente por aplicação |
+| `prefetch` | strings / peparse | Prova de execução de programas |
+| `rag` | ChromaDB | Consulta de documentos PDF indexados |
+| `recycle_bin` | python / strings | Ficheiros eliminados da Reciclagem |
 | `reglookup` | reglookup | Consulta directa a hives do registo Windows |
 | `regripper` | RegRipper | Análise forense automatizada do registo |
-| `timestamps` | find / stat | Timestamps de ficheiros, intervalos de datas, timelines |
+| `string_search` | strings / grep | Pesquisa de texto em ficheiros binários |
+| `timestamps` | find / stat | Timestamps, intervalos de datas, timelines |
 
-Para adicionar uma nova skill, basta criar um ficheiro `skills/nome.txt` seguindo o formato de `skills/TEMPLATE.txt`. Nenhuma alteração de código é necessária.
+Para adicionar uma nova skill, cria um ficheiro `skills/nome.txt` seguindo o formato de `skills/TEMPLATE.txt`. Não é necessária nenhuma alteração de código.
+
+---
+
+## Sistema RAG
+
+O agente inclui um pipeline **RAG (Retrieval-Augmented Generation)** para indexar e consultar documentos PDF (manuais, relatórios forenses, jurisprudência).
+
+- Os PDFs são indexados com embeddings locais (`all-MiniLM-L6-v2`) e guardados em `chroma_store/`
+- O agente dispõe de duas ferramentas RAG: `ingest_pdf_document` e `query_rag_documents`
+- Por omissão, o índice é limpo no arranque (usar `--no-clear-rag` para manter entre sessões)
+
+---
+
+## Relatórios e output
+
+Todos os relatórios são guardados em `exports/` (montado também em `/exports/` dentro do container):
+
+- **Relatório final** (`export_<timestamp>.txt`) — gerado automaticamente no final de cada investigação, com cabeçalho que inclui o tempo de resposta e a pergunta original
+- **Relatórios intermédios** (`intermediate_<n>_<timestamp>.txt`) — criados durante compressão de contexto, consolidados no relatório final
+- **Ficheiros de output** — qualquer ficheiro guardado pelo agente em `/exports/` fica disponível em `exports/` no host
+
+Todos os achados incluem a sua **fonte exacta** (caminho completo, hive + chave de registo, ou ficheiro de base de dados + tabela).
 
 ---
 
@@ -171,36 +205,53 @@ Para adicionar uma nova skill, basta criar um ficheiro `skills/nome.txt` seguind
 ```
 aiagent-forensics/
 ├── agent/
-│   ├── main.py          ← agente principal (chatbot ReAct)
+│   ├── main.py          ← agente principal (ReAct loop, compressão de contexto, relatórios)
 │   ├── skills.py        ← carregamento e selecção de skills
-│   ├── tools.py         ← execução de comandos no container
+│   ├── tools.py         ← gestão do container Docker e execução de comandos
 │   └── requirements.txt
 ├── docker/
-│   ├── Dockerfile       ← imagem Docker com ferramentas forenses
-│   └── entrypoint.sh    ← auto-detecção e montagem da imagem
+│   ├── Dockerfile       ← imagem com ferramentas forenses (sleuthkit, ewf, reglookup...)
+│   └── entrypoint.sh    ← auto-detecção e montagem de E01/DD/VHD/VMDK
+├── rag/
+│   ├── config.py        ← configuração centralizada (modelo, chunking, ChromaDB)
+│   ├── indexer.py       ← ingestão e chunking de PDFs
+│   ├── retriever.py     ← pesquisa semântica no ChromaDB
+│   └── generator.py     ← geração de resposta com contexto RAG
 ├── skills/
 │   ├── TEMPLATE.txt     ← template para novas skills
+│   ├── browser_history.txt
 │   ├── exiftool.txt
+│   ├── file_search.txt
+│   ├── jump_lists.txt
+│   ├── prefetch.txt
+│   ├── rag.txt
+│   ├── recycle_bin.txt
 │   ├── reglookup.txt
 │   ├── regripper.txt
+│   ├── string_search.txt
 │   └── timestamps.txt
-├── evidence/            ← coloca aqui a imagem forense (não commitar)
-└── exports/             ← ficheiros de output gerados pelo agente
+├── evidence/            ← coloca aqui a imagem forense ou directório (não commitar)
+├── exports/             ← relatórios gerados pelo agente
+├── chroma_store/        ← índice RAG persistente (não commitar)
+└── pyproject.toml
 ```
 
 ---
 
 ## Notas técnicas
 
-- O `entrypoint.sh` detecta automaticamente o tipo de imagem, monta o E01 via `ewfmount`, identifica as partições com `mmls` e monta cada partição NTFS via `losetup` + kernel NTFS driver
-- O agente implementa um loop ReAct manual: invoca o LLM, extrai tool calls (nativo ou fallback JSON), executa no container, injeta o resultado como `ToolMessage` e repete até o modelo responder sem tool calls
-- Inclui detecção de loops: se o modelo repetir o mesmo comando consecutivamente, é injectado um nudge para forçar uma abordagem diferente
-- O `docker exec` usa `bash -c` para preservar espaços em paths (ex: nomes com espaços)
-- Output acima de 100 linhas é guardado em `/tmp/` dentro do container; o modelo recebe as primeiras 100 linhas e instruções para usar `grep`/`head`
+- O `entrypoint.sh` detecta automaticamente o tipo de imagem, monta E01 via `ewfmount`, identifica partições com `mmls` e monta cada partição NTFS via `losetup` + driver NTFS do kernel
+- Com `--no-mount`, o directório de evidência é montado directamente em `/forensics`; o entrypoint não encontra nenhuma imagem e dorme
+- A imagem Docker `forensics-sandbox` é construída automaticamente se não existir (`docker build -t forensics-sandbox ./docker`)
+- Output acima de 100 linhas é guardado em `/tmp/` dentro do container; o agente recebe as primeiras 100 linhas e instruções para usar `grep`/`head`
+- Compressão de contexto: a 70 % de ocupação, o histórico é comprimido para relatório intermédio em disco; a 85 % o agente é forçado a concluir
+- Detecção de terminação prematura: se o agente terminar com < 25 % de contexto e existirem relatórios intermédios, é forçada uma continuação (máx. 3 vezes)
+- A listagem de utilizadores Windows cruza sempre duas fontes: directório `USERS/` (filesystem) e chave `/SAM/Domains/Account/Users/Names` (registo SAM)
 
 ---
 
 ## Orientadores
+
 - Miguel Negrão — miguel.negrao@ipleiria.pt
 - Miguel Frade — miguel.frade@ipleiria.pt
 - Patrício Domingues — patricio.domingues@ipleiria.pt

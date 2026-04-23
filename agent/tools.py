@@ -33,7 +33,7 @@ os.makedirs(EXPORTS_PATH, exist_ok=True)
 
 # ─── Gestão do container ──────────────────────────────────────────────────────
 
-def start_container() -> bool:
+def start_container(no_mount: bool = False) -> bool:
     """Destrói qualquer container existente e cria um novo de raiz."""
     rm_result = subprocess.run(["docker", "rm", "-f", CONTAINER_NAME], capture_output=True, text=True)
     if rm_result.returncode != 0 and rm_result.stderr.strip():
@@ -63,6 +63,12 @@ def start_container() -> bool:
             print(f"[!] Erro no build da imagem: {e}")
             return False
 
+    if no_mount:
+        volume_arg = f"{FORENSICS_IMAGE_PATH}:/forensics:ro"
+        print("[*] Modo directo — sem montagem de imagem forense.")
+    else:
+        volume_arg = f"{FORENSICS_IMAGE_PATH}:/forensics_raw:ro"
+
     print("[*] A iniciar container forense...")
     try:
         docker_run_args = [
@@ -78,24 +84,27 @@ def start_container() -> bool:
             "--cpus", "1.0",
             "--security-opt", "seccomp=unconfined",
             "--security-opt", "apparmor=unconfined",
-            "-v", f"{FORENSICS_IMAGE_PATH}:/forensics_raw:ro",
+            "-v", volume_arg,
             "-v", f"{EXPORTS_PATH}:/exports",
         ]
         docker_run_args += ["forensics-sandbox", "sleep", "infinity"]
         subprocess.run(docker_run_args, check=True, capture_output=True)
 
-        print("[*] A aguardar montagem da imagem forense...")
-        time.sleep(10)
-
-        check = subprocess.run(
-            ["docker", "exec", CONTAINER_NAME, "ls", "/forensics_ewf"],
-            capture_output=True, text=True
-        )
-        if "ewf1" in check.stdout:
-            print("[+] Container iniciado e imagem E01 montada com sucesso!")
+        if no_mount:
+            print("[+] Container iniciado em modo directo!")
         else:
-            print("[!] Container iniciado mas ewf1 nao encontrado.")
-            print(f"[!] Verifica com: docker logs {CONTAINER_NAME}")
+            print("[*] A aguardar montagem da imagem forense...")
+            time.sleep(10)
+
+            check = subprocess.run(
+                ["docker", "exec", CONTAINER_NAME, "ls", "/forensics_ewf"],
+                capture_output=True, text=True
+            )
+            if "ewf1" in check.stdout:
+                print("[+] Container iniciado e imagem E01 montada com sucesso!")
+            else:
+                print("[!] Container iniciado mas ewf1 nao encontrado.")
+                print(f"[!] Verifica com: docker logs {CONTAINER_NAME}")
 
         return True
 

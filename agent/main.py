@@ -321,6 +321,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-clear-rag", dest="clear_rag", action="store_false",
                         help="Mantém documentos RAG indexados de sessões anteriores")
     parser.set_defaults(clear_rag=True)
+    parser.add_argument("--no-mount", dest="no_mount", action="store_true", default=False,
+                        help="Monta a directoria de evidência directamente em /forensics (sem imagem E01/DD)")
     return parser.parse_args()
 
 
@@ -335,7 +337,7 @@ def main():
     print(f"[*] Contexto : {args.ctx} tokens | Temperatura: {args.temp}")
     sys.modules["agent.tools"].FORENSICS_IMAGE_PATH = os.path.abspath(args.dir)
     print(f"[*] Dir. imagem : {sys.modules['agent.tools'].FORENSICS_IMAGE_PATH}")
-    start_container()
+    start_container(no_mount=args.no_mount)
 
     if args.evidence:
         check = run_in_sandbox(f"test -d '{args.evidence}' && echo ok")
