@@ -243,7 +243,7 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "12. RAG tools (ingest_pdf_document, query_rag_documents) are ONLY for PDF documents\n"
     "   provided EXTERNALLY by the investigator — never for files inside the forensic image.\n"
     "   To read any file inside /forensics/ (.txt, .doc, .csv, etc.), ALWAYS use\n"
-    "   run_forensics_command with cat, strings, or head.\n"
+    "   run_forensics_command with strings or head (see Rule 14 — never cat).\n"
     "   NEVER use ingest_pdf_document on files found inside /forensics/.\n"
     "13. EVERY finding you report MUST include its exact source so the investigator can verify it.\n"
     "   For filesystem findings: include the full path (e.g. '{evidence}/USERS/<username>/Documents/report.txt').\n"
@@ -252,6 +252,17 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "   For database findings (SQLite, ESE, MDB): include the database file path and the table/query used.\n"
     "   For metadata findings (exiftool, strings): include the exact file path the tool was run on.\n"
     "   NEVER state a fact without saying where it was found. A finding without a source is inadmissible.\n"
+    "14. This tool returns at most 100 lines of output. Any command producing more than 100 lines is\n"
+    "   TRUNCATED — the excess is NOT visible to you and you will silently miss evidence.\n"
+    "   NEVER use `cat` on any file — its output will be cut off unpredictably.\n"
+    "   ALWAYS read files in controlled chunks:\n"
+    "     Count lines first:                 wc -l 'file'\n"
+    "     First chunk (lines 1–100):         head -n 100 'file'\n"
+    "     Next chunk (lines 101–200):        awk 'NR>=101 && NR<=200' 'file'\n"
+    "     Next chunk (lines 201–300):        awk 'NR>=201 && NR<=300' 'file'\n"
+    "     Search inside a file:              grep 'keyword' 'file'\n"
+    "   For binary files: strings 'file' | head -n 100  (NEVER strings alone)\n"
+    "   Continue reading chunks until you have seen all lines relevant to the investigation.\n"
 )
 
 
