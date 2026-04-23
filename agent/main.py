@@ -266,8 +266,18 @@ _SYSTEM_PROMPT_TEMPLATE = (
 )
 
 
-def build_system_prompt(evidence: str) -> str:
-    return _SYSTEM_PROMPT_TEMPLATE.format(evidence=evidence)
+def build_system_prompt(evidence: str, allow_network: bool = False) -> str:
+    prompt = _SYSTEM_PROMPT_TEMPLATE.format(evidence=evidence)
+    if allow_network:
+        prompt += (
+            "\nNETWORK MODE: Internet access is enabled in this container.\n"
+            "If a command returns 'command not found' or 'not installed', "
+            "AUTOMATICALLY install it with `sudo apt-get install -y <package>` "
+            "and then re-run the original command — do NOT ask the user for permission.\n"
+            "Only install tools directly relevant to the investigation. "
+            "Do NOT use the network for any other purpose.\n"
+        )
+    return prompt
 
 
 # ─── Auto-detecção da partição de evidência ──────────────────────────────────
@@ -334,6 +344,8 @@ def parse_args() -> argparse.Namespace:
     parser.set_defaults(clear_rag=True)
     parser.add_argument("--no-mount", dest="no_mount", action="store_true", default=False,
                         help="Monta a directoria de evidência directamente em /forensics (sem imagem E01/DD)")
+    parser.add_argument("--allow-network", dest="allow_network", action="store_true", default=False,
+                        help="Activa acesso à internet no container (para sudo apt-get install)")
     return parser.parse_args()
 
 
@@ -348,7 +360,7 @@ def main():
     print(f"[*] Contexto : {args.ctx} tokens | Temperatura: {args.temp}")
     sys.modules["agent.tools"].FORENSICS_IMAGE_PATH = os.path.abspath(args.dir)
     print(f"[*] Dir. imagem : {sys.modules['agent.tools'].FORENSICS_IMAGE_PATH}")
-    start_container(no_mount=args.no_mount)
+    start_container(no_mount=args.no_mount, allow_network=args.allow_network)
 
     if args.evidence:
         check = run_in_sandbox(f"test -d '{args.evidence}' && echo ok")
@@ -385,7 +397,7 @@ def main():
     )
     agent = create_agent(model=llm, tools=TOOLS)
 
-    system_prompt = build_system_prompt(evidence)
+    system_prompt = build_system_prompt(evidence, allow_network=args.allow_network)
     conversation = [SystemMessage(content=system_prompt)]
 
     while True:

@@ -103,6 +103,7 @@ uv run forensics
 | `--dir` | path | `./evidence` | Directório host com a imagem forense |
 | `--evidence` | path | auto | Partição dentro do container a usar (ex: `/forensics/part002`) |
 | `--no-mount` | flag | — | Monta o directório de evidência directamente em `/forensics` sem tentar montar imagem E01/DD |
+| `--allow-network` | flag | — | Activa acesso à internet no container; o agente instala automaticamente ferramentas em falta via `sudo apt-get install` |
 | `--no-clear-rag` | flag | — | Mantém documentos RAG indexados de sessões anteriores |
 | `--think` | flag | activado | Activa modo de raciocínio do modelo (reasoning) |
 | `--debug` | flag | — | Mostra campos raw do AIMessage para inspecção |

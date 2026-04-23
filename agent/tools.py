@@ -33,7 +33,7 @@ os.makedirs(EXPORTS_PATH, exist_ok=True)
 
 # ─── Gestão do container ──────────────────────────────────────────────────────
 
-def start_container(no_mount: bool = False) -> bool:
+def start_container(no_mount: bool = False, allow_network: bool = False) -> bool:
     """Destrói qualquer container existente e cria um novo de raiz."""
     rm_result = subprocess.run(["docker", "rm", "-f", CONTAINER_NAME], capture_output=True, text=True)
     if rm_result.returncode != 0 and rm_result.stderr.strip():
@@ -71,6 +71,9 @@ def start_container(no_mount: bool = False) -> bool:
 
     print("[*] A iniciar container forense...")
     try:
+        if allow_network:
+            print("[!] AVISO: container com acesso à internet activo.")
+
         docker_run_args = [
             "docker", "run", "-d",
             "--name", CONTAINER_NAME,
@@ -79,7 +82,6 @@ def start_container(no_mount: bool = False) -> bool:
             "--device", "/dev/loop-control",
             "--device", "/dev/fuse",
             "--device-cgroup-rule", "b 7:* rmw",
-            "--network", "none",
             "--memory", "512m",
             "--cpus", "1.0",
             "--security-opt", "seccomp=unconfined",
@@ -87,6 +89,8 @@ def start_container(no_mount: bool = False) -> bool:
             "-v", volume_arg,
             "-v", f"{EXPORTS_PATH}:/exports",
         ]
+        if not allow_network:
+            docker_run_args += ["--network", "none"]
         docker_run_args += ["forensics-sandbox", "sleep", "infinity"]
         subprocess.run(docker_run_args, check=True, capture_output=True)
 
