@@ -422,6 +422,7 @@ def main():
 
         original_query_msg = conversation[-1]
         ts_query = int(time.time())
+        t_start  = time.time()
         out_file = f"/exports/investigation_summary_{ts_query}.txt"
         intermediate_files: list[str] = []
         MAX_COMPRESSIONS = 20
@@ -568,10 +569,19 @@ def main():
                             agent_active = False
                             print(f"[!] Limite de {MAX_COMPRESSIONS} compressões atingido. A gerar relatório final...")
                             content = _consolidate()
+                            elapsed = time.time() - t_start
                             print(f"\n{'='*60}")
                             print(f"Agente: {content}")
-                            print(f"{'='*60}\n")
-                            b64 = _b64.b64encode(content.encode("utf-8")).decode()
+                            print(f"{'='*60}")
+                            print(f"[*] Tempo de resposta: {elapsed:.1f}s\n")
+                            mins, secs = divmod(int(elapsed), 60)
+                            header = (
+                                f"=== Relatório Final ===\n"
+                                f"Tempo de investigação: {elapsed:.1f}s ({mins}m{secs:02d}s)\n"
+                                f"Pergunta: {original_query_msg.content}\n"
+                                f"{'='*24}\n\n"
+                            )
+                            b64 = _b64.b64encode((header + content).encode("utf-8")).decode()
                             run_in_sandbox(f"echo '{b64}' | base64 -d > {out_file}")
                             print(f"[*] Relatório final guardado em: {out_file}\n")
                         else:
@@ -583,6 +593,8 @@ def main():
                                 "Do NOT call any tools. Do NOT include bash commands or code blocks.\n"
                                 "Structure: users found, key files and their content, suspicious items, registry/system findings, timestamps.\n"
                                 "Be thorough and specific — exact file paths, usernames, timestamps, hash values, suspicious content.\n"
+                                "For EVERY finding include its exact source: full file path, or registry hive path + key, "
+                                "or database file path + table. A finding without a source must not appear in the report.\n"
                                 "ONLY report findings from actual tool results already in this conversation.\n"
                                 "End with a brief list of areas not yet explored."
                             ))])
@@ -647,13 +659,22 @@ def main():
 
                         if intermediate_files:
                             content = _consolidate()
-                            b64 = _b64.b64encode(content.encode("utf-8")).decode()
+                            elapsed = time.time() - t_start
+                            mins, secs = divmod(int(elapsed), 60)
+                            header = (
+                                f"=== Relatório Final ===\n"
+                                f"Tempo de investigação: {elapsed:.1f}s ({mins}m{secs:02d}s)\n"
+                                f"Pergunta: {original_query_msg.content}\n"
+                                f"{'='*24}\n\n"
+                            )
+                            b64 = _b64.b64encode((header + content).encode("utf-8")).decode()
                             run_in_sandbox(f"echo '{b64}' | base64 -d > {out_file}")
                             print(f"[*] Relatório final guardado em: {out_file}\n")
 
                         print(f"\n{'='*60}")
                         print(f"Agente: {content}" if content else "Agente: Não foi possível obter uma resposta final.")
-                        print(f"{'='*60}\n")
+                        print(f"{'='*60}")
+                        print(f"[*] Tempo de resposta: {time.time() - t_start:.1f}s\n")
 
         except KeyboardInterrupt:
             print("\n[!] Agente cancelado. A voltar ao prompt...")
