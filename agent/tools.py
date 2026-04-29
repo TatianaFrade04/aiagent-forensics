@@ -3,6 +3,7 @@ tools.py — Ferramentas do agente forense
 Executa comandos bash arbitrários dentro do container Docker.
 """
 
+import hashlib
 import subprocess
 import os
 import time
@@ -33,6 +34,29 @@ os.makedirs(EXPORTS_PATH, exist_ok=True)
 
 # ─── Gestão do container ──────────────────────────────────────────────────────
 
+def _compute_dockerfile_hash() -> str:
+    docker_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "docker"))
+    h = hashlib.sha256()
+    for fname in ("Dockerfile", "entrypoint.sh"):
+        fpath = os.path.join(docker_dir, fname)
+        if os.path.exists(fpath):
+            with open(fpath, "rb") as f:
+                h.update(f.read())
+    return h.hexdigest()[:16]
+
+_HASH_FILE = os.path.join(os.path.dirname(__file__), ".docker_image_hash")
+
+def _get_stored_hash() -> str:
+    if os.path.exists(_HASH_FILE):
+        with open(_HASH_FILE) as f:
+            return f.read().strip()
+    return ""
+
+def _store_hash(value: str):
+    with open(_HASH_FILE, "w") as f:
+        f.write(value)
+
+
 def start_container(no_mount: bool = False, allow_network: bool = False) -> bool:
     """Destrói qualquer container existente e cria um novo de raiz."""
     rm_result = subprocess.run(["docker", "rm", "-f", CONTAINER_NAME], capture_output=True, text=True)
@@ -43,18 +67,28 @@ def start_container(no_mount: bool = False, allow_network: bool = False) -> bool
         if check.returncode != 0:
             break
         time.sleep(1)
+    local_hash = _compute_dockerfile_hash()
+    dockerfile_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "docker"))
+
     img_check = subprocess.run(
         ["docker", "image", "inspect", "forensics-sandbox"],
         capture_output=True
     )
-    if img_check.returncode != 0:
-        print("[*] Imagem 'forensics-sandbox' não encontrada. A fazer build...")
-        dockerfile_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "docker"))
+    needs_build = img_check.returncode != 0
+
+    if not needs_build and local_hash != _get_stored_hash():
+        print("[!] Imagem Docker desactualizada — a reconstruir automaticamente...")
+        subprocess.run(["docker", "rmi", "forensics-sandbox"], capture_output=True)
+        needs_build = True
+
+    if needs_build:
+        print("[*] A fazer build da imagem 'forensics-sandbox'...")
         try:
             subprocess.run(
                 ["docker", "build", "-t", "forensics-sandbox", dockerfile_dir],
                 check=True
             )
+            _store_hash(local_hash)
             print("[+] Build concluído.")
         except FileNotFoundError:
             print("[!] Docker não encontrado. Verifica se está instalado.")

@@ -24,3 +24,6 @@ exports/
 
 # ChromaDB — base de dados vectorial local (gerada em runtime)
 chroma_store/
+
+# Docker image hash (gerado localmente, não commitar)
+agent/.docker_image_hash
