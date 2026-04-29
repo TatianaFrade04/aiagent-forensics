@@ -30,6 +30,22 @@ find '{evidence}/USERS' \( -iname '*.doc' -o -iname '*.docx' -o -iname '*.xls' -
 find '{evidence}/USERS' -type f -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort -r | head -30
 ```
 
+## Email files (.eml)
+RFC 2822 headers span multiple lines — a header value continues on the next line
+if it starts with whitespace. NEVER use plain `grep` alone on .eml files because it
+only returns lines containing the pattern and silently drops continuation lines.
+
+```bash
+# Read the first 50 lines to see ALL headers with their continuation lines
+head -n 50 '<path/to/file.eml>'
+
+# Show a specific header AND its continuation lines (2 lines of context after)
+grep -A 2 '^Received:' '<path/to/file.eml>'
+
+# Find all Received headers with full context
+grep -A 3 '^Received' '<path/to/file.eml>'
+```
+
 ## Tips
 - Always use `-iname` (case-insensitive) since Windows filenames may have mixed case on a Linux mount
 - Add `2>/dev/null` to suppress permission errors on system directories

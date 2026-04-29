@@ -1,19 +1,21 @@
 SKILL: regripper
 DESCRIPTION: Extract forensic artefacts from a Windows system — user accounts, OS version and install date, installed programs, last system use, USB devices, startup programs, recently opened files, program execution history. Uses regripper plugins on Windows Registry hives (SAM, SYSTEM, SOFTWARE, NTUSER.DAT). The binary is 'regripper' (NOT rip.pl). ALWAYS discover hive paths first with find -iname.
-KEYWORDS: regripper, rip.pl, registry, registo, hive, SAM, SYSTEM, SOFTWARE, NTUSER, NTUSER.DAT, UsrClass, usrclass.dat, windows registry, user activity, atividade utilizador, USB, devices, dispositivos, installed programs, programas instalados, software instalado, network, rede, autorun, startup, arranque, MRU, recent files, ficheiros recentes, shellbags, userassist, user accounts, contas utilizador, last login, ultimo login, plugin, utilizadores, users, contas, accounts, sistema operativo, operating system, versao do windows, windows version, os version, instalado, instalacao, installation date, data instalacao, ultima vez, last used, quando instalado, computador, computer name, nome do computador, que sistema, que windows, versao sistema, when installed, quem usou, who used, programas, programs, software, shutdown, desligado, desligar, ultimo uso, ultima utilizacao, last shutdown, last use, quando foi usado, when was used, utilizado, foi utilizado
+KEYWORDS: regripper, rip.pl, registry, registo, hive, SAM, SYSTEM, SOFTWARE, NTUSER, NTUSER.DAT, UsrClass, usrclass.dat, windows registry, user activity, atividade utilizador, USB, devices, dispositivos, installed programs, programas instalados, software instalado, network, rede, autorun, startup, arranque, MRU, recent files, ficheiros recentes, shellbags, userassist, user accounts, contas utilizador, last login, ultimo login, plugin, utilizadores, users, contas, accounts, sistema operativo, operating system, versao do windows, windows version, os version, instalado, instalacao, installation date, data instalacao, ultima vez, last used, quando instalado, computador, computer name, nome do computador, que sistema, que windows, versao sistema, when installed, quem usou, who used, programas, programs, software, shutdown, desligado, desligar, ultimo uso, ultima utilizacao, last shutdown, last use, quando foi usado, when was used, utilizado, foi utilizado, password hint, dica de password, dica senha, password enabled, password disabled, conta ativa, conta desativada, account disabled, account enabled, conta com password, password set, sam parse, samparse, logon password, user password, password hint enabled, has password
 ---
 
 ## MANDATORY QUERY → COMMAND MAPPING
 When the user asks one of these questions, use EXACTLY the command shown — no variations.
 
-| User question (any language)                          | Command to use                                      |
-|-------------------------------------------------------|-----------------------------------------------------|
-| "when was the OS last used / shutdown / turned off?"  | regripper -r $SYSTEM_HIVE -p shutdown               |
-| "when was the OS installed?"                          | reglookup on SOFTWARE + grep InstallDate (see below)|
-| "what OS / Windows version is this?"                  | reglookup on SOFTWARE + grep ProductName            |
-| "what programs are installed?"                        | reglookup on SOFTWARE /CurrentVersion/Uninstall     |
-| "what users exist?"                                   | find '{evidence}/USERS' -mindepth 1 -maxdepth 1 -type d |
-| "USB devices connected?"                              | regripper -r $SYSTEM_HIVE -p usbstor                |
+| User question (any language)                                        | Command to use                                      |
+|---------------------------------------------------------------------|-----------------------------------------------------|
+| "when was the OS last used / shutdown / turned off?"                | regripper -r $SYSTEM_HIVE -p shutdown               |
+| "when was the OS installed?"                                        | reglookup on SOFTWARE + grep InstallDate (see below)|
+| "what OS / Windows version is this?"                                | reglookup on SOFTWARE + grep ProductName            |
+| "what programs are installed?"                                      | reglookup on SOFTWARE /CurrentVersion/Uninstall     |
+| "what users exist?"                                                 | find '{evidence}/USERS' -mindepth 1 -maxdepth 1 -type d |
+| "USB devices connected?"                                            | regripper -r $SYSTEM_HIVE -p usbstor                |
+| "password hint for user X?" / "dica de password do utilizador X?"  | regripper -r $SAM_HIVE -p samparse \| grep -A 20 "X" |
+| "is account X enabled?" / "does X have a password enabled?"        | regripper -r $SAM_HIVE -p samparse \| grep -A 20 "X" |
 
 ⚠️ "LAST USED" MEANS SHUTDOWN — NOT SESSION DATA:
 The forensic evidence for "when was the system last used" is the last shutdown timestamp in the SYSTEM hive.
@@ -106,8 +108,40 @@ SOFTWARE_HIVE=$(find {evidence} -iname 'SOFTWARE' -not -path '*/Users/*' -not -p
 regripper -l
 ```
 
+## User account password hints and password status (SAM hive)
+
+`samparse` shows both the **Password Hint** and account flags for every user:
+
+```bash
+SAM_HIVE=$(find {evidence} -iname 'SAM' -not -path '*/Users/*' 2>/dev/null | head -1)
+regripper -r "$SAM_HIVE" -p samparse
+```
+
+Example output for a user:
+```
+Username        : Jimmy Wilson [1004]
+Password Hint   : safeone
+  --> Normal user account          ← account is ENABLED, no "Account Disabled" line
+  --> Password does not expire
+```
+
+Interpreting account status:
+- **No "Account Disabled" line** = account is active/enabled, logon password is active
+- **`--> Account Disabled`** = account is disabled
+- **`--> Password not required`** = blank password allowed
+- **`Password Hint : <text>`** = the hint the user typed when creating the password
+
+If `samparse` is unavailable, use reglookup directly:
+```bash
+# Get password hint (stored as UTF-16LE binary under the user's RID)
+SAM_HIVE=$(find {evidence} -iname 'SAM' -not -path '*/Users/*' 2>/dev/null | head -1)
+reglookup "$SAM_HIVE" | grep -i "UserPasswordHint"
+# Decode: %00 separators = UTF-16LE → remove %00 and URL-decode remaining chars
+```
+
 ## Tips
 - Always use single quotes around hive paths
 - Use `-a` for a full audit of a hive, or `-p <plugin>` for targeted extraction
 - NTUSER.DAT contains the most user-specific forensic artifacts
 - Combine SAM + SYSTEM + SOFTWARE for a complete system profile
+- For password hints and account status, always use `samparse` on the SAM hive — it decodes everything

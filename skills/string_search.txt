@@ -27,10 +27,57 @@ find '{evidence}/USERS' -iname '*.txt' -exec grep -li 'confidential' {} \; 2>/de
 grep -rEo '([0-9]{1,3}\.){3}[0-9]{1,3}' '{evidence}/USERS/<username>/' 2>/dev/null | head -20
 ```
 
+## Email file analysis (.eml, .msg)
+
+`.eml` files are plain text — ALWAYS use `grep` directly, never `strings`.
+Email headers contain critical forensic metadata.
+
+**MANDATORY STEP 0: find the file first — NEVER grep a filename without the full path.**
+
+```bash
+# Step 0: locate the .eml file (it is stored deep inside AppData, not in the current directory)
+EML=$(find '{evidence}' -iname '447018D5-00000006.eml' 2>/dev/null | head -1)
+echo "Found: $EML"
+
+# Step 1: extract ALL Received headers WITH continuation lines (RFC 2822 folded headers)
+grep -i -A 2 -E '^(date|received):' "$EML"
+
+# Step 2: extract sender, recipient, subject, message-id
+grep -i -E '^(from|to|cc|subject|message-id):' "$EML"
+
+# Step 3: read all headers (everything before the first blank line)
+awk '/^$/{exit} 1' "$EML"
+```
+
+### Timezone semantics — CRITICAL
+An email passes through multiple SMTP servers. Each server stamps a `Received:` header.
+
+- `Date:` header → the **sender's** timezone (set by the sender's mail client/server)
+- `Received:` headers → one per relay hop, each with its own timestamp and timezone
+  - The **first** `Received:` (top of file) = the destination server that delivered to the inbox
+  - The **last** `Received:` (bottom of the chain) = closest to the origin/sender
+
+**"Destination timezone"** = timezone offset in the **first/topmost** `Received:` header.
+**"Source/sender timezone"** = timezone offset in the `Date:` header or the last `Received:` header.
+
+Example header chain (read top to bottom = last hop to first hop).
+NOTE: timezones often appear on the NEXT (indented) line — a "folded" RFC 2822 header:
+```
+Received: by 10.221.48.196 with SMTP id ux4csp77384vcb;
+        Fri, 16 Feb 2014 09:55:09 -0800 (PST)              ← destination (continuation line)
+--
+Received: from relay.example.com ... ; Sun, 16 Feb 2014 12:54:50 -0500
+Date: Sun, 16 Feb 2014 12:55:09 -0500                     ← sender's timezone
+```
+Here the destination timezone is **-0800** and the sender's timezone is **-0500**.
+
 ## Tips
 - `grep -r` is recursive (searches all files in a directory); `-i` is case-insensitive; `-l` shows only filenames
 - For binary files (exe, dll, dat) use `strings` instead of `grep` — grep may choke on binary data
+- `.eml` files are plain text — use `grep` directly, NOT `strings`
+- IMPORTANT: RFC 2822 headers are often "folded" — the timezone in a `Received:` header may be on the NEXT line (indented with whitespace). Always use `-A 2` to capture it.
 - Large recursive greps over system directories can be very slow — limit to user directories (`/USERS/`) when possible
 - `grep -E` uses extended regex (useful for email, URL, IP patterns)
 - Save results to exports: `grep -ri 'keyword' '{evidence}/USERS/' 2>/dev/null > /exports/grep_results.txt`
 - If a file has unusual encoding (UTF-16), add `strings -e l` for little-endian Unicode
+- **NEVER** grep or awk a filename like `'447018D5-00000006.eml'` without a full path — always `find` first; .eml files are buried in `AppData/Local/Microsoft/Windows Live Mail/...`

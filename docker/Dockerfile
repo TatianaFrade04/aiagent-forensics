@@ -25,8 +25,17 @@ RUN apt-get update && apt-get install -y \
     libimage-exiftool-perl \
     regripper \
     reglookup \
-    && pip3 install --break-system-packages python-evtx evtx \
     && rm -rf /var/lib/apt/lists/*
+
+# Install EVTX parsing tools explicitly with python3 -m pip to guarantee
+# the packages land in the same Python that the container runs.
+# Verify import works immediately so the build fails visibly if not.
+RUN python3 -m pip install --break-system-packages python-evtx evtx \
+    && python3 -c "import Evtx.Evtx; print('[+] python-evtx OK')" \
+    && python3 -c "import evtx; print('[+] evtx OK')" \
+    && EVTXDUMP=$(find /usr /root -name "evtxdump.py" 2>/dev/null | head -1) \
+    && [ -n "$EVTXDUMP" ] && ln -sf "$EVTXDUMP" /usr/local/bin/evtxdump.py && echo "[+] evtxdump.py -> $EVTXDUMP" \
+    || echo "[-] evtxdump.py not found after install"
 
 RUN mkdir -p /forensics_raw /forensics_ewf /forensics
 

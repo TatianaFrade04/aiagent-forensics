@@ -1,6 +1,6 @@
 SKILL: timestamps
 DESCRIPTION: Analyze file creation, modification, and access timestamps on NTFS to build timelines and detect timestomping (deliberate timestamp manipulation)
-KEYWORDS: timestamp, timestamps, data, date, created, criado, modified, modificado, accessed, acedido, mtime, atime, ctime, $MFT, timeline, cronologia, ntfs, metadata, stat, fls, istat, sleuthkit, mactime, timestomping, manipulacao, chronology, recent files, ficheiros recentes, newer, mais recentes, when was, quando foi, last modified, last accessed, janeiro, fevereiro, marco, abril, maio, junho, julho, agosto, setembro, outubro, novembro, dezembro, january, february, march, april, june, july, august, september, october, november, december, 2013, 2014, 2015, 2016, 2017, 2018, entre, between, data de modificacao, data de criacao, quando foi modificado, quando foi criado
+KEYWORDS: timestamp, timestamps, data, date, created, criado, modified, modificado, accessed, acedido, mtime, atime, ctime, $MFT, timeline, cronologia, ntfs, metadata, stat, fls, istat, sleuthkit, mactime, timestomping, manipulacao, chronology, recent files, ficheiros recentes, newer, mais recentes, when was, quando foi, last modified, last accessed, janeiro, fevereiro, marco, abril, maio, junho, julho, agosto, setembro, outubro, novembro, dezembro, january, february, march, april, june, july, august, september, october, november, december, 2013, 2014, 2015, 2016, 2017, 2018, entre, between, data de modificacao, data de criacao, quando foi modificado, quando foi criado, uptime, system uptime, tempo ativo, tempo de arranque, boot time, quanto tempo ligado, ligado desde, event log, evtx, winevt, 6005, 6006, 12, kernel-general, sistema ligado, when was booted, quando foi iniciado, system boot, arranque do sistema
 ---
 
 ## What is timestamp analysis?
@@ -44,6 +44,50 @@ fls -r -l '{evidence}' 2>/dev/null | head -50
 # Save a full timestamp listing of user files
 find {evidence}/Users -type f -printf '%TY-%Tm-%Td %TH:%TM\t%p\n' 2>/dev/null | sort > /exports/file_timeline.txt
 ```
+
+## System uptime at a specific point in time
+
+**Uptime is NOT stored in the registry.** To calculate uptime at timestamp T:
+  uptime = T − last_boot_before_T
+
+Boot time comes from the **Windows System Event Log** (System.evtx):
+- **Event ID 12** (Microsoft-Windows-Kernel-General) = actual OS start → **use this for uptime**
+- **Event ID 6005** = EventLog service started ~15 seconds after boot → **do NOT use for uptime**
+- **Event ID 6006** = EventLog service stopped → clean shutdown
+
+```bash
+# 1. Locate the System event log
+find '{evidence}' -iname 'System.evtx' 2>/dev/null
+
+# 2. Calculate uptime using Event ID 12 (Kernel-General) — one-shot, no intermediate output
+#    IMPORTANT: do NOT print all events — thousands of lines will be truncated
+#    Use import Evtx.Evtx (evtxdump.py is NOT installed in this environment)
+python3 -c "
+from datetime import datetime, timezone
+import Evtx.Evtx as evtx, re
+path = '{evidence}/Windows/System32/winevt/Logs/System.evtx'
+last_boot = None
+target_dt = datetime(YYYY, MM, DD, HH, MM2, SS, tzinfo=timezone.utc)  # replace with target
+with evtx.Evtx(path) as log:
+    for r in log.records():
+        xml = r.xml()
+        if '>12<' in xml and 'Kernel-General' in xml:
+            m = re.search(r'SystemTime=\"([^\"]+)\"', xml)
+            if m:
+                try:
+                    dt = datetime.fromisoformat(m.group(1))
+                    if last_boot is None or dt > last_boot:
+                        last_boot = dt
+                except: pass
+if last_boot:
+    print('Last boot (Event ID 12):', last_boot)
+    print('Uptime (s):', int((target_dt - last_boot).total_seconds()))
+"
+# Example: boot 2014-02-20 14:22:00.733999+00:00, target 2014-02-20 17:02:35 UTC → 9634 s
+```
+
+### Alternative: last shutdown time from registry
+`regripper -r $SYSTEM_HIVE -p shutdown` gives the **last shutdown time**, NOT the boot time. Only use this as a cross-reference, not as the boot time.
 
 ## Tips
 - NTFS stores two sets of timestamps: `$STANDARD_INFORMATION` (shown by stat/Windows) and `$FILE_NAME` (harder to modify). Differences between them can indicate timestomping

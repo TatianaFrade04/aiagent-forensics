@@ -1,0 +1,130 @@
+SKILL: event_log
+DESCRIPTION: Parse Windows Event Log files (.evtx) to find system boot/shutdown times, user logins, application execution, and calculate system uptime using evtxdump or evtxexport.
+KEYWORDS: event log, event logs, evtx, windows event, uptime, system uptime, boot time, last boot, startup, shutdown, system logon event, login event, last login event, last logon event, last run, last used, last executed, application last run, windows mail last run, quando foi iniciado, tempo de actividade, tempo ligado, system started, system booted, event id, eventid, 6005, 6006, 4648, winevt, System.evtx, Security.evtx, Application.evtx, seconds uptime, uptime in seconds
+---
+
+## What are Windows Event Logs?
+Windows Event Logs (`.evtx`) record system activity: boots, shutdowns, logins, application launches, and errors. The three main logs are `System.evtx`, `Security.evtx`, and `Application.evtx`. Located at `Windows/System32/winevt/Logs/`.
+
+## Key Event IDs
+| ID   | Log      | Source                         | Meaning |
+|------|----------|--------------------------------|---------|
+| 12   | System   | Microsoft-Windows-Kernel-General | **OS started** — use THIS for uptime (sub-second precision) |
+| 6005 | System   | EventLog                       | EventLog service started (~15 s after boot — do NOT use for uptime) |
+| 6006 | System   | EventLog                       | EventLog service stopped → clean shutdown |
+| 6009 | System   | EventLog                       | Windows version logged at boot |
+| 6013 | System   | EventLog                       | Uptime at previous shutdown |
+| 4624 | Security | Security                       | Successful logon |
+| 4634 | Security | Security                       | Logoff |
+| 4648 | Security | Security                       | Logon with explicit credentials |
+
+## CRITICAL: use Event ID 12, NOT Event ID 6005, for uptime
+
+Event ID **12** (source: `Microsoft-Windows-Kernel-General`) is written by the kernel the instant
+Windows starts. Its `TimeCreated SystemTime` has **sub-second precision** and is the actual OS
+start time. Event ID 6005 is the EventLog service starting, which happens ~15 seconds later —
+using it will produce an answer that is ~15 seconds too low.
+
+Example (IACIS-HDD-2014 image):
+- Event ID 12:   `2014-02-20 14:22:00.733999+00:00`  → uptime at 17:02:35 = **9634 s** ✓
+- Event ID 6005: `2014-02-20 14:22:15+00:00`          → uptime at 17:02:35 = 9620 s  ✗
+
+## Step-by-step workflow
+
+```bash
+# 1. Find all event log files
+find '{evidence}' -iname '*.evtx' -type f 2>/dev/null
+
+# 2. Parse System.evtx using python-evtx (Evtx.Evtx) — evtxdump.py is NOT installed
+#    DO NOT print all events — output will be thousands of lines and get truncated.
+#    Instead, extract only what you need and print a single result.
+
+# 3. Calculate uptime — use Event ID 12 (Kernel-General), NOT 6005
+python3 -c "
+from datetime import datetime, timezone
+import Evtx.Evtx as evtx, re
+path = '{evidence}/Windows/System32/winevt/Logs/System.evtx'
+last_boot = None
+target_dt = datetime(YYYY, MM, DD, HH, MM2, SS, tzinfo=timezone.utc)  # replace with actual target
+with evtx.Evtx(path) as log:
+    for r in log.records():
+        xml = r.xml()
+        if '>12<' in xml and 'Kernel-General' in xml:
+            m = re.search(r'SystemTime=\"([^\"]+)\"', xml)
+            if m:
+                try:
+                    dt = datetime.fromisoformat(m.group(1))
+                    if last_boot is None or dt > last_boot:
+                        last_boot = dt
+                except: pass
+if last_boot:
+    print('Last boot (Event ID 12):', last_boot)
+    print('Uptime (s):', int((target_dt - last_boot).total_seconds()))
+else:
+    print('Event ID 12 not found')
+"
+
+# 4. Shutdown events (Event ID 6006)
+python3 -c "
+import Evtx.Evtx as evtx, re
+path = '{evidence}/Windows/System32/winevt/Logs/System.evtx'
+last_shutdown = None
+with evtx.Evtx(path) as log:
+    for r in log.records():
+        xml = r.xml()
+        if '>6006<' in xml:
+            m = re.search(r'SystemTime=\"([^\"]+)\"', xml)
+            if m: last_shutdown = m.group(1)
+print('Last shutdown:', last_shutdown)
+"
+
+# 5. Application last-run events — check Application log
+python3 -c "
+import Evtx.Evtx as evtx, re
+path = '{evidence}/Windows/System32/winevt/Logs/Application.evtx'
+with evtx.Evtx(path) as log:
+    for r in log.records():
+        xml = r.xml()
+        m_id = re.search(r'>(\d+)<\/EventID', xml)
+        m_ts = re.search(r'SystemTime=\"([^\"]+)\"', xml)
+        if m_id and m_ts: print(f'ID={m_id.group(1):6s}  {m_ts.group(1)}')
+" 2>/dev/null | tail -50
+```
+
+## Calculating system uptime
+
+```bash
+# Complete one-shot uptime calculation (replace target date/time as needed)
+python3 -c "
+from datetime import datetime, timezone
+import Evtx.Evtx as evtx, re
+path = '{evidence}/Windows/System32/winevt/Logs/System.evtx'
+last_boot = None
+target_dt = datetime(2014, 2, 20, 17, 2, 35, tzinfo=timezone.utc)
+with evtx.Evtx(path) as log:
+    for r in log.records():
+        xml = r.xml()
+        if '>12<' in xml and 'Kernel-General' in xml:
+            m = re.search(r'SystemTime=\"([^\"]+)\"', xml)
+            if m:
+                try:
+                    dt = datetime.fromisoformat(m.group(1))
+                    if last_boot is None or dt > last_boot:
+                        last_boot = dt
+                except: pass
+if last_boot:
+    print(int((target_dt - last_boot).total_seconds()))
+"
+# → 9634
+```
+
+Example: boot `2014-02-20 14:22:00.733999+00:00`, target `2014-02-20T17:02:35Z` → 9634 s
+
+## Tips
+- **Event ID 12** (Kernel-General) = actual OS start — sub-second precision — use for uptime
+- **Event ID 6005** = EventLog service started (~15 s after boot) — do NOT use for uptime
+- `evtxdump.py` is NOT installed (python-evtx v0.8.1 doesn't include it) — use `import Evtx.Evtx`
+- NEVER print all events to stdout — the output gets truncated; always extract and print only the final value
+- Event logs are at `Windows/System32/winevt/Logs/` — always `find` first since the path varies
+- Use `int(total_seconds())` (not `//`) for uptime in seconds — truncates fractions correctly
+- For application last-run times, check `Application.evtx`
