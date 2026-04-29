@@ -47,6 +47,29 @@ MODELOS_DEFAULT = [
 
 SESSOES_DEFAULT = 3
 
+# Contexto máximo seguro por modelo para 12 GB VRAM (Q4 quantization)
+# Pesos do modelo + KV cache não devem exceder ~11.5 GB (margem de segurança)
+MODEL_CTX_12GB: dict[str, int] = {
+    "gemma4:e4b":      131072,  # 4B, GQA com poucos KV heads — KV cache muito eficiente
+    "gemma3:4b":        65536,  # 4B standard
+    "gemma3:12b":       16384,  # 12B — pesos ~8 GB, pouco espaço para KV cache
+    "qwen3.5:4b":       65536,  # 4B
+    "qwen2.5:7b":       32768,  # 7B — pesos ~4.5 GB
+    "qwen2.5:14b":      16384,  # 14B — pesos ~9 GB
+    "llama3.2":         65536,  # 3B (default tag)
+    "llama3.2:3b":      65536,  # 3B explícito
+    "llama3.1:8b":      32768,  # 8B — pesos ~5 GB
+    "llama3.3:70b":      4096,  # 70B quantizado — apenas cabe com ctx mínimo
+    "deepseek-r1:8b":   32768,  # 8B reasoning — usa mais memória em inferência
+    "mistral":          32768,  # 7B
+    "mistral:7b":       32768,  # 7B explícito
+}
+
+
+def ctx_para_modelo(modelo: str) -> int:
+    """Devolve o contexto máximo seguro para 12 GB VRAM. Fallback: 32768."""
+    return MODEL_CTX_12GB.get(modelo, 32768)
+
 # ─── Perguntas CTF com ground truth ──────────────────────────────────────────
 # Formato: (id, pergunta_para_agente, resposta_correta, tipo)
 # tipo: "mc" = múltipla escolha, "tf" = verdadeiro/falso
@@ -249,10 +272,10 @@ def guardar_log(dados: dict, pasta: str = "logs_ctf"):
 
 # ─── Core ─────────────────────────────────────────────────────────────────────
 
-def correr_sessao_ctf(modelo: str, sessao: int, debug: bool = False) -> dict:
+def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False) -> dict:
     """Lança o agente uma vez e envia todas as perguntas CTF em sequência."""
     print(f"\n{'='*60}")
-    print(f"  MODELO: {modelo}  |  SESSÃO: {sessao}/{SESSOES_DEFAULT}")
+    print(f"  MODELO: {modelo}  |  CTX: {ctx}  |  SESSÃO: {sessao}/{SESSOES_DEFAULT}")
     print(f"{'='*60}")
 
     timestamp_inicio = datetime.now().isoformat()
@@ -262,7 +285,7 @@ def correr_sessao_ctf(modelo: str, sessao: int, debug: bool = False) -> dict:
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
 
-    cmd = ["uv", "run", "forensics", "--model", modelo]
+    cmd = ["uv", "run", "forensics", "--model", modelo, "--ctx", str(ctx)]
     if debug:
         cmd.append("--debug")
 
@@ -423,6 +446,8 @@ def parse_args():
     p.add_argument("--pasta", default="logs_ctf")
     p.add_argument("--debug", action="store_true")
     p.add_argument("--apenas-modelo", metavar="MODELO")
+    p.add_argument("--ctx", type=int, default=None,
+                   help="Contexto em tokens (default: auto-detectado por modelo para 12 GB VRAM)")
     return p.parse_args()
 
 
@@ -437,6 +462,10 @@ def main():
     print(f"   Sessões  : {sessoes} por modelo")
     print(f"   Perguntas: {len(PERGUNTAS_CTF)} (com ground truth)")
     print(f"   Total    : {total} sessões\n")
+    if args.ctx:
+        print(f"   Contexto : {args.ctx} (manual)\n")
+    else:
+        print(f"   Contexto : auto (12 GB VRAM)\n")
 
     # Limpar container residual
     print("  Limpando container Docker residual...")
@@ -447,9 +476,10 @@ def main():
     todos_resultados = []
 
     for modelo in modelos:
+        ctx = args.ctx if args.ctx else ctx_para_modelo(modelo)
         for sessao in range(1, sessoes + 1):
             try:
-                dados = correr_sessao_ctf(modelo, sessao, debug=args.debug)
+                dados = correr_sessao_ctf(modelo, sessao, ctx=ctx, debug=args.debug)
                 guardar_log(dados, pasta=args.pasta)
                 todos_resultados.append(dados)
 
