@@ -3,46 +3,48 @@ DESCRIPTION: Search for files by name, extension, type, or size across the evide
 KEYWORDS: encontrar ficheiro, procurar ficheiro, search file, find file, localizar, locate, listar ficheiros, list files, extensao, extension, tipo de ficheiro, file type, tamanho, size, nome, name, pdf, docx, xlsx, doc, xls, jpg, jpeg, png, mp3, mp4, zip, rar, exe, dll, bat, ps1, csv, txt, todos os ficheiros, all files, ficheiros de, files with, que ficheiros, what files, mostrar ficheiros, show files
 ---
 
-## Golden rule: ALWAYS find first — 3 steps
+## Golden rule: one combined search command
 
-**NEVER assume a file's full path from its name alone.** Follow these 3 steps in order:
+**NEVER assume a file's full path.** Run this single command — it searches mounted partitions first, then falls through to the VHD automatically if not found:
 
 ```bash
-# Step 1 — locate the file in the mounted evidence
-find '{evidence}' -iname 'pdf.pdf' -type f 2>/dev/null
-# → /forensics/part006/Users/JohnDoe/Desktop/pdf.pdf   (found → go to Step 3)
-# → (no output)                                          (not found → go to Step 2)
+TARGET='pdf.pdf'
+FILE=$(find '/forensics' -iname "$TARGET" -type f 2>/dev/null | head -1)
+if [ -n "$FILE" ]; then
+  echo "FOUND: $FILE"
+  stat -c "%s" "$FILE"
+else
+  echo "Not in mounted partitions — searching VHD..."
+  VHD=$(find '{evidence}' \( -iname '*.vhd' -o -iname '*.vmdk' \) -type f 2>/dev/null | head -1)
+  echo "VHD: $VHD"
+  mmls "$VHD" 2>/dev/null | awk 'NR>5 && $2~/[0-9]/{print $3}' | while read start; do
+    offset=$(( 10#$start ))
+    result=$(fls -i vhd -r -o "$offset" "$VHD" 2>/dev/null | grep -i "$TARGET")
+    [ -n "$result" ] && echo "FOUND in VHD offset=$offset: $result"
+  done
+fi
+```
 
-# Step 2 — ONLY if Step 1 returned NOTHING: the file may be inside a nested VHD/VMDK
-#           Find the virtual disk file, then search ALL its partitions in ONE command.
-find '{evidence}' \( -iname '*.vhd' -o -iname '*.vmdk' \) -type f 2>/dev/null
-# → /forensics/part006/Windows/System32/config/SYSTEM.vhd
+This prints either:
+- `FOUND: /forensics/part006/...` + size → done, use the path directly
+- `FOUND in VHD offset=<N>: r/r <INODE>:   pdf.pdf` → extract with icat:
 
-# DO NOT run mmls first to inspect partitions — run the full loop below directly.
-# Search ALL partitions at once — NEVER run mmls alone or check partitions one by one.
-# ALWAYS use -i vhd with fls on VHD files; without it, dynamic VHDs return empty.
-# Run this EXACT loop and wait for the "FOUND" line before proceeding.
-VHD='/forensics/part006/Windows/System32/config/SYSTEM.vhd'
-mmls "$VHD" 2>/dev/null | awk 'NR>5 && $2~/[0-9]/{print $3}' | while read start; do
-  offset=$(( 10#$start ))
-  result=$(fls -i vhd -r -o "$offset" "$VHD" 2>/dev/null | grep -i 'pdf.pdf')
-  [ -n "$result" ] && echo "FOUND offset=$offset: $result"
-done
-# The loop prints one line per match, e.g.:
-#   FOUND offset=<ACTUAL_OFFSET>: r/r <ACTUAL_INODE>:   pdf.pdf
-# Use ONLY the offset and inode printed by the loop above — NEVER use values from examples.
+**CRITICAL — fls `*` prefix means DELETED:**
+```
+r/r * 61:   Card Printers.htm   ← * = DELETED — content may be empty or overwritten — DO NOT USE
+r/r 64:     Card Printers.htm   ← no * = ACTIVE file — USE THIS INODE
+```
+When fls returns multiple entries for the same filename, ALWAYS use the entry WITHOUT `*`.
+A `*` entry is a deleted/unallocated inode — extracting it gives empty or garbage content.
 
-# Extract the file using icat — replace <ACTUAL_OFFSET> and <ACTUAL_INODE> with loop output:
+```bash
+# Replace <ACTUAL_OFFSET> and <ACTUAL_INODE> with the values printed above — NEVER use example values
+# Use ONLY the inode WITHOUT * (the active file)
 icat -i vhd -o <ACTUAL_OFFSET> "$VHD" <ACTUAL_INODE> > /exports/pdf.pdf
 stat -c "%s" /exports/pdf.pdf
-# Always compute all three — hash type in the question is not always what it says:
 md5sum /exports/pdf.pdf    # 32-char hash
 sha1sum /exports/pdf.pdf   # 40-char hash
 sha256sum /exports/pdf.pdf # 64-char hash
-
-# Step 3 — use the full path returned by find (or the extracted file) for further commands
-stat -c "%s" '/forensics/part006/Users/JohnDoe/Desktop/pdf.pdf'
-md5sum '/forensics/part006/Users/JohnDoe/Desktop/pdf.pdf'
 ```
 
 ## What is generic file search?

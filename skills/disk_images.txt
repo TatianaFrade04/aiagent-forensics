@@ -11,16 +11,20 @@ Use `mmls` to read their partition tables and `fsstat` to get filesystem details
 
 ## Step-by-step workflow
 ```bash
-# 1. Find all virtual disk files in the evidence
-find '{evidence}' \( -iname '*.vhd' -o -iname '*.vmdk' -o -iname '*.dd' -o -iname '*.img' \) -type f 2>/dev/null
+# 1. Find the virtual disk file — ALWAYS assign to $VHD to avoid case-sensitivity errors
+#    NEVER retype the filename manually: Linux is case-sensitive (SYSTEM.vhd ≠ System.vhd)
+VHD=$(find '{evidence}' \( -iname '*.vhd' -o -iname '*.vmdk' -o -iname '*.dd' -o -iname '*.img' \) -type f 2>/dev/null | head -1)
+echo "$VHD"   # verify the exact path before proceeding
+# If the question names a specific file (e.g. "System.vhd"), search for it explicitly:
+#   VHD=$(find '{evidence}' -iname 'system.vhd' -type f 2>/dev/null | head -1)
 
 # 2. Identify the image type
-file '/path/to/image.vhd'
+file "$VHD"
 
 # 3. ALWAYS pipe mmls through awk — NEVER run plain mmls (raw output is too long and columns are confusing)
 #    Columns: $1=row, $2=SlotType(Meta/-------/00:NN), $3=Start, $4=End, $5=Length
 #    Filter: $2~/[0-9]/ keeps only data partitions (skips Meta and Unallocated rows)
-mmls '/path/to/image.vhd' 2>/dev/null | awk 'NR>5 && $2~/[0-9]/{print $1, "start="$3, "len="$5}'
+mmls "$VHD" 2>/dev/null | awk 'NR>5 && $2~/[0-9]/{print $1, "start="$3, "len="$5}'
 #    Example output (Meta and Unallocated already excluded):
 #      004: start=0000000034 len=0000065536
 #      006: start=0000065664 len=0001331200
@@ -41,9 +45,15 @@ start=0001396864
 len=0001433600
 offset=$(( 10#$start ))
 capacity=$(( 10#$len * 512 )); echo "Capacity: $capacity bytes"
-fsstat -i vhd -o "$offset" '/path/to/image.vhd' | grep -i 'volume name\|cluster size'
-# Repeat for each data partition (006:, 007:, 008: ...) until Volume Name matches the target
-# For .vmdk files use: fsstat -i vmdk -o "$offset" '/path/to/image.vmdk'
+fsstat -i vhd -o "$offset" "$VHD" | grep -i 'volume name\|cluster size'
+# Repeat for EVERY data partition (006:, 007:, 008: ...) until Volume Name matches the target.
+# For .vmdk files use: fsstat -i vmdk -o "$offset" "$VHD"
+
+# CRITICAL — when searching for a partition by name (e.g. "J. Wilson"):
+# YOU MUST run fsstat on ALL data partitions before concluding the partition does not exist.
+# Do NOT stop after the first partition that does not match.
+# Pattern: check 006 → not a match → check 007 → not a match → check 008 → … → found!
+# Answering "not found" after checking only ONE partition is ALWAYS wrong.
 ```
 
 ## Key fields in mmls output
@@ -63,7 +73,7 @@ Units are in 512-byte sectors
 ## Getting the volume label
 ```bash
 # Option A: fsstat with image type flag (shows FS Type, Volume Name, total sectors)
-fsstat -i vhd -o <start_sector> '/path/to/image.vhd' | grep -i 'volume name\|total range\|sector size'
+fsstat -i vhd -o <start_sector> "$VHD" | grep -i 'volume name\|total range\|sector size'
 
 # Option B: ntfslabel (faster, label only)
 # Requires mounting — use fsstat instead for read-only analysis
@@ -99,6 +109,7 @@ with open('/forensics_ewf/ewf1', 'rb') as f:
 ```
 
 ## Tips
+- NEVER retype the VHD/VMDK filename manually — always use `$VHD` assigned from `find` output. Linux is case-sensitive: `SYSTEM.vhd ≠ System.vhd`. Retyping causes "no such file" errors.
 - ALWAYS run `mmls` piped through `awk 'NR>5{print $1, "start="$3, "len="$5}'` — NEVER run plain `mmls` (raw output is too long and Start/End/Length columns are easy to confuse)
 - Always `find` the file first — never assume the path
 - Sector size is almost always 512 bytes; confirm with `mmls` header ("Units are in 512-byte sectors")
@@ -107,4 +118,4 @@ with open('/forensics_ewf/ewf1', 'rb') as f:
 - For `.vhd` files always pass `-i vhd` to `fsstat` — without it, TSK reads raw bytes and dynamic VHDs return wrong volume names
 - `fsstat -o` requires a DECIMAL offset. Use `$(( 10#<start> ))` to strip leading zeros — bash `printf '%d'` with a leading-zero string interprets as OCTAL.
 - NEVER compute the offset manually from the awk output — always assign `start=<value>` and let bash compute `offset=$(( 10#$start ))`. Example: `0065664` looks like 65664 but bash evaluates it as octal 27060 if you do arithmetic on it directly.
-- To identify a partition by name/label: run `fsstat` on EACH data partition and check `Volume Name` — never guess by position.
+- To identify a partition by name/label: run `fsstat` on EVERY data partition and check `Volume Name` — never guess by position. Never stop early: only after ALL partitions have been checked can you conclude a named partition is absent.

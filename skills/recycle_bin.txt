@@ -1,101 +1,121 @@
 SKILL: recycle_bin
 DESCRIPTION: Analyse the Windows Recycle Bin ($RECYCLE.BIN) to find deleted files, their original paths, deletion timestamps, and file sizes. Each deleted file has a $I metadata file and a $R content file.
-KEYWORDS: recycle bin, reciclagem, lixo, lixeira, deleted, apagado, eliminado, deletado, removido, removed, recycle, recycled, recyclebin, $recyclebin, $RECYCLE.BIN, $I, $R, ficheiros apagados, deleted files, recovery, recuperacao, apagar, delete, trash, lixeira do windows, ficheiro eliminado, foi apagado, foi eliminado, what was deleted, o que foi apagado, enviou para o lixo, mandou para o lixo, atirou para o lixo, sent to recycle, moved to trash, who deleted, quem apagou, user deleted, which files deleted
+KEYWORDS: recycle bin, reciclagem, lixo, lixeira, deleted, apagado, eliminado, deletado, removido, removed, recycle, recycled, recyclebin, $recyclebin, $RECYCLE.BIN, $I, $R, ficheiros apagados, deleted files, recovery, recuperacao, apagar, delete, trash, lixeira do windows, ficheiro eliminado, foi apagado, foi eliminado, what was deleted, o que foi apagado, enviou para o lixo, mandou para o lixo, atirou para o lixo, sent to recycle, moved to trash, who deleted, quem apagou, user deleted, which files deleted, $I file size, $R file size, deleted file size
 ---
 
 ## What is the Recycle Bin?
-When a file is deleted via Windows Explorer (not Shift+Delete), it goes to `$RECYCLE.BIN\<SID>\`. Each deleted file creates two entries:
-- `$I<hash>` — metadata file: original full path, file size, deletion timestamp
-- `$R<hash>` — the actual deleted file content (recoverable)
+Files deleted via Windows Explorer go to `$RECYCLE.BIN\<SID>\`. Each deleted item creates:
+- `$I<hash>` — metadata: original full path, original file size, deletion timestamp
+- `$R<hash>` — the actual deleted content (file or folder tree)
 
-The SID in the path identifies which user deleted the file.
+The SID directory identifies the user who deleted the item.
 
-## Forensic use cases
-- Find files that were deliberately deleted by a suspect
-- Recover the original path of deleted files
-- Determine when files were deleted
-- Identify which user deleted each file (via SID)
-- Recover deleted file content
+## CRITICAL: reading $I files — use Python heredoc, never strings or python3 -c
 
-## CRITICAL: recovering original paths from $I files
+NEVER use `strings` or `strings -e l` — they fail silently on Win10+ $I files.
+NEVER use `python3 -c "..."` with double quotes — bash expands `$RECYCLE` → path breaks.
+ALWAYS use `python3 << 'PYEOF'` heredoc (single-quoted delimiter prevents all expansion).
 
-`$I` files store the original Windows path in UTF-16LE encoding (Windows Vista+ format).
-`strings` without flags only extracts ASCII — use `strings -e l` to extract UTF-16LE strings.
-Then use `grep ':'` to find Windows drive-letter paths like `C:\Users\...` — NO backslash in grep pattern.
+$I binary format:
+- Version 1 (Vista/7/8): path at offset 24, null-terminated UTF-16LE
+- Version 2 (Win10+): path length (chars) at bytes 24-27, path at offset 28, NOT null-terminated
 
-WRONG (plain strings misses UTF-16LE paths):
-  `find ... | while read f; do strings "$f" | grep ':'; done`  → may return empty or only partial fragments
-
-WRONG (breaks command parsing — never use xargs bash -c with backslash patterns):
-  `find ... | xargs -I {} bash -c 'strings {} | grep -oP "^.*\\"'`  → "unexpected EOF" errors
-
-RIGHT — use strings -e l (little-endian 16-bit = UTF-16LE):
+Use `struct` to detect version and extract path correctly:
 ```bash
-find '{evidence}/$RECYCLE.BIN' -name '$I*' -type f 2>/dev/null | while read f; do strings -e l "$f" | grep ':'; done | sort -u
+python3 << 'PYEOF'
+import os, struct
+base = '{evidence}/$RECYCLE.BIN'
+for sid in os.listdir(base):
+    sp = os.path.join(base, sid)
+    if not os.path.isdir(sp): continue
+    for fn in os.listdir(sp):
+        if not fn.startswith('$I'): continue
+        fpath = os.path.join(sp, fn)
+        try:
+            data = open(fpath, 'rb').read()
+            if len(data) < 28: continue
+            version = struct.unpack_from('<Q', data, 0)[0]
+            if version == 2:
+                path_len = struct.unpack_from('<I', data, 24)[0]
+                path = data[28:28 + path_len*2].decode('utf-16-le', errors='replace')
+            else:
+                path = data[24:].decode('utf-16-le', errors='replace').split('\x00')[0]
+            if ':' in path:
+                print('SID=' + sid + ': ' + path)
+        except Exception as e:
+            print('ERR ' + fpath + ': ' + str(e))
+PYEOF
 ```
 
-ALWAYS use `while read f; do strings -e l "$f" | grep ':'; done` for extracting original paths.
-NEVER use `xargs -I {} bash -c '...'` — complex quoting inside bash -c always fails.
+## CRITICAL: getting the original file size
+NEVER run `stat` on a `$I` file — it always returns ~544 bytes (the metadata file size, not the original).
+```bash
+# Option A (simplest): stat the $R file — its size = original logical size
+stat -c "%s" '{evidence}/$RECYCLE.BIN/<SID>/$R<hash>'
 
-## CRITICAL: identifying which user deleted files
-
-The SID IS the directory name in the path — it does NOT need to be extracted from the binary.
-Example path: `{evidence}/$RECYCLE.BIN/S-1-5-21-...-1004/$IABFQJP.txt`
-→ User SID is `S-1-5-21-...-1004` (the directory between `$RECYCLE.BIN/` and the `$I` filename)
-
-To list unique SIDs: `find '{evidence}/$RECYCLE.BIN' -mindepth 1 -maxdepth 1 -type d 2>/dev/null`
+# Option B: read size from $I binary (bytes 8-15, little-endian uint64)
+python3 << 'PYEOF'
+import struct
+data = open('{evidence}/$RECYCLE.BIN/<SID>/$I<hash>', 'rb').read()
+print('Original size:', struct.unpack_from('<Q', data, 8)[0], 'bytes')
+PYEOF
+```
 
 ## Identifying a specific user's deleted files
 
-To find files deleted by a named user (e.g. "BillyBob") and verify specific filenames:
-
-**Step 1 — Search ALL $I files across all SIDs for the target filename:**
+**Step 1a — Search $I metadata for directly-deleted files (keyword in $I path):**
 ```bash
-# Search all $I files — shows filename AND which SID folder it came from
-find '{evidence}/$RECYCLE.BIN' -name '$I*' -type f 2>/dev/null | while read f; do
-  match=$(strings -e l "$f" | grep -i 'New Price List')
-  [ -n "$match" ] && echo "SID=$(basename $(dirname "$f")): $match"
-done
-# Replace 'New Price List' with the actual filename fragment to search for.
-# If the question mentions two filenames, run this loop twice (once per name).
-# Output example:
-#   SID=S-1-5-21-...-1001: C:\Users\BillyBob\Desktop\New Price List.txt
+python3 << 'PYEOF'
+import os, struct
+base = '{evidence}/$RECYCLE.BIN'
+keyword = 'New Price List'
+for sid in os.listdir(base):
+    sp = os.path.join(base, sid)
+    if not os.path.isdir(sp): continue
+    for fn in os.listdir(sp):
+        if not fn.startswith('$I'): continue
+        fpath = os.path.join(sp, fn)
+        try:
+            data = open(fpath, 'rb').read()
+            if len(data) < 28: continue
+            version = struct.unpack_from('<Q', data, 0)[0]
+            if version == 2:
+                path_len = struct.unpack_from('<I', data, 24)[0]
+                path = data[28:28 + path_len*2].decode('utf-16-le', errors='replace')
+            else:
+                path = data[24:].decode('utf-16-le', errors='replace').split('\x00')[0]
+            if keyword.lower() in path.lower():
+                print('SID=' + sid + ': ' + path)
+        except Exception as e:
+            print('ERR ' + fpath + ': ' + str(e))
+PYEOF
+# If two filenames, run twice with different keywords.
 ```
 
-**Step 2 — Confirm the SID belongs to the named user via SOFTWARE registry:**
+**Step 1b — ALSO search inside $R directories (deleted folders):**
+
+**CRITICAL:** When a **folder** is deleted, the `$I` records only the folder name (e.g. `New Prices`),
+NOT the individual files inside it. The files live inside the `$R` directory — Step 1a will miss them.
+```bash
+find '{evidence}/$RECYCLE.BIN' -mindepth 2 -maxdepth 2 -name '$R*' -type d 2>/dev/null | while read rdir; do
+  result=$(find "$rdir" -iname '*New Price List*' 2>/dev/null)
+  [ -n "$result" ] && echo "SID=$(basename $(dirname "$rdir")): $result"
+done
+# Replace 'New Price List' with the actual filename fragment.
+```
+
+**Step 2 — Map SID to username via SOFTWARE registry:**
 ```bash
 HIVE=$(find '{evidence}' -path '*/System32/config/SOFTWARE' -not -path '*/RegBack/*' 2>/dev/null | head -1)
 reglookup "$HIVE" 2>/dev/null | grep -i 'ProfileList' | grep -i 'ProfileImagePath' | grep -i 'BillyBob'
 # → /Microsoft/.../ProfileList/S-1-5-21-...-1001/ProfileImagePath|SZ|C:\Users\BillyBob
-# → BillyBob's SID is S-1-5-21-...-1001
-# NOTE: RegisteredOwner (also in SOFTWARE) is NOT the same as a user's SID — do NOT use it for SID mapping.
+# NOTE: RegisteredOwner is NOT the same as a user's SID — never use it for SID mapping.
 ```
 
-Both files must be found under the same SID, and that SID must map to the named user.
-
-## Usage examples
-```bash
-# List all $I metadata files (one per deleted item)
-find '{evidence}/$RECYCLE.BIN' -name '$I*' -type f 2>/dev/null
-
-# Recover original paths from ALL $I files — strings -e l extracts UTF-16LE paths, grep ':' finds Windows paths
-find '{evidence}/$RECYCLE.BIN' -name '$I*' -type f 2>/dev/null | while read f; do strings -e l "$f" | grep ':'; done | sort -u
-
-# List all deleted items with timestamps — use find -printf (NOT stat)
-find '{evidence}/$RECYCLE.BIN' -name '$I*' -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort
-
-# Identify which users deleted files: SID directories under $RECYCLE.BIN
-find '{evidence}/$RECYCLE.BIN' -mindepth 1 -maxdepth 1 -type d 2>/dev/null
-
-# List actual deleted file contents ($R files)
-find '{evidence}/$RECYCLE.BIN' -name '$R*' -type f 2>/dev/null | head -30
-
-# Copy a recoverable deleted file to exports
-cp '{evidence}/$RECYCLE.BIN/S-1-5-21-1171287513-3642516788-2358256967-1004/$RABFQJP.txt' /exports/recovered_file.txt
-```
+Both files must appear under the same SID, and that SID must map to the named user.
 
 ## Tips
-- The SID `S-1-5-21-...-1004` etc. identifies the user — correlate with SAM hive or user directory names
-- `$I` files are small binary files; use `strings` to read the original path embedded in them
-- `$R` files have the same content as the original deleted file — you can copy and open them
-- Shift+Delete bypasses the Recycle Bin — those files are NOT here and require carving tools
+- SID directory under `$RECYCLE.BIN` IS the user identifier — no binary extraction needed
+- `$R` entries can be files OR directories (when a folder was deleted)
+- Shift+Delete bypasses the Recycle Bin — those files are NOT here, require carving tools
+- To list SIDs: `find '{evidence}/$RECYCLE.BIN' -mindepth 1 -maxdepth 1 -type d 2>/dev/null`

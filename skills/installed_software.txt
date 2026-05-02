@@ -1,0 +1,50 @@
+SKILL: installed_software
+DESCRIPTION: Find installed or used programs on a Windows system by querying the registry uninstall keys and prefetch files. Use this when asked what programs, tools, or software were installed or used — especially encryption tools, suspicious programs, or specific applications.
+KEYWORDS: installed, installed programs, software installed, que programas, programas instalados, que ferramentas, what programs, what software, programs used, what was installed, o que esta instalado, o que foi instalado, encryption programs, encryption software, encriptacao, cifra, cipher, veracrypt, bitlocker, truecrypt, bctextencoder, file vault, program list, lista de programas, ferramentas instaladas, tools installed, applications, aplicacoes, what tools, que ferramentas foram usadas, que software, installed tools, encryption tool, ferramenta de encriptacao
+---
+
+## CRITICAL: run each step as a SEPARATE tool call — never combine into one command
+
+Each step produces up to 100 lines of output. Combining steps into one command shares that budget
+and will truncate results, causing you to miss programs. Run one command per tool call.
+
+## Step 1 — Registry uninstall keys (installed programs — most reliable)
+
+```bash
+SOFTWARE=$(find '/forensics' -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1)
+reglookup -p '/Microsoft/Windows/CurrentVersion/Uninstall' "$SOFTWARE" 2>/dev/null | grep -i -E 'veracrypt|bitlocker|truecrypt|bctextencoder|file.?vault' | head -20
+reglookup -p '/WOW6432Node/Microsoft/Windows/CurrentVersion/Uninstall' "$SOFTWARE" 2>/dev/null | grep -i -E 'veracrypt|bitlocker|truecrypt|bctextencoder|file.?vault' | head -20
+```
+
+## Step 2 — Full NTUSER.DAT scan (portable tools — catches BCTextEncoder in Shell Bags, MUI Cache, UserAssist, etc.)
+
+Portable tools like BCTextEncoder leave no installer footprint but appear somewhere in the user's
+registry (Shell Bags, MUI Cache, UserAssist, Run keys). Dump all NTUSER.DAT keys and grep — this
+covers every possible location regardless of Windows version.
+
+```bash
+find '/forensics' -iname 'NTUSER.DAT' 2>/dev/null | while read hive; do
+  result=$(reglookup "$hive" 2>/dev/null | grep -i -E 'veracrypt|bitlocker|truecrypt|bctextencoder|file.?vault')
+  [ -n "$result" ] && echo "=== $hive ===" && echo "$result" | head -20
+done
+```
+
+## Step 3 — Prefetch files (confirms a program was executed)
+
+```bash
+find '/forensics' -ipath '*/Prefetch/*.pf' 2>/dev/null | grep -i -E 'veracrypt|bitlocker|truecrypt|bctextencoder'
+```
+
+## Step 4 — File system fallback (portable tools, leftover files)
+
+```bash
+find '/forensics' \( -iname '*veracrypt*' -o -iname '*truecrypt*' -o -iname '*bctextencoder*' \) 2>/dev/null | head -20
+```
+
+## Tips
+
+- BitLocker is a Windows built-in feature — it will NOT appear in Uninstall keys. Detect it via policy keys or BitLocker-encrypted volume markers.
+- BCTextEncoder is a portable tool — it will NOT appear in Uninstall keys. It WILL appear in MUI Cache (Step 2) and possibly Prefetch (Step 3).
+- VeraCrypt and TrueCrypt appear in Uninstall keys when installed via the standard installer.
+- Always run BOTH the 64-bit (`/Uninstall`) and 32-bit (`/WOW6432Node/.../Uninstall`) registry paths in Step 1.
+- Run ALL four steps before concluding — a program missed in Step 1 may appear in Steps 2–4.
