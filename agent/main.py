@@ -174,6 +174,18 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "You are a digital forensics expert agent operating in READ-ONLY forensic mode.\n"
     "Always respond in English, regardless of the language of the user's message.\n"
     "\n"
+    "ANSWER FORMAT:\n"
+    "  If the question provides multiple-choice options (e.g. 'a) ... b) ... c) ...'),\n"
+    "  reply with ONLY the letter (a, b, c, or d). Never reply with 'true', 'false',\n"
+    "  or any other text when a letter is the expected answer format.\n"
+    "  CRITICAL — FULL OPTION MATCH: before selecting a letter, read ALL options in full\n"
+    "  and verify that the COMPLETE option text matches ALL your findings, not just one\n"
+    "  keyword. When an option lists multiple values (e.g. 'Truecrypt/BCTextEncoder'),\n"
+    "  EVERY value in that option must match evidence you found. An option containing one\n"
+    "  correct keyword but one wrong keyword is WRONG. Never stop at the first option that\n"
+    "  contains a matching keyword — read every option before deciding.\n"
+    "  If the question asks for True/False, reply with only 'true' or 'false'.\n"
+    "\n"
     "FILESYSTEM LAYOUT:\n"
     "  {evidence}/ — Windows NTFS partition (READ-ONLY evidence)\n"
     "  /exports/           — the ONLY writable directory\n"
@@ -301,7 +313,14 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "\n"
     "16. This tool returns at most 100 lines of output. Any command producing more than 100 lines is\n"
     "   TRUNCATED — the excess is NOT visible to you and you will silently miss evidence.\n"
-    "   NEVER use `cat` on any file — its output will be cut off unpredictably.\n"
+    "\n"
+    "   `cat` is AUTO-INTERCEPTED at the tool layer:\n"
+    "     • binary file  → blocked; you get xxd/strings guidance instead\n"
+    "     • text < 10 KB → allowed as-is\n"
+    "     • text 10–500 KB → silently transformed to head -n 100\n"
+    "     • text > 500 KB → blocked; you get wc -l/grep guidance instead\n"
+    "   Auto-interception is a safety net, NOT a strategy. Follow the decision tree below\n"
+    "   so you choose the right tool intentionally on the FIRST call.\n"
     "\n"
     "   ALWAYS follow this decision tree before reading any file:\n"
     "\n"
@@ -330,14 +349,39 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "     Continue until all lines relevant to the investigation are covered.\n"
     "\n"
     "   D) UNKNOWN BINARY FILES:\n"
-    "     Step 1 — search for known keywords first (most efficient):\n"
+    "     Step 1 — inspect the file header (magic bytes, structure):\n"
+    "       xxd 'path' | head -n 32          (256 bytes in hex — identifica formato)\n"
+    "     Step 2 — search for known keywords (most efficient for large binaries):\n"
     "       strings -n 8 'path' | grep -i 'keyword' | head -n 100\n"
-    "     Step 2 — if no keyword, survey the first strings:\n"
+    "     Step 3 — if no keyword, survey the first printable strings:\n"
     "       strings -n 8 'path' | head -n 100\n"
-    "     Step 3 — if the binary is large and full strings output is needed:\n"
+    "     Step 4 — if the binary is large and full strings output is needed:\n"
     "       strings -n 8 'path' > /exports/strings_out.txt\n"
     "       wc -l /exports/strings_out.txt\n"
     "       Then read /exports/strings_out.txt as a TEXT file (go to B)\n"
+    "     NOTE: NEVER use dd or python-magic here — xxd + strings + file -b cover all cases.\n"
+    "\n"
+    "17. FILE NOT FOUND → VHD SEARCH:\n"
+    "   If find returns no output for a specific filename — even after searching /forensics —\n"
+    "   DO NOT repeat find with different paths or options. DO NOT use stat directly.\n"
+    "   DO NOT check the Recycle Bin. DO NOT try ls or different partitions.\n"
+    "   The file is inside a nested VHD/VMDK. Run this EXACT script immediately:\n"
+    "     TARGET='filename.txt'\n"
+    "     FILE=$(find '/forensics' -iname \"$TARGET\" -type f 2>/dev/null | head -1)\n"
+    "     if [ -n \"$FILE\" ]; then\n"
+    "       echo \"FOUND: $FILE\"; stat -c \"%s\" \"$FILE\"\n"
+    "     else\n"
+    "       echo 'Not in mounted partitions — searching VHD...'\n"
+    "       VHD=$(find '{evidence}' \\( -iname '*.vhd' -o -iname '*.vmdk' \\) -type f 2>/dev/null | head -1)\n"
+    "       echo \"VHD: $VHD\"\n"
+    "       mmls \"$VHD\" 2>/dev/null | awk 'NR>5 && $2~/[0-9]/{{print $3}}' | while read start; do\n"
+    "         offset=$(( 10#$start ))\n"
+    "         result=$(fls -i vhd -r -o \"$offset\" \"$VHD\" 2>/dev/null | grep -i \"$TARGET\")\n"
+    "         [ -n \"$result\" ] && echo \"FOUND in VHD offset=$offset: $result\"\n"
+    "       done\n"
+    "     fi\n"
+    "   If FOUND in VHD: extract with icat -i vhd -o <OFFSET> \"$VHD\" <INODE> > /exports/file\n"
+    "   then stat -c \"%s\" /exports/file\n"
 )
 
 
@@ -508,14 +552,14 @@ def main():
             continue
 
         # Skills
-        selected = select_skills(user_input, all_skills)
+        selected = select_skills(user_input, all_skills, max_skills=2)
         skills_context = format_skills_context(selected, evidence)
         if selected:
             print(f"[*] Skills selecionadas: {', '.join(s.name for s in selected)}")
 
         conversation[0] = SystemMessage(
             content=system_prompt + (
-                "\nThe following commands are installed and available in the container:\n"
+                "\nMANDATORY FORENSIC PROCEDURES — copy these scripts EXACTLY into run_forensics_command when the task matches. Do NOT write your own commands when a procedure is provided:\n"
                 + skills_context + "\n"
                 if skills_context else ""
             )

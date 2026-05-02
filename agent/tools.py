@@ -4,6 +4,8 @@ Executa comandos bash arbitrários dentro do container Docker.
 """
 
 import hashlib
+import re
+import shlex
 import subprocess
 import os
 import time
@@ -185,6 +187,83 @@ def stop_container():
 
 MAX_LINES = 100  # Linhas acima deste limite → guarda em ficheiro no container
 
+# Apanha: cat [flags] 'path'  /  cat [flags] "path"  /  cat [flags] path
+# Apenas um ficheiro, path começa com / ou .
+_CAT_PATTERN = re.compile(
+    r"""^\s*cat\s+(?:-[A-Za-z]+\s+)*(?:'([^']+)'|"([^"]+)"|(/\S+|\./\S+))\s*$"""
+)
+
+
+def _get_file_meta(path: str) -> tuple[int, str]:
+    """Devolve (size_bytes, mime_type) do ficheiro dentro do container."""
+    meta_cmd = (
+        f"stat -c '%s' {shlex.quote(path)} 2>/dev/null; "
+        f"file -b --mime-type {shlex.quote(path)} 2>/dev/null"
+    )
+    r = subprocess.run(
+        ["docker", "exec", CONTAINER_NAME, "bash", "-c", meta_cmd],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
+    )
+    lines = r.stdout.strip().splitlines()
+    try:
+        size = int(lines[0].strip())
+    except (ValueError, IndexError):
+        size = -1
+    mime = lines[1].strip() if len(lines) > 1 else "unknown"
+    return size, mime
+
+
+def _intercept_cat(command: str) -> "tuple[str, str] | str | None":
+    """
+    Interceta comandos `cat path`.
+
+    Retorna:
+      (novo_comando, metadata_prefix)  — transforma e continua
+      str                              — bloqueia e devolve mensagem directamente
+      None                             — não é cat, passa em frente
+    """
+    m = _CAT_PATTERN.match(command)
+    if not m:
+        return None
+
+    path = m.group(1) or m.group(2) or m.group(3)
+    size, mime = _get_file_meta(path)
+
+    fmt_size = (
+        f"{size:,} bytes ({size / 1024:.0f} KB)" if size >= 0 else "tamanho desconhecido"
+    )
+    meta_note = f"[AUTO-METADATA] path={path} | size={fmt_size} | type={mime}\n"
+
+    # Ficheiro binário — cat bloqueado
+    if not mime.startswith("text/"):
+        return (
+            f"{meta_note}"
+            f"cat bloqueado — ficheiro binário ({mime}).\n"
+            f"Para inspecionar usa:\n"
+            f"  xxd {shlex.quote(path)} | head -n 32\n"
+            f"  strings -n 8 {shlex.quote(path)} | head -n 100"
+        )
+
+    # Texto pequeno (< 10 KB ou tamanho desconhecido) — permite cat
+    if size < 0 or size < 10_240:
+        return (command, meta_note)
+
+    # Texto médio (10 KB – 500 KB) — transforma em head
+    if size < 512_000:
+        new_cmd = f"head -n 100 {shlex.quote(path)}"
+        note = meta_note + f"[cat → head -n 100: ficheiro tem {size / 1024:.0f} KB]\n"
+        return (new_cmd, note)
+
+    # Texto grande (≥ 500 KB) — bloqueia, guia para wc -l / grep
+    return (
+        f"{meta_note}"
+        f"cat bloqueado — ficheiro demasiado grande ({size / 1024 / 1024:.1f} MB).\n"
+        f"Verifica primeiro com:\n"
+        f"  wc -l {shlex.quote(path)}\n"
+        f"  grep -n 'keyword' {shlex.quote(path)} | head -n 100"
+    )
+
+
 def run_in_sandbox(command: str) -> str:
     """Executa um comando bash arbitrário dentro do container Docker."""
     command = command.strip()
@@ -199,6 +278,15 @@ def run_in_sandbox(command: str) -> str:
 
     if not ensure_container_running():
         return "Erro: nao foi possivel iniciar o container."
+
+    # ── Intercepção de cat ────────────────────────────────────────────────────
+    intercept = _intercept_cat(command)
+    if intercept is not None:
+        if isinstance(intercept, str):
+            return intercept                      # bloqueado — devolve guia directamente
+        command, _meta_prefix = intercept
+    else:
+        _meta_prefix = ""
 
     docker_cmd = ["docker", "exec", CONTAINER_NAME, "bash", "-c", command]
 
@@ -230,7 +318,7 @@ def run_in_sandbox(command: str) -> str:
                 output += f"\n[stderr]\n{stderr}" if stdout.strip() else stderr
 
             if not output.strip():
-                return "(comando executado sem output)"
+                return _meta_prefix + "(comando executado sem output)"
 
             # Output grande: guarda em ficheiro dentro do container
             lines = output.splitlines()
@@ -245,18 +333,20 @@ def run_in_sandbox(command: str) -> str:
                 )
                 if save_result.returncode != 0:
                     return (
-                        f"[Output grande: {len(lines)} linhas — truncado a {MAX_LINES}]\n"
+                        _meta_prefix
+                        + f"[Output grande: {len(lines)} linhas — truncado a {MAX_LINES}]\n"
                         + "\n".join(lines[:MAX_LINES])
                     )
                 return (
-                    f"[Output grande: {len(lines)} linhas — guardado em {out_file}]\n"
+                    _meta_prefix
+                    + f"[Output grande: {len(lines)} linhas — guardado em {out_file}]\n"
                     f"Usa grep, head ou tail para analisar:\n"
                     f"  grep 'keyword' {out_file}\n"
                     f"  head -50 {out_file}\n\n"
                     f"Primeiras {MAX_LINES} linhas:\n" + "\n".join(lines[:MAX_LINES])
                 )
 
-            return output
+            return _meta_prefix + output
 
         except subprocess.TimeoutExpired:
             return "Erro: timeout — o comando demorou mais de 60 segundos."
