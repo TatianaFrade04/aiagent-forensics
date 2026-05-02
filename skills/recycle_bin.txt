@@ -1,6 +1,6 @@
 SKILL: recycle_bin
 DESCRIPTION: Analyse the Windows Recycle Bin ($RECYCLE.BIN) to find deleted files, their original paths, deletion timestamps, and file sizes. Each deleted file has a $I metadata file and a $R content file.
-KEYWORDS: recycle bin, reciclagem, lixo, lixeira, deleted, apagado, eliminado, deletado, removido, removed, recycle, $RECYCLE.BIN, $I, $R, ficheiros apagados, deleted files, recovery, recuperacao, apagar, delete, trash, lixeira do windows, ficheiro eliminado, foi apagado, foi eliminado, what was deleted, o que foi apagado
+KEYWORDS: recycle bin, reciclagem, lixo, lixeira, deleted, apagado, eliminado, deletado, removido, removed, recycle, recycled, recyclebin, $recyclebin, $RECYCLE.BIN, $I, $R, ficheiros apagados, deleted files, recovery, recuperacao, apagar, delete, trash, lixeira do windows, ficheiro eliminado, foi apagado, foi eliminado, what was deleted, o que foi apagado, enviou para o lixo, mandou para o lixo, atirou para o lixo, sent to recycle, moved to trash, who deleted, quem apagou, user deleted, which files deleted
 ---
 
 ## What is the Recycle Bin?
@@ -44,6 +44,34 @@ Example path: `{evidence}/$RECYCLE.BIN/S-1-5-21-...-1004/$IABFQJP.txt`
 → User SID is `S-1-5-21-...-1004` (the directory between `$RECYCLE.BIN/` and the `$I` filename)
 
 To list unique SIDs: `find '{evidence}/$RECYCLE.BIN' -mindepth 1 -maxdepth 1 -type d 2>/dev/null`
+
+## Identifying a specific user's deleted files
+
+To find files deleted by a named user (e.g. "BillyBob") and verify specific filenames:
+
+**Step 1 — Search ALL $I files across all SIDs for the target filename:**
+```bash
+# Search all $I files — shows filename AND which SID folder it came from
+find '{evidence}/$RECYCLE.BIN' -name '$I*' -type f 2>/dev/null | while read f; do
+  match=$(strings -e l "$f" | grep -i 'New Price List')
+  [ -n "$match" ] && echo "SID=$(basename $(dirname "$f")): $match"
+done
+# Replace 'New Price List' with the actual filename fragment to search for.
+# If the question mentions two filenames, run this loop twice (once per name).
+# Output example:
+#   SID=S-1-5-21-...-1001: C:\Users\BillyBob\Desktop\New Price List.txt
+```
+
+**Step 2 — Confirm the SID belongs to the named user via SOFTWARE registry:**
+```bash
+HIVE=$(find '{evidence}' -path '*/System32/config/SOFTWARE' -not -path '*/RegBack/*' 2>/dev/null | head -1)
+reglookup "$HIVE" 2>/dev/null | grep -i 'ProfileList' | grep -i 'ProfileImagePath' | grep -i 'BillyBob'
+# → /Microsoft/.../ProfileList/S-1-5-21-...-1001/ProfileImagePath|SZ|C:\Users\BillyBob
+# → BillyBob's SID is S-1-5-21-...-1001
+# NOTE: RegisteredOwner (also in SOFTWARE) is NOT the same as a user's SID — do NOT use it for SID mapping.
+```
+
+Both files must be found under the same SID, and that SID must map to the named user.
 
 ## Usage examples
 ```bash
