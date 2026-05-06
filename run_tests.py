@@ -150,9 +150,25 @@ def extrair_metricas_do_log(texto_resposta: str) -> dict:
     return metricas
 
 
+# ─── Helpers de apresentação ──────────────────────────────────────────────────
+
+def _imprimir_tabela_contextos(modelos: list, ctx_manual: int | None):
+    print(f"   {'Modelo':<22} {'Contexto (tokens)':>18}  Fonte")
+    print(f"   {'-'*22} {'-'*18}  {'-'*7}")
+    for m in modelos:
+        if ctx_manual:
+            ctx = ctx_manual
+            fonte = "manual"
+        else:
+            ctx = MODEL_CTX_12GB.get(m, 32768)
+            fonte = "tabela" if m in MODEL_CTX_12GB else "default"
+        print(f"   {m:<22} {ctx:>18,}  {fonte}")
+    print()
+
+
 # ─── Core ─────────────────────────────────────────────────────────────────────
 
-def correr_sessao(modelo: str, sessao: int, ctx: int, debug: bool = False) -> dict:
+def correr_sessao(modelo: str, sessao: int, ctx: int, debug: bool = False, run_ts: str = "", limpar_contexto: bool = False) -> dict:
     """Lança o agente UMA VEZ e envia todas as perguntas em sequência via Popen."""
     print(f"\n{'='*60}")
     print(f"  MODELO: {modelo}  |  CTX: {ctx}  |  SESSÃO: {sessao}/{SESSOES_DEFAULT}")
@@ -200,7 +216,8 @@ def correr_sessao(modelo: str, sessao: int, ctx: int, debug: bool = False) -> di
                 "resposta_final": "ERRO: agente nao arrancou", "resposta_raw": "",
                 "tempo_segundos": 0.0,
                 "metricas_ollama": {"total_duration_ns":0,"prompt_eval_count":0,"eval_count":0,"tool_calls":0}})
-        return {"modelo": modelo, "sessao": sessao, "timestamp_inicio": timestamp_inicio,
+        return {"modelo": modelo, "ctx": ctx, "limpar_contexto": limpar_contexto,
+                "sessao": sessao, "timestamp_inicio": timestamp_inicio,
                 "timestamp_fim": datetime.now().isoformat(), "perguntas": resultados,
                 "resumo": {"total_perguntas": len(resultados), "tempo_total_segundos": 0,
                            "tempo_medio_segundos": 0, "total_tool_calls": 0}}
@@ -264,10 +281,27 @@ def correr_sessao(modelo: str, sessao: int, ctx: int, debug: bool = False) -> di
             "metricas_ollama": metricas,
         })
 
+        # Limpa contexto entre perguntas se solicitado
+        if limpar_contexto:
+            try:
+                proc.stdin.write("limpar\n")
+                proc.stdin.flush()
+                deadline_limpar = time.time() + 10
+                while time.time() < deadline_limpar:
+                    linha = proc.stdout.readline()
+                    if not linha:
+                        break
+                    if "Historico limpo" in linha:
+                        break
+            except Exception:
+                pass
+
         # Guarda progresso após cada pergunta (evita perder dados se interrompido)
         tempo_total_parcial = sum(r["tempo_segundos"] for r in resultados)
         guardar_log({
             "modelo": modelo,
+            "ctx": ctx,
+            "limpar_contexto": limpar_contexto,
             "sessao": sessao,
             "timestamp_inicio": timestamp_inicio,
             "timestamp_fim": datetime.now().isoformat(),
@@ -278,7 +312,7 @@ def correr_sessao(modelo: str, sessao: int, ctx: int, debug: bool = False) -> di
                 "tempo_medio_segundos": round(tempo_total_parcial / len(resultados), 2),
                 "total_tool_calls": sum(r["metricas_ollama"]["tool_calls"] for r in resultados),
             },
-        })
+        }, run_ts=run_ts)
 
     # Termina o agente
     try:
@@ -288,13 +322,32 @@ def correr_sessao(modelo: str, sessao: int, ctx: int, debug: bool = False) -> di
     except Exception:
         proc.kill()
 
-def guardar_log(dados: dict, pasta: str = "logs_testes"):
+    tempo_total_final = sum(r["tempo_segundos"] for r in resultados)
+    return {
+        "modelo": modelo,
+        "ctx": ctx,
+        "limpar_contexto": limpar_contexto,
+        "sessao": sessao,
+        "timestamp_inicio": timestamp_inicio,
+        "timestamp_fim": datetime.now().isoformat(),
+        "perguntas": resultados,
+        "resumo": {
+            "total_perguntas": len(resultados),
+            "tempo_total_segundos": round(tempo_total_final, 2),
+            "tempo_medio_segundos": round(tempo_total_final / len(resultados), 2) if resultados else 0,
+            "total_tool_calls": sum(r["metricas_ollama"]["tool_calls"] for r in resultados),
+        },
+    }
+
+def guardar_log(dados: dict, pasta: str = "logs_testes", run_ts: str = ""):
     """Guarda JSON estruturado — inclui hostname do PC na pasta."""
     hostname = socket.gethostname()
     pasta_pc = os.path.join(pasta, hostname)
     os.makedirs(pasta_pc, exist_ok=True)
     ms = modelo_safe(dados["modelo"])
-    caminho = f"{pasta_pc}/{ms}_sessao{dados['sessao']}.json"
+    ts = f"_{run_ts}" if run_ts else ""
+    limpo = "_limpo" if dados.get("limpar_contexto") else ""
+    caminho = f"{pasta_pc}/{ms}_sessao{dados['sessao']}{limpo}{ts}.json"
 
     with open(caminho, "w", encoding="utf-8") as f:
         json.dump(dados, f, ensure_ascii=False, indent=2)
@@ -318,6 +371,8 @@ def parse_args():
                    help="Corre apenas um modelo específico (útil para testes rápidos)")
     p.add_argument("--ctx", type=int, default=None,
                    help="Contexto em tokens (default: auto-detectado por modelo para 12 GB VRAM)")
+    p.add_argument("--limpar-contexto", action="store_true", default=False,
+                   help="Limpa o contexto da conversa entre perguntas (cada pergunta é independente)")
     return p.parse_args()
 
 
@@ -330,14 +385,11 @@ def main():
 
     total = len(modelos) * args.sessoes
     print(f"\n🔬 Bateria de testes — AIAgent@forensics")
-    print(f"   Modelos  : {', '.join(modelos)}")
     print(f"   Sessões  : {args.sessoes} por modelo")
     print(f"   Perguntas: {len(PERGUNTAS)} por sessão")
-    print(f"   Total    : {total} sessões  ({total * len(PERGUNTAS)} respostas)")
-    if args.ctx:
-        print(f"   Contexto : {args.ctx} (manual)\n")
-    else:
-        print(f"   Contexto : auto (12 GB VRAM)\n")
+    print(f"   Total    : {total} sessões  ({total * len(PERGUNTAS)} respostas)\n")
+    print(f"   Modelos e contextos máximos (12 GB VRAM):")
+    _imprimir_tabela_contextos(modelos, args.ctx)
 
     # Limpar container Docker residual antes de começar
     print("  Limpando container Docker residual...")
@@ -345,14 +397,20 @@ def main():
                    capture_output=True, text=True)
     print("  OK\n")
 
+    run_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     inicio_global = time.time()
+    todos_resultados = []
 
     for modelo in modelos:
         ctx = args.ctx if args.ctx else ctx_para_modelo(modelo)
         for sessao in range(1, args.sessoes + 1):
             try:
-                dados = correr_sessao(modelo, sessao, ctx=ctx, debug=args.debug)
-                guardar_log(dados, pasta=args.pasta)
+                dados = correr_sessao(modelo, sessao, ctx=ctx, debug=args.debug, run_ts=run_ts, limpar_contexto=args.limpar_contexto)
+                if dados:
+                    guardar_log(dados, pasta=args.pasta, run_ts=run_ts)
+                    todos_resultados.append(dados)
+                    r = dados["resumo"]
+                    print(f"\n  📊 {modelo} (ctx={ctx:,}) sessão {sessao}: {r['total_perguntas']} perguntas  |  {r['tempo_medio_segundos']:.1f}s/pergunta  |  {r['total_tool_calls']} tool_calls")
             except KeyboardInterrupt:
                 print("\n[!] Interrompido pelo utilizador.")
                 sys.exit(0)
@@ -361,6 +419,15 @@ def main():
                 continue
 
     duracao = round(time.time() - inicio_global, 1)
+    print(f"\n{'='*70}")
+    print(f"  RESULTADOS FINAIS")
+    print(f"{'='*70}")
+    print(f"  {'Modelo':<20} {'Contexto':>10} {'Perguntas':>10} {'Tempo médio':>12} {'Tool calls':>11}")
+    print(f"  {'-'*65}")
+    for d in todos_resultados:
+        r = d["resumo"]
+        ctx_str = f"{d.get('ctx', 0):,}"
+        print(f"  {d['modelo']:<20} {ctx_str:>10} {r['total_perguntas']:>10}  {r['tempo_medio_segundos']:>8.1f}s  {r['total_tool_calls']:>10}")
     print(f"\n✅ Testes concluídos em {duracao}s")
     print(f"   Logs em: {args.pasta}/")
     print(f"\n   Próximo passo: traz os JSONs ao Claude para gerar gráficos e tabelas.\n")

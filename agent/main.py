@@ -198,7 +198,17 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "  Main hives location: {evidence}/Windows/System32/config/\n"
     "  Per-user hive:        {evidence}/USERS/<username>/NTUSER.DAT\n"
     "  NEVER search for *.reg or *.hive — those are not hive files.\n"
-    "  ALWAYS resolve hive paths with find in the SAME command string, using this pattern:\n"
+    "\n"
+    "  reglookup SYNTAX — CRITICAL:\n"
+    "    1. reglookup uses FORWARD SLASHES '/' as path separators — NEVER backslashes.\n"
+    "    2. Arguments are ALWAYS: reglookup -p '<KEY_PATH>' '<HIVE_FILE>'\n"
+    "       -p = the path WITHIN the registry using forward slashes\n"
+    "       last arg = the hive FILE path on disk\n"
+    "  WRONG: reglookup -p '/forensics/.../NTUSER.DAT' 'Software\\...'  ← args reversed!\n"
+    "  WRONG: reglookup -p 'Software\\Microsoft\\Windows\\CurrentVersion\\Run' ...  ← backslashes!\n"
+    "  RIGHT: reglookup -p '/Software/Microsoft/Windows/CurrentVersion/Run' '/forensics/.../NTUSER.DAT'\n"
+    "\n"
+    "  SYSTEM HIVES — resolve path with find in the SAME command string:\n"
     "    HIVE=$(find '{evidence}' -iname 'SOFTWARE' -not -path '*/Users/*'\n"
     "      -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1)\n"
     "    ; reglookup -p '/...' \"$HIVE\"\n"
@@ -208,6 +218,20 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "  NEVER use inline $(find ...) without assigning to a quoted variable first.\n"
     "  The -not -path '*/diagnostics/*' filter is CRITICAL — omitting it may return\n"
     "  a diagnostics file instead of the real hive, causing 'undefined value' errors.\n"
+    "\n"
+    "  USER HIVE (NTUSER.DAT) — the path is known directly, no find needed:\n"
+    "    reglookup -p '/Software/Microsoft/Windows/CurrentVersion/Run' \\\n"
+    "      '{evidence}/USERS/<username>/NTUSER.DAT'\n"
+    "  Note: NTUSER.DAT paths use forward slashes and a leading slash, same as system hives.\n"
+    "  Note: use single-quoted hive path when the username contains spaces.\n"
+    "\n"
+    "  USER STARTUP PROGRAMS (Run key in NTUSER.DAT):\n"
+    "    reglookup -p '/Software/Microsoft/Windows/CurrentVersion/Run' \\\n"
+    "      '{evidence}/USERS/<username>/NTUSER.DAT'\n"
+    "  If the above returns an error, check the hive file exists first:\n"
+    "    find '{evidence}/USERS/<username>' -iname 'NTUSER.DAT'\n"
+    "  Case matters on Linux — the file may be 'NTUSER.DAT' or 'ntuser.dat'.\n"
+    "\n"
     "  To find the Windows version: reglookup -p '/Microsoft/Windows NT/CurrentVersion'\n"
     "  on the SOFTWARE hive.\n"
     "\n"
@@ -239,10 +263,12 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "   Only report failure after at least TWO distinct approaches have been tried and both failed.\n"
     "   If a registry path fails, try the EVENT LOG. If a tool is missing, try an alternative tool.\n"
     "   NEVER repeat an identical failing command — always change something.\n"
-    "8. Every new question requires a new tool call — no exceptions.\n"
+    "8. MANDATORY TOOL CALL — you MUST call run_forensics_command before answering ANY question.\n"
+    "   Answering without first calling the tool is FORBIDDEN, even if you think you know the answer.\n"
+    "   Every new question requires a NEW tool call — no exceptions.\n"
     "   NEVER answer from memory or from results seen earlier in this conversation.\n"
-    "   Even if the exact same question was just asked, call run_forensics_command again\n"
-    "   to get a fresh result. Reusing cached output is treated the same as hallucination.\n"
+    "   Even if the exact same question was just asked, call run_forensics_command again.\n"
+    "   Answering without a tool call is treated the same as hallucination — always wrong.\n"
     "9. If command output is truncated, use grep, head, or tail to extract the needed\n"
     "   information before answering. NEVER assume or invent content that was cut off.\n"
     "10. When the user provides an absolute path in a command, run it EXACTLY as given.\n"
@@ -302,16 +328,78 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "\n"
     "15. EMAIL FORENSICS (.eml files) — ALWAYS use grep directly on the file, never strings.\n"
     "   To read email headers: awk '/^$/{{exit}} 1' 'file.eml'\n"
-    "   TIMEZONE SEMANTICS — an email passes through multiple SMTP servers, each adding a Received: header:\n"
+    "   ALWAYS run this first to capture ALL Received: and Date: headers:\n"
+    "     grep -i -E '^(date|received):' 'file.eml'\n"
+    "\n"
+    "   RECEIVED HEADER CHAIN — each SMTP hop adds one Received: header at the TOP:\n"
+    "     • Topmost 'Received:'     → FINAL DESTINATION server (inbox/delivery)\n"
+    "     • Bottom-most 'Received:' → first hop, closest to sender/origin\n"
+    "     Each Received: header contains the IP of the server that ACCEPTED the message.\n"
+    "\n"
+    "   DESTINATION IP ADDRESS:\n"
+    "     The 'final destination IP' is the IP in the TOPMOST Received: header.\n"
+    "     Extract it with: grep -i '^received:' 'file.eml' | head -1\n"
+    "     Look for patterns like: 'from ... [x.x.x.x]' or 'by ... with'\n"
+    "     The IP inside [] in the topmost Received: = final destination.\n"
+    "\n"
+    "   TIMEZONE SEMANTICS:\n"
     "     • 'Date:' header          → sender's timezone (set by the mail client)\n"
     "     • Topmost 'Received:'     → DESTINATION timezone (the inbox/delivery server)\n"
     "     • Bottom-most 'Received:' → closest to the sender/origin\n"
     "   When asked for the DESTINATION timezone, report the offset from the FIRST (topmost) Received: header.\n"
     "   When asked for the SENDER timezone, report the offset from the Date: header.\n"
     "   NEVER report the Date: header offset as the destination timezone.\n"
-    "   ALWAYS run: grep -i -E '^(date|received):' 'file.eml'  to capture ALL timezone data.\n"
     "\n"
-    "16. This tool returns at most 100 lines of output. Any command producing more than 100 lines is\n"
+    "16. LAST LOGIN TIME FOR LOCAL WINDOWS USERS — stored in the SAM hive, NOT the Security event log.\n"
+    "   The Security event log (Event ID 4624) is unreliable: it stores the SAM account name (e.g. 'jwilson'),\n"
+    "   NOT the full display name, and the log may be incomplete. ALWAYS use the SAM hive as primary source.\n"
+    "\n"
+    "   Method 1 — chntpw (fastest):\n"
+    "     find '{evidence}' -iname 'SAM' -not -ipath '*/Logs/*' -not -iname '*.log*' | head -3\n"
+    "     chntpw -i '<SAM path>' <<< $'cat sam\\nexit' 2>/dev/null | head -60\n"
+    "     Look for the user's last login timestamp in the output.\n"
+    "\n"
+    "   Method 2 — python-registry (if chntpw unavailable):\n"
+    "     python3 -c \"\n"
+    "     import Registry.Registry as reg, struct\n"
+    "     from datetime import datetime, timedelta, timezone\n"
+    "     h = reg.Registry('<SAM path>')\n"
+    "     # Get RID for user by name:\n"
+    "     names = h.open('SAM\\\\Domains\\\\Account\\\\Users\\\\Names')\n"
+    "     for sub in names.subkeys(): print(sub.name())\n"
+    "     \" 2>&1\n"
+    "     # Then read the V value for that RID:\n"
+    "     python3 -c \"\n"
+    "     import Registry.Registry as reg, struct\n"
+    "     from datetime import datetime, timedelta, timezone\n"
+    "     h = reg.Registry('<SAM path>')\n"
+    "     users = h.open('SAM\\\\Domains\\\\Account\\\\Users')\n"
+    "     for sub in users.subkeys():\n"
+    "       if sub.name() == 'Names': continue\n"
+    "       try:\n"
+    "         v = sub.value('V').raw_data()\n"
+    "         # LastLogin FILETIME is at offset 0x08 in the V blob (8 bytes, little-endian)\n"
+    "         ft = struct.unpack_from('<Q', v, 8)[0]\n"
+    "         if ft == 0: dt = 'never'\n"
+    "         else: dt = datetime(1601,1,1,tzinfo=timezone.utc)+timedelta(microseconds=ft//10)\n"
+    "         name_off = struct.unpack_from('<I', v, 0x0c)[0] + 0xcc\n"
+    "         name_len = struct.unpack_from('<I', v, 0x10)[0]\n"
+    "         name = v[name_off:name_off+name_len].decode('utf-16-le','ignore')\n"
+    "         print(sub.name(), name, dt)\n"
+    "       except: pass\n"
+    "     \" 2>&1\n"
+    "\n"
+    "   FILETIME conversion: datetime(1601,1,1,tzinfo=utc) + timedelta(microseconds=filetime//10)\n"
+    "   NEVER search Event ID 4624 by display name — EVTX stores SAM account name, not full name.\n"
+    "   NEVER give up after one failed attempt — if chntpw fails, try python-registry and vice-versa.\n"
+    "\n"
+    "17. EVTX XML ATTRIBUTE PARSING — the correct element format in Windows EVTX XML is:\n"
+    "     <Data Name=\"TargetUserName\">jwilson</Data>   (element content, NOT an XML attribute)\n"
+    "   WRONG regex: r'TargetUserName=\"([^\"]+)\"'   (looks for XML attribute — will NEVER match)\n"
+    "   RIGHT regex: r'<Data Name=\"TargetUserName\">([^<]+)</Data>'\n"
+    "   Apply the same pattern for ANY named Data field: SubjectUserName, IpAddress, LogonType, etc.\n"
+    "\n"
+    "18. This tool returns at most 100 lines of output. Any command producing more than 100 lines is\n"
     "   TRUNCATED — the excess is NOT visible to you and you will silently miss evidence.\n"
     "\n"
     "   `cat` is AUTO-INTERCEPTED at the tool layer:\n"
@@ -382,6 +470,50 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "     fi\n"
     "   If FOUND in VHD: extract with icat -i vhd -o <OFFSET> \"$VHD\" <INODE> > /exports/file\n"
     "   then stat -c \"%s\" /exports/file\n"
+    "\n"
+    "19. WINDOWS APPLICATION LAST RUN TIME — use UserAssist in NTUSER.DAT, NOT Application.evtx.\n"
+    "   Application.evtx is a BINARY file — grep/strings will NEVER find plain-text usernames or\n"
+    "   timestamps inside it. NEVER run grep on .evtx files to find application usage.\n"
+    "\n"
+    "   The correct source is the UserAssist registry key in NTUSER.DAT:\n"
+    "     Key: /Software/Microsoft/Windows/CurrentVersion/Explorer/UserAssist/<GUID>/Count\n"
+    "     GUID {{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}} — direct executable launches\n"
+    "     GUID {{F4E57C4B-2036-45F0-A9AB-443BCFE33D9F}} — shortcut/LNK launches\n"
+    "   All entry names are ROT-13 encoded. Decode with: codecs.decode(name, 'rot13')\n"
+    "   Examples: 'wlmail.exe' → ROT-13 → 'jyznvy.rkr'  |  'Windows Live Mail.lnk' → 'Jvaqbjf Yvir Znvy.yax'\n"
+    "\n"
+    "   STEP 1 — Dump all UserAssist entries and decode ROT-13:\n"
+    "     python3 -c \"\n"
+    "     import Registry.Registry as reg, struct, codecs\n"
+    "     from datetime import datetime, timedelta, timezone\n"
+    "     h = reg.Registry('{evidence}/USERS/<username>/NTUSER.DAT')\n"
+    "     for guid in ['{{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}}','{{F4E57C4B-2036-45F0-A9AB-443BCFE33D9F}}']:\n"
+    "       try:\n"
+    "         key = h.open('Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Explorer\\\\UserAssist\\\\'+guid+'\\\\Count')\n"
+    "         for v in key.values():\n"
+    "           name = codecs.decode(v.name(), 'rot13')\n"
+    "           data = v.raw_data()\n"
+    "           if len(data) >= 68:\n"
+    "             ft = struct.unpack_from('<Q', data, 60)[0]\n"
+    "             dt = datetime(1601,1,1,tzinfo=timezone.utc)+timedelta(microseconds=ft//10) if ft else 'never'\n"
+    "           else: dt='no timestamp'\n"
+    "           print(guid[-8:], name, dt)\n"
+    "       except Exception as e: print(guid[-8:], 'ERROR', e)\n"
+    "     \" 2>&1 | grep -i 'mail\\|browser\\|<appname>'\n"
+    "\n"
+    "   STEP 2 — If no match in UserAssist, check LNK file access timestamps:\n"
+    "     find '{evidence}/USERS/<username>/AppData/Roaming/Microsoft/Windows/Recent' \\\n"
+    "       -iname '*<appname>*' -o -iname '*<appname>*.lnk' 2>/dev/null | \\\n"
+    "       while read f; do python3 -c \"import os; s=os.stat('$f'); print(s.st_atime, '$f')\"; done\n"
+    "   Or use python3 with lnkfile/LnkParse3 if available, otherwise stat atime.\n"
+    "\n"
+    "   STEP 3 — Alternative: check IAM or Mail account key timestamps (Windows Live Mail):\n"
+    "     reglookup -p '/Software/Microsoft/IAM/Accounts/Active Directory GC' \\\n"
+    "       '{evidence}/USERS/<username>/NTUSER.DAT'\n"
+    "     The KEY timestamp shown by reglookup is the last modification = last active use.\n"
+    "\n"
+    "   NEVER search Application.evtx or any .evtx file for application last run time.\n"
+    "   NEVER repeat a failing grep on a binary .evtx file — if a command returns empty, switch to UserAssist.\n"
 )
 
 
@@ -469,6 +601,8 @@ def parse_args() -> argparse.Namespace:
                         help="Monta a directoria de evidência directamente em /forensics (sem imagem E01/DD)")
     parser.add_argument("--allow-network", dest="allow_network", action="store_true", default=False,
                         help="Activa acesso à internet no container (para sudo apt-get install)")
+    parser.add_argument("--limpar-apos-pergunta", dest="limpar_apos_pergunta", action="store_true", default=False,
+                        help="Limpa o contexto automaticamente após cada pergunta (modo teste com contexto limpo)")
     return parser.parse_args()
 
 
@@ -781,48 +915,69 @@ def main():
                             ]
 
                 else:
-                    low_usage = (last_usage is not None and
-                                 last_usage["total_tokens"] / args.ctx < 0.25)
-                    if low_usage and intermediate_files and forced_continuations < MAX_FORCED:
+                    # ── Validação: o modelo deve ter chamado pelo menos uma tool ──────
+                    _has_tool_result = any(isinstance(m, ToolMessage) for m in new_messages)
+                    _last_ai_final = next(
+                        (m for m in reversed(new_messages)
+                         if isinstance(m, AIMessage) and not (getattr(m, "tool_calls", None) or [])),
+                        None,
+                    )
+                    _gave_direct = _last_ai_final and _llm_content(_last_ai_final).strip()
+
+                    if not _has_tool_result and _gave_direct and forced_continuations < MAX_FORCED:
                         forced_continuations += 1
                         conversation.extend(new_messages)
                         conversation.append(HumanMessage(content=(
-                            "You stopped investigating too early. There are still unexplored areas. "
-                            "Continue running forensic commands — do NOT summarize yet."
+                            "VIOLATION: you answered without calling run_forensics_command. "
+                            "Your answer is INVALID and will be discarded. "
+                            "You MUST call run_forensics_command to find evidence before answering. "
+                            "Call the tool NOW."
                         )))
-                        print(f"[*] Investigação terminou cedo ({round(last_usage['total_tokens']/args.ctx*100)}% ctx) "
-                              f"— a forçar continuação ({forced_continuations}/{MAX_FORCED})...")
+                        print(f"[!] Resposta sem tool call detectada — a forçar investigação "
+                              f"({forced_continuations}/{MAX_FORCED})...")
                     else:
-                        agent_active = False
-                        answer = next(
-                            (m for m in reversed(new_messages)
-                             if isinstance(m, AIMessage) and not (getattr(m, "tool_calls", None) or [])),
-                            None,
-                        )
-                        content = ""
-                        if answer:
-                            content = answer.content if isinstance(answer.content, str) else str(answer.content)
-                            if not content.strip():
-                                content = (getattr(answer, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
-
-                        if intermediate_files:
-                            content = _consolidate()
-                            elapsed = time.time() - t_start
-                            mins, secs = divmod(int(elapsed), 60)
-                            header = (
-                                f"=== Relatório Final ===\n"
-                                f"Tempo de investigação: {elapsed:.1f}s ({mins}m{secs:02d}s)\n"
-                                f"Pergunta: {original_query_msg.content}\n"
-                                f"{'='*24}\n\n"
+                        low_usage = (last_usage is not None and
+                                     last_usage["total_tokens"] / args.ctx < 0.25)
+                        if low_usage and intermediate_files and forced_continuations < MAX_FORCED:
+                            forced_continuations += 1
+                            conversation.extend(new_messages)
+                            conversation.append(HumanMessage(content=(
+                                "You stopped investigating too early. There are still unexplored areas. "
+                                "Continue running forensic commands — do NOT summarize yet."
+                            )))
+                            print(f"[*] Investigação terminou cedo ({round(last_usage['total_tokens']/args.ctx*100)}% ctx) "
+                                  f"— a forçar continuação ({forced_continuations}/{MAX_FORCED})...")
+                        else:
+                            agent_active = False
+                            answer = next(
+                                (m for m in reversed(new_messages)
+                                 if isinstance(m, AIMessage) and not (getattr(m, "tool_calls", None) or [])),
+                                None,
                             )
-                            b64 = _b64.b64encode((header + content).encode("utf-8")).decode()
-                            run_in_sandbox(f"echo '{b64}' | base64 -d > {out_file}")
-                            print(f"[*] Relatório final guardado em: {out_file}\n")
+                            content = ""
+                            if answer:
+                                content = answer.content if isinstance(answer.content, str) else str(answer.content)
+                                if not content.strip():
+                                    content = (getattr(answer, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
 
-                        print(f"\n{'='*60}")
-                        print(f"Agente: {content}" if content else "Agente: Não foi possível obter uma resposta final.")
-                        print(f"{'='*60}")
-                        print(f"[*] Tempo de resposta: {time.time() - t_start:.1f}s\n")
+                            if intermediate_files:
+                                content = _consolidate()
+                                elapsed = time.time() - t_start
+                                mins, secs = divmod(int(elapsed), 60)
+                                header = (
+                                    f"=== Relatório Final ===\n"
+                                    f"Tempo de investigação: {elapsed:.1f}s ({mins}m{secs:02d}s)\n"
+                                    f"Pergunta: {original_query_msg.content}\n"
+                                    f"{'='*24}\n\n"
+                                )
+                                b64 = _b64.b64encode((header + content).encode("utf-8")).decode()
+                                run_in_sandbox(f"echo '{b64}' | base64 -d > {out_file}")
+                                print(f"[*] Relatório final guardado em: {out_file}\n")
+
+                            print(f"\n{'='*60}")
+                            print(f"Agente: {content}" if content else "Agente: Não foi possível obter uma resposta final.")
+                            print(f"{'='*60}")
+                            print(f"[*] Tempo de resposta: {time.time() - t_start:.1f}s\n")
 
         except KeyboardInterrupt:
             print("\n[!] Agente cancelado. A voltar ao prompt...")
@@ -833,6 +988,11 @@ def main():
             print(f"\n[!] Erro: {str(e)}\n")
             if conversation and isinstance(conversation[-1], HumanMessage):
                 conversation.pop()
+
+        # Limpar contexto após pergunta se flag ativada
+        if args.limpar_apos_pergunta:
+            conversation = [SystemMessage(content=system_prompt)]
+            print("[*] Contexto limpo após resposta.\n")
 
 
 if __name__ == "__main__":

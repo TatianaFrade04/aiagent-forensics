@@ -43,6 +43,8 @@ MODELOS_DEFAULT = [
     "qwen3.5:4b",
     "qwen2.5:7b",
     "llama3.1:8b",
+    "granite3.2:8b",
+    "mistral:7b",
 ]
 
 SESSOES_DEFAULT = 3
@@ -170,7 +172,7 @@ PERGUNTAS_CTF = [
     (
         "Q20",
         "What encryption programs were used on this computer? Choose from: a) Veracrypt/BitLocker  b) BitLocker/Veracrypt  c) File Vault/Truecrypt  d) BCTextEncoder/Veracrypt  e) No encryption programs were used  f) Truecrypt/BCTextEncoder. Reply with only the letter, read all options before reply.",
-        "d",
+        "f",
         "mc",
     ),
     (
@@ -261,10 +263,12 @@ def extrair_metricas_do_log(texto: str) -> dict:
     return metricas
 
 
-def guardar_log(dados: dict, pasta: str = "logs_ctf"):
+def guardar_log(dados: dict, pasta: str = "logs_ctf", run_ts: str = ""):
     os.makedirs(pasta, exist_ok=True)
     ms = modelo_safe(dados["modelo"])
-    caminho = f"{pasta}/{ms}_sessao{dados['sessao']}.json"
+    ts = f"_{run_ts}" if run_ts else ""
+    limpo = "_contexto_limpo" if dados.get("limpar_contexto") else ""
+    caminho = f"{pasta}/{ms}_sessao{dados['sessao']}{limpo}{ts}.json"
     with open(caminho, "w", encoding="utf-8") as f:
         json.dump(dados, f, ensure_ascii=False, indent=2)
     print(f"  → Guardado: {caminho}")
@@ -272,10 +276,12 @@ def guardar_log(dados: dict, pasta: str = "logs_ctf"):
 
 # ─── Core ─────────────────────────────────────────────────────────────────────
 
-def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False) -> dict:
+def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, run_ts: str = "", limpar_contexto: bool = False, pasta: str = "logs_ctf") -> dict:
     """Lança o agente uma vez e envia todas as perguntas CTF em sequência."""
     print(f"\n{'='*60}")
     print(f"  MODELO: {modelo}  |  CTX: {ctx}  |  SESSÃO: {sessao}/{SESSOES_DEFAULT}")
+    modo_str = "contexto limpo entre perguntas" if limpar_contexto else "contexto normal"
+    print(f"  MODO: {modo_str}")
     print(f"{'='*60}")
 
     timestamp_inicio = datetime.now().isoformat()
@@ -324,7 +330,7 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False) -
                 "resposta_extraida": "", "correto": False,
                 "tempo_segundos": 0.0, "metricas_ollama": {"total_duration_ns":0,"prompt_eval_count":0,"eval_count":0,"tool_calls":0}
             })
-        return _resumo(modelo, sessao, timestamp_inicio, resultados)
+        return _resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto)
     print(" OK")
 
     for idx, (id_q, pergunta, correta, tipo) in enumerate(PERGUNTAS_CTF):
@@ -401,8 +407,23 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False) -
             "metricas_ollama": metricas,
         })
 
+        # Limpa contexto entre perguntas se solicitado
+        if limpar_contexto:
+            try:
+                proc.stdin.write("limpar\n")
+                proc.stdin.flush()
+                deadline_limpar = time.time() + 10
+                while time.time() < deadline_limpar:
+                    linha = proc.stdout.readline()
+                    if not linha:
+                        break
+                    if "Historico limpo" in linha or "limpo" in linha.lower():
+                        break
+            except Exception:
+                pass
+
         # Guarda progresso após cada pergunta
-        guardar_log(_resumo(modelo, sessao, timestamp_inicio, resultados))
+        guardar_log(_resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto), pasta=pasta, run_ts=run_ts)
 
     # Termina agente
     try:
@@ -412,15 +433,17 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False) -
     except Exception:
         proc.kill()
 
-    return _resumo(modelo, sessao, timestamp_inicio, resultados)
+    return _resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto)
 
 
-def _resumo(modelo, sessao, timestamp_inicio, resultados):
+def _resumo(modelo, sessao, timestamp_inicio, resultados, ctx: int = 0, limpar_contexto: bool = False):
     corretas = sum(1 for r in resultados if r.get("correto", False))
     total = len(resultados)
     tempo_total = sum(r["tempo_segundos"] for r in resultados)
     return {
         "modelo": modelo,
+        "ctx": ctx,
+        "limpar_contexto": limpar_contexto,
         "sessao": sessao,
         "timestamp_inicio": timestamp_inicio,
         "timestamp_fim": datetime.now().isoformat(),
@@ -437,6 +460,22 @@ def _resumo(modelo, sessao, timestamp_inicio, resultados):
     }
 
 
+# ─── Helpers de apresentação ──────────────────────────────────────────────────
+
+def _imprimir_tabela_contextos(modelos: list, ctx_manual: int | None):
+    print(f"   {'Modelo':<22} {'Contexto (tokens)':>18}  Fonte")
+    print(f"   {'-'*22} {'-'*18}  {'-'*7}")
+    for m in modelos:
+        if ctx_manual:
+            ctx = ctx_manual
+            fonte = "manual"
+        else:
+            ctx = MODEL_CTX_12GB.get(m, 32768)
+            fonte = "tabela" if m in MODEL_CTX_12GB else "default"
+        print(f"   {m:<22} {ctx:>18,}  {fonte}")
+    print()
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def parse_args():
@@ -448,6 +487,8 @@ def parse_args():
     p.add_argument("--apenas-modelo", metavar="MODELO")
     p.add_argument("--ctx", type=int, default=None,
                    help="Contexto em tokens (default: auto-detectado por modelo para 12 GB VRAM)")
+    p.add_argument("--limpar-contexto", action="store_true", default=False,
+                   help="Limpa o contexto da conversa entre perguntas (cada pergunta é independente)")
     return p.parse_args()
 
 
@@ -457,21 +498,21 @@ def main():
     sessoes = args.sessoes
 
     total = len(modelos) * sessoes
+    modo_label = "contexto limpo entre perguntas" if args.limpar_contexto else "contexto normal"
     print(f"\n🔬 CTF Scoring — AIAgent@forensics")
-    print(f"   Modelos  : {', '.join(modelos)}")
+    print(f"   Modo     : {modo_label}")
     print(f"   Sessões  : {sessoes} por modelo")
     print(f"   Perguntas: {len(PERGUNTAS_CTF)} (com ground truth)")
     print(f"   Total    : {total} sessões\n")
-    if args.ctx:
-        print(f"   Contexto : {args.ctx} (manual)\n")
-    else:
-        print(f"   Contexto : auto (12 GB VRAM)\n")
+    print(f"   Modelos e contextos máximos (12 GB VRAM):")
+    _imprimir_tabela_contextos(modelos, args.ctx)
 
     # Limpar container residual
     print("  Limpando container Docker residual...")
     subprocess.run(["docker", "rm", "-f", "forensics"], capture_output=True, text=True)
     print("  OK\n")
 
+    run_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     inicio_global = time.time()
     todos_resultados = []
 
@@ -479,8 +520,8 @@ def main():
         ctx = args.ctx if args.ctx else ctx_para_modelo(modelo)
         for sessao in range(1, sessoes + 1):
             try:
-                dados = correr_sessao_ctf(modelo, sessao, ctx=ctx, debug=args.debug)
-                guardar_log(dados, pasta=args.pasta)
+                dados = correr_sessao_ctf(modelo, sessao, ctx=ctx, debug=args.debug, run_ts=run_ts, limpar_contexto=args.limpar_contexto, pasta=args.pasta)
+                guardar_log(dados, pasta=args.pasta, run_ts=run_ts)
                 todos_resultados.append(dados)
 
                 r = dados["resumo"]
@@ -495,14 +536,15 @@ def main():
 
     # Tabela final
     duracao = round(time.time() - inicio_global, 1)
-    print(f"\n{'='*60}")
+    print(f"\n{'='*70}")
     print(f"  RESULTADOS FINAIS")
-    print(f"{'='*60}")
-    print(f"  {'Modelo':<20} {'Score':>8} {'Corretas':>10} {'Tempo médio':>12}")
-    print(f"  {'-'*52}")
+    print(f"{'='*70}")
+    print(f"  {'Modelo':<20} {'Contexto':>10} {'Score':>8} {'Corretas':>10} {'Tempo médio':>12}")
+    print(f"  {'-'*62}")
     for d in todos_resultados:
         r = d["resumo"]
-        print(f"  {d['modelo']:<20} {r['score_percentagem']:>7}%  {r['corretas']:>4}/{r['total_perguntas']:<4}  {r['tempo_medio_segundos']:>8.1f}s")
+        ctx_str = f"{d.get('ctx', 0):,}"
+        print(f"  {d['modelo']:<20} {ctx_str:>10} {r['score_percentagem']:>7}%  {r['corretas']:>4}/{r['total_perguntas']:<4}  {r['tempo_medio_segundos']:>8.1f}s")
     print(f"\n✅ Concluído em {duracao}s  |  Logs em: {args.pasta}/\n")
 
 

@@ -36,6 +36,7 @@ os.makedirs(EXPORTS_PATH, exist_ok=True)
 
 # ─── Gestão do container ──────────────────────────────────────────────────────
 
+# Calcula um hash dos ficheiros Docker (Dockerfile + entrypoint.sh)
 def _compute_dockerfile_hash() -> str:
     docker_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "docker"))
     h = hashlib.sha256()
@@ -44,16 +45,19 @@ def _compute_dockerfile_hash() -> str:
         if os.path.exists(fpath):
             with open(fpath, "rb") as f:
                 h.update(f.read())
-    return h.hexdigest()[:16]
+    return h.hexdigest()[:16] #16 chars
 
 _HASH_FILE = os.path.join(os.path.dirname(__file__), ".docker_image_hash")
+# Localização: agent/.docker_image_hash
 
+# Lê o hash guardado do ficheiro
 def _get_stored_hash() -> str:
     if os.path.exists(_HASH_FILE):
         with open(_HASH_FILE) as f:
             return f.read().strip()
     return ""
 
+# Guarda o novo hash em ficheiro
 def _store_hash(value: str):
     with open(_HASH_FILE, "w") as f:
         f.write(value)
@@ -234,7 +238,7 @@ def _intercept_cat(command: str) -> "tuple[str, str] | str | None":
     )
     meta_note = f"[AUTO-METADATA] path={path} | size={fmt_size} | type={mime}\n"
 
-    # Ficheiro binário — cat bloqueado
+    # Ficheiro binário — cat bloqueado e redireciona para strings
     if not mime.startswith("text/"):
         return (
             f"{meta_note}"
