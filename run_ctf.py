@@ -13,22 +13,71 @@ import argparse
 import atexit
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
 import time
-import threading
 from datetime import datetime
+
+# ─── Imports do agente ────────────────────────────────────────────────────────
+
+_project_root = os.path.abspath(os.path.dirname(__file__))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
+from langchain_ollama import ChatOllama
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain.agents import create_agent
+
+from agent.tools import start_container, stop_container, run_in_sandbox
+from agent.main import auto_detect_evidence, build_system_prompt, TOOLS
+from agent.skills import load_skills, select_skills, format_skills_context
 
 # ─── Cleanup garantido (Ctrl+C, SIGTERM, SSH drop) ────────────────────────────
 
-_current_proc = None
+def _cleanup_orphan_loops():
+    """Remove loop devices orphans no host que apontam para ficheiros ewf1."""
+    try:
+        result = subprocess.run(
+            ["losetup", "-a"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            if "ewf1" in line and line.split(":")[1].strip().startswith("[]:"):
+                dev = line.split(":")[0].strip()
+                subprocess.run(["sudo", "losetup", "-d", dev], capture_output=True)
+    except Exception:
+        pass
+
+
+def _cleanup_container():
+    """Para e remove o container com sequência segura, depois limpa loop devices órfãos."""
+    # 1. Desmontar partições e loop devices dentro do container
+    subprocess.run(
+        ["docker", "exec", "forensics", "bash", "-c",
+         "umount -l /forensics/part* 2>/dev/null; "
+         "losetup -D 2>/dev/null; "
+         "umount -l /forensics_ewf 2>/dev/null; true"],
+        capture_output=True, timeout=15
+    )
+    # 2. Parar container com timeout explícito de 10s
+    subprocess.run(["docker", "stop", "--time", "10", "forensics"], capture_output=True)
+    # 3. Forçar remoção
+    subprocess.run(["docker", "rm", "-f", "forensics"], capture_output=True)
+    # 4. Polling até confirmar que o container não existe (máximo 10s)
+    for _ in range(10):
+        check = subprocess.run(["docker", "inspect", "forensics"], capture_output=True)
+        if check.returncode != 0:
+            break
+        time.sleep(1)
+    # 5. Só agora limpar loop devices órfãos no host
+    _cleanup_orphan_loops()
+
 
 def _cleanup():
-    global _current_proc
-    if _current_proc and _current_proc.poll() is None:
-        _current_proc.kill()
-    subprocess.run(["docker", "rm", "-f", "forensics"], capture_output=True)
+    _cleanup_container()
+
 
 atexit.register(_cleanup)
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
@@ -203,8 +252,6 @@ def modelo_safe(modelo: str) -> str:
 
 def extrair_resposta_modelo(texto: str, tipo: str) -> str:
     """Extrai a resposta do modelo (letra ou true/false) do texto de resposta."""
-    import re
-
     # Procura na linha "Agente: ..."
     for linha in texto.splitlines():
         if linha.startswith("Agente:"):
@@ -225,15 +272,12 @@ def extrair_resposta_modelo(texto: str, tipo: str) -> str:
         return texto_lower[:20]
 
     if tipo == "mc":
-        # Tenta extrair letra simples no início
         m = re.match(r"^\s*([a-g])\b", texto_lower)
         if m:
             return m.group(1)
-        # Tenta "the answer is X" ou "answer: X"
         m = re.search(r"(?:answer is|answer:|correct answer is|correct:)\s*([a-g])\b", texto_lower)
         if m:
             return m.group(1)
-        # Última tentativa: primeira letra isolada
         m = re.search(r"\b([a-g])\b", texto_lower[:100])
         if m:
             return m.group(1)
@@ -247,23 +291,20 @@ def avaliar_resposta(resposta_modelo: str, resposta_correta: str, tipo: str) -> 
     return extraida.strip().lower() == resposta_correta.strip().lower()
 
 
-def extrair_metricas_do_log(texto: str) -> dict:
-    import re
+def _extrair_metricas_msgs(msgs: list) -> dict:
+    """Extrai métricas directamente das mensagens do agente."""
     metricas = {"total_duration_ns": 0, "prompt_eval_count": 0, "eval_count": 0, "tool_calls": 0}
-    m = re.search(r"'total_duration':\s*(\d+)", texto)
-    if m:
-        metricas["total_duration_ns"] = int(m.group(1))
-    m = re.search(r"'prompt_eval_count':\s*(\d+)", texto)
-    if m:
-        metricas["prompt_eval_count"] = int(m.group(1))
-    m = re.search(r"'eval_count':\s*(\d+)", texto)
-    if m:
-        metricas["eval_count"] = int(m.group(1))
-    metricas["tool_calls"] = texto.count("run_forensics_command(")
+    for msg in msgs:
+        if isinstance(msg, AIMessage):
+            meta = getattr(msg, "response_metadata", {}) or {}
+            metricas["total_duration_ns"] += meta.get("total_duration", 0)
+            metricas["prompt_eval_count"] += meta.get("prompt_eval_count", 0)
+            metricas["eval_count"] += meta.get("eval_count", 0)
+            metricas["tool_calls"] += len(getattr(msg, "tool_calls", None) or [])
     return metricas
 
 
-def guardar_log(dados: dict, pasta: str = "logs_ctf", run_ts: str = ""):
+def guardar_log(dados: dict, pasta: str = "logs_ctf_limpeza", run_ts: str = ""):
     os.makedirs(pasta, exist_ok=True)
     ms = modelo_safe(dados["modelo"])
     ts = f"_{run_ts}" if run_ts else ""
@@ -276,8 +317,40 @@ def guardar_log(dados: dict, pasta: str = "logs_ctf", run_ts: str = ""):
 
 # ─── Core ─────────────────────────────────────────────────────────────────────
 
-def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, run_ts: str = "", limpar_contexto: bool = False, pasta: str = "logs_ctf") -> dict:
-    """Lança o agente uma vez e envia todas as perguntas CTF em sequência."""
+def _llm_content(msg) -> str:
+    """Extrai o conteúdo textual de uma mensagem AI."""
+    c = msg.content if isinstance(msg.content, str) else str(msg.content)
+    if not c.strip():
+        c = (getattr(msg, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
+    return c
+
+
+def _invocar_agente(agent, conversation: list, debug: bool = False) -> list:
+    """Corre agent.stream() e devolve a lista de novas mensagens."""
+    new_messages = []
+    try:
+        for chunk in agent.stream({"messages": conversation}, {"recursion_limit": 999}):
+            for node_output in chunk.values():
+                for msg in node_output.get("messages", []):
+                    new_messages.append(msg)
+                    if debug:
+                        if isinstance(msg, AIMessage):
+                            raw = msg.content if isinstance(msg.content, str) else ""
+                            visible = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+                            tool_calls = getattr(msg, "tool_calls", None) or []
+                            print(f"  [AIMessage] {visible[:300]!r}")
+                            for tc in tool_calls:
+                                print(f"    → {tc['name']}({tc['args']})")
+                        elif isinstance(msg, ToolMessage):
+                            out = msg.content[:300] if isinstance(msg.content, str) else str(msg.content)[:300]
+                            print(f"  [ToolMessage] {out!r}")
+    except Exception as e:
+        print(f"\n  [!] Erro no agente: {e}")
+    return new_messages
+
+
+def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, run_ts: str = "", limpar_contexto: bool = False, pasta: str = "logs_ctf_limpeza") -> dict:
+    """Inicia o agente directamente e envia todas as perguntas CTF em sequência."""
     print(f"\n{'='*60}")
     print(f"  MODELO: {modelo}  |  CTX: {ctx}  |  SESSÃO: {sessao}/{SESSOES_DEFAULT}")
     modo_str = "contexto limpo entre perguntas" if limpar_contexto else "contexto normal"
@@ -285,108 +358,69 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
     print(f"{'='*60}")
 
     timestamp_inicio = datetime.now().isoformat()
+    t_wall_inicio = time.time()
     resultados = []
 
-    env = os.environ.copy()
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["PYTHONUTF8"] = "1"
-
-    cmd = ["uv", "run", "forensics", "--model", modelo, "--ctx", str(ctx)]
-    if debug:
-        cmd.append("--debug")
-
-    global _current_proc
-    proc = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-    )
-    _current_proc = proc
-
-    # Aguarda arranque
-    print("  A arrancar agente...", end="", flush=True)
-    deadline = time.time() + 90
-    arrancou = False
-    while time.time() < deadline:
-        linha = proc.stdout.readline()
-        if not linha:
-            break
-        if "Skills" in linha or "Tu:" in linha:
-            arrancou = True
-            break
-        print(".", end="", flush=True)
-
-    if not arrancou:
-        proc.kill()
-        for id_q, pergunta, correta, tipo in PERGUNTAS_CTF:
-            resultados.append({
-                "id": id_q, "pergunta": pergunta, "resposta_correta": correta,
-                "tipo": tipo, "resposta_modelo_raw": "ERRO: agente nao arrancou",
-                "resposta_extraida": "", "correto": False,
-                "tempo_segundos": 0.0, "metricas_ollama": {"total_duration_ns":0,"prompt_eval_count":0,"eval_count":0,"tool_calls":0}
-            })
-        return _resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto)
+    print("  A iniciar container...", end="", flush=True)
+    start_container()
     print(" OK")
+
+    print("  A detectar partição de evidência...", end="", flush=True)
+    evidence = auto_detect_evidence()
+    print(f" {evidence}")
+
+    system_prompt = build_system_prompt(evidence)
+    all_skills = load_skills()
+
+    llm = ChatOllama(
+        model=modelo,
+        temperature=0.3,
+        num_ctx=ctx,
+        reasoning=True,
+    )
+    agent = create_agent(model=llm, tools=TOOLS)
+
+    conversation = [SystemMessage(content=system_prompt)]
 
     for idx, (id_q, pergunta, correta, tipo) in enumerate(PERGUNTAS_CTF):
         print(f"\n  [{id_q}] {pergunta[:65]}...")
-        print(f"  Aguardando resposta...", end="", flush=True)
 
+        if limpar_contexto:
+            conversation = [SystemMessage(content=system_prompt)]
+
+        selected = select_skills(pergunta, all_skills, max_skills=2)
+        skills_context = format_skills_context(selected, evidence)
+        if selected and debug:
+            print(f"  [Skills: {', '.join(s.name for s in selected)}]")
+
+        conversation[0] = SystemMessage(
+            content=system_prompt + (
+                "\nMANDATORY FORENSIC PROCEDURES — copy these scripts EXACTLY into run_forensics_command when the task matches. Do NOT write your own commands when a procedure is provided:\n"
+                + skills_context + "\n"
+                if skills_context else ""
+            )
+        )
+        conversation.append(HumanMessage(content=pergunta))
+
+        print(f"  A aguardar resposta...", end="", flush=True)
         inicio = time.time()
-        try:
-            proc.stdin.write(pergunta + "\n")
-            proc.stdin.flush()
-        except Exception as e:
-            resultados.append({
-                "id": id_q, "pergunta": pergunta, "resposta_correta": correta,
-                "tipo": tipo, "resposta_modelo_raw": f"ERRO: {e}",
-                "resposta_extraida": "", "correto": False,
-                "tempo_segundos": 0.0, "metricas_ollama": {"total_duration_ns":0,"prompt_eval_count":0,"eval_count":0,"tool_calls":0}
-            })
-            continue
 
-        # Lê stdout em thread separada para não perder nada
-        linhas = []
-        ultima_agente_ref = [""]
-        fim_evento = threading.Event()
-
-        def ler_stdout():
-            sep_count = 0
-            ultima_agente = ""
-            try:
-                for linha in proc.stdout:
-                    linhas.append(linha.rstrip())
-                    if linha.startswith("=" * 10):
-                        sep_count += 1
-                    if linha.startswith("Agente:"):
-                        ultima_agente = linha
-                        ultima_agente_ref[0] = linha
-                    # Detecta fim: separador depois de termos visto Agente:
-                    if sep_count >= 1 and ultima_agente and linha.startswith("=" * 10):
-                        fim_evento.set()
-                        return
-            except Exception:
-                pass
-            fim_evento.set()
-
-        t = threading.Thread(target=ler_stdout, daemon=True)
-        t.start()
-        fim_evento.wait(timeout=600)  # 10 min máximo
-        agente_linha = ultima_agente_ref[0]
+        new_messages = _invocar_agente(agent, conversation, debug=debug)
+        conversation.extend(new_messages)
 
         tempo = time.time() - inicio
-        resposta_raw = "\n".join(linhas)
-        metricas = extrair_metricas_do_log(resposta_raw)
 
-        resposta_extraida = extrair_resposta_modelo(agente_linha or resposta_raw, tipo)
-        correto = avaliar_resposta(agente_linha or resposta_raw, correta, tipo)
+        answer = next(
+            (m for m in reversed(new_messages)
+             if isinstance(m, AIMessage) and not (getattr(m, "tool_calls", None) or [])),
+            None,
+        )
+        content = _llm_content(answer) if answer else ""
 
-        # Calcula ETA
+        metricas = _extrair_metricas_msgs(new_messages)
+        resposta_extraida = extrair_resposta_modelo(content, tipo)
+        correto = avaliar_resposta(content, correta, tipo)
+
         perguntas_feitas = idx + 1
         tempo_medio = sum(r["tempo_segundos"] for r in resultados) / max(len(resultados), 1)
         restantes = len(PERGUNTAS_CTF) - perguntas_feitas
@@ -400,40 +434,19 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
             "pergunta": pergunta,
             "resposta_correta": correta,
             "tipo": tipo,
-            "resposta_modelo_raw": agente_linha,
+            "resposta_modelo_raw": content,
             "resposta_extraida": resposta_extraida,
             "correto": correto,
             "tempo_segundos": round(tempo, 2),
             "metricas_ollama": metricas,
         })
 
-        # Limpa contexto entre perguntas se solicitado
-        if limpar_contexto:
-            try:
-                proc.stdin.write("limpar\n")
-                proc.stdin.flush()
-                deadline_limpar = time.time() + 10
-                while time.time() < deadline_limpar:
-                    linha = proc.stdout.readline()
-                    if not linha:
-                        break
-                    if "Historico limpo" in linha or "limpo" in linha.lower():
-                        break
-            except Exception:
-                pass
-
-        # Guarda progresso após cada pergunta
         guardar_log(_resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto), pasta=pasta, run_ts=run_ts)
 
-    # Termina agente
-    try:
-        proc.stdin.write("exit\n")
-        proc.stdin.flush()
-        proc.wait(timeout=30)
-    except Exception:
-        proc.kill()
-
-    return _resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto)
+    _cleanup_container()
+    res = _resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto)
+    res["duracao_wall_segundos"] = round(time.time() - t_wall_inicio, 1)
+    return res
 
 
 def _resumo(modelo, sessao, timestamp_inicio, resultados, ctx: int = 0, limpar_contexto: bool = False):
@@ -476,13 +489,24 @@ def _imprimir_tabela_contextos(modelos: list, ctx_manual: int | None):
     print()
 
 
+def _formatar_duracao(seg: float) -> str:
+    s = int(seg)
+    h, rem = divmod(s, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m:02d}m {s:02d}s"
+    if m:
+        return f"{m}m {s:02d}s"
+    return f"{s}s"
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def parse_args():
     p = argparse.ArgumentParser(description="CTF scoring — AIAgent@forensics")
     p.add_argument("--modelos", nargs="+", default=MODELOS_DEFAULT)
     p.add_argument("--sessoes", type=int, default=SESSOES_DEFAULT)
-    p.add_argument("--pasta", default="logs_ctf")
+    p.add_argument("--pasta", default="logs_ctf_limpeza")
     p.add_argument("--debug", action="store_true")
     p.add_argument("--apenas-modelo", metavar="MODELO")
     p.add_argument("--ctx", type=int, default=None,
@@ -507,14 +531,16 @@ def main():
     print(f"   Modelos e contextos máximos (12 GB VRAM):")
     _imprimir_tabela_contextos(modelos, args.ctx)
 
-    # Limpar container residual
-    print("  Limpando container Docker residual...")
+    print("  Limpando container Docker residual e loop devices órfãos...")
     subprocess.run(["docker", "rm", "-f", "forensics"], capture_output=True, text=True)
+    _cleanup_orphan_loops()
     print("  OK\n")
 
     run_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     inicio_global = time.time()
     todos_resultados = []
+    sessoes_concluidas = 0
+    tempos_sessoes: list[float] = []
 
     for modelo in modelos:
         ctx = args.ctx if args.ctx else ctx_para_modelo(modelo)
@@ -524,8 +550,18 @@ def main():
                 guardar_log(dados, pasta=args.pasta, run_ts=run_ts)
                 todos_resultados.append(dados)
 
+                dur_sessao = dados.get("duracao_wall_segundos", 0.0)
+                tempos_sessoes.append(dur_sessao)
+                sessoes_concluidas += 1
+
                 r = dados["resumo"]
-                print(f"\n  📊 {modelo} sessão {sessao}: {r['corretas']}/{r['total_perguntas']} ({r['score_percentagem']}%)")
+                restantes = total - sessoes_concluidas
+                if restantes > 0:
+                    media = sum(tempos_sessoes) / len(tempos_sessoes)
+                    eta_str = f"  |  ETA restante: ~{_formatar_duracao(restantes * media)}"
+                else:
+                    eta_str = "  |  Última sessão concluída"
+                print(f"\n  📊 {modelo} sessão {sessao}: {r['corretas']}/{r['total_perguntas']} ({r['score_percentagem']}%)  |  duração: {_formatar_duracao(dur_sessao)}{eta_str}")
 
             except KeyboardInterrupt:
                 print("\n[!] Interrompido.")
@@ -534,18 +570,18 @@ def main():
                 print(f"\n[ERRO] {modelo} sessão {sessao}: {e}")
                 continue
 
-    # Tabela final
     duracao = round(time.time() - inicio_global, 1)
-    print(f"\n{'='*70}")
+    print(f"\n{'='*90}")
     print(f"  RESULTADOS FINAIS")
-    print(f"{'='*70}")
-    print(f"  {'Modelo':<20} {'Contexto':>10} {'Score':>8} {'Corretas':>10} {'Tempo médio':>12}")
-    print(f"  {'-'*62}")
+    print(f"{'='*90}")
+    print(f"  {'Modelo':<20} {'Contexto':>10} {'Sessão':>7} {'Score':>8} {'Corretas':>10} {'Duração sessão':>16} {'T.médio/Q':>11}")
+    print(f"  {'-'*86}")
     for d in todos_resultados:
         r = d["resumo"]
         ctx_str = f"{d.get('ctx', 0):,}"
-        print(f"  {d['modelo']:<20} {ctx_str:>10} {r['score_percentagem']:>7}%  {r['corretas']:>4}/{r['total_perguntas']:<4}  {r['tempo_medio_segundos']:>8.1f}s")
-    print(f"\n✅ Concluído em {duracao}s  |  Logs em: {args.pasta}/\n")
+        dur = _formatar_duracao(d.get("duracao_wall_segundos", r["tempo_total_segundos"]))
+        print(f"  {d['modelo']:<20} {ctx_str:>10} {d['sessao']:>7} {r['score_percentagem']:>7}%  {r['corretas']:>4}/{r['total_perguntas']:<4}  {dur:>14}  {r['tempo_medio_segundos']:>8.1f}s")
+    print(f"\n✅ Concluído em {_formatar_duracao(duracao)} ({duracao}s)  |  Logs em: {args.pasta}/\n")
 
 
 if __name__ == "__main__":

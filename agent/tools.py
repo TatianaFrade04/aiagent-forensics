@@ -122,7 +122,7 @@ def start_container(no_mount: bool = False, allow_network: bool = False) -> bool
             "--device", "/dev/loop-control",
             "--device", "/dev/fuse",
             "--device-cgroup-rule", "b 7:* rmw",
-            "--memory", "512m",
+            "--memory", "2g",
             "--cpus", "1.0",
             "--security-opt", "seccomp=unconfined",
             "--security-opt", "apparmor=unconfined",

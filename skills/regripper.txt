@@ -119,8 +119,8 @@ regripper -r "$SAM_HIVE" -p samparse
 
 Example output for a user:
 ```
-Username        : Jimmy Wilson [1004]
-Password Hint   : safeone
+Username        : Alice Example [1001]
+Password Hint   : <hint text>
   --> Normal user account          ← account is ENABLED, no "Account Disabled" line
   --> Password does not expire
 ```

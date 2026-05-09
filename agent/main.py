@@ -37,10 +37,6 @@ from langchain.agents import create_agent
 from .tools import run_in_sandbox, stop_container, start_container
 from .skills import load_skills, select_skills, format_skills_context
 
-# RAG imports
-from rag.indexer import ingest_pdf, is_document_indexed
-from rag.generator import answer_with_rag
-
 load_dotenv()
 
 # ─── Ferramenta exposta ao agente ─────────────────────────────────────────────
@@ -74,14 +70,15 @@ def ingest_pdf_document(filename: str) -> str:
     """
     import os
     import logging
-    
+    from rag.indexer import ingest_pdf, is_document_indexed
+
     logger = logging.getLogger(__name__)
-    
+
     try:
         # Check if file exists
         if not os.path.isfile(filename):
             return f"Error: PDF file '{filename}' not found."
-        
+
         # Check if already indexed (by filename only)
         basename = os.path.basename(filename)
         if is_document_indexed(basename):
@@ -123,9 +120,10 @@ def query_rag_documents(query: str, top_k: int = 5, filename: str | None = None)
     """
     import logging
     import re
-    
+    from rag.generator import answer_with_rag
+
     logger = logging.getLogger(__name__)
-    
+
     # Auto-detect filename from query if not provided
     if not filename:
         # Look for patterns like "Com base no ficheiro X" or "ficheiro X"
@@ -350,48 +348,11 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "   When asked for the SENDER timezone, report the offset from the Date: header.\n"
     "   NEVER report the Date: header offset as the destination timezone.\n"
     "\n"
-    "16. LAST LOGIN TIME FOR LOCAL WINDOWS USERS — stored in the SAM hive, NOT the Security event log.\n"
-    "   The Security event log (Event ID 4624) is unreliable: it stores the SAM account name (e.g. 'jwilson'),\n"
-    "   NOT the full display name, and the log may be incomplete. ALWAYS use the SAM hive as primary source.\n"
-    "\n"
-    "   Method 1 — chntpw (fastest):\n"
-    "     find '{evidence}' -iname 'SAM' -not -ipath '*/Logs/*' -not -iname '*.log*' | head -3\n"
-    "     chntpw -i '<SAM path>' <<< $'cat sam\\nexit' 2>/dev/null | head -60\n"
-    "     Look for the user's last login timestamp in the output.\n"
-    "\n"
-    "   Method 2 — python-registry (if chntpw unavailable):\n"
-    "     python3 -c \"\n"
-    "     import Registry.Registry as reg, struct\n"
-    "     from datetime import datetime, timedelta, timezone\n"
-    "     h = reg.Registry('<SAM path>')\n"
-    "     # Get RID for user by name:\n"
-    "     names = h.open('SAM\\\\Domains\\\\Account\\\\Users\\\\Names')\n"
-    "     for sub in names.subkeys(): print(sub.name())\n"
-    "     \" 2>&1\n"
-    "     # Then read the V value for that RID:\n"
-    "     python3 -c \"\n"
-    "     import Registry.Registry as reg, struct\n"
-    "     from datetime import datetime, timedelta, timezone\n"
-    "     h = reg.Registry('<SAM path>')\n"
-    "     users = h.open('SAM\\\\Domains\\\\Account\\\\Users')\n"
-    "     for sub in users.subkeys():\n"
-    "       if sub.name() == 'Names': continue\n"
-    "       try:\n"
-    "         v = sub.value('V').raw_data()\n"
-    "         # LastLogin FILETIME is at offset 0x08 in the V blob (8 bytes, little-endian)\n"
-    "         ft = struct.unpack_from('<Q', v, 8)[0]\n"
-    "         if ft == 0: dt = 'never'\n"
-    "         else: dt = datetime(1601,1,1,tzinfo=timezone.utc)+timedelta(microseconds=ft//10)\n"
-    "         name_off = struct.unpack_from('<I', v, 0x0c)[0] + 0xcc\n"
-    "         name_len = struct.unpack_from('<I', v, 0x10)[0]\n"
-    "         name = v[name_off:name_off+name_len].decode('utf-16-le','ignore')\n"
-    "         print(sub.name(), name, dt)\n"
-    "       except: pass\n"
-    "     \" 2>&1\n"
-    "\n"
-    "   FILETIME conversion: datetime(1601,1,1,tzinfo=utc) + timedelta(microseconds=filetime//10)\n"
-    "   NEVER search Event ID 4624 by display name — EVTX stores SAM account name, not full name.\n"
-    "   NEVER give up after one failed attempt — if chntpw fails, try python-registry and vice-versa.\n"
+    "16. SAM HIVE — LOCAL WINDOWS USERS (last login, RID, password hint, account status).\n"
+    "   The SAM hive is the ONLY reliable source for last login time, RID, password hint, and account flags.\n"
+    "   The Security event log (Event ID 4624) stores the SAM account name (e.g. 'jwilson'), NOT the display\n"
+    "   name, and the log may be incomplete or cleared. ALWAYS prefer the SAM hive.\n"
+    "   NEVER search Event ID 4624 by display name to find last login.\n"
     "\n"
     "17. EVTX XML ATTRIBUTE PARSING — the correct element format in Windows EVTX XML is:\n"
     "     <Data Name=\"TargetUserName\">jwilson</Data>   (element content, NOT an XML attribute)\n"
@@ -930,8 +891,10 @@ def main():
                         conversation.append(HumanMessage(content=(
                             "VIOLATION: you answered without calling run_forensics_command. "
                             "Your answer is INVALID and will be discarded. "
-                            "You MUST call run_forensics_command to find evidence before answering. "
-                            "Call the tool NOW."
+                            "You have NO memory of previous runs — do NOT claim you 'previously ran' "
+                            "any command or that you already know the output. "
+                            "You MUST call run_forensics_command NOW to read the actual evidence. "
+                            "The tool call must appear before any answer."
                         )))
                         print(f"[!] Resposta sem tool call detectada — a forçar investigação "
                               f"({forced_continuations}/{MAX_FORCED})...")

@@ -107,8 +107,8 @@ done
 **Step 2 — Map SID to username via SOFTWARE registry:**
 ```bash
 HIVE=$(find '{evidence}' -path '*/System32/config/SOFTWARE' -not -path '*/RegBack/*' 2>/dev/null | head -1)
-reglookup "$HIVE" 2>/dev/null | grep -i 'ProfileList' | grep -i 'ProfileImagePath' | grep -i 'BillyBob'
-# → /Microsoft/.../ProfileList/S-1-5-21-...-1001/ProfileImagePath|SZ|C:\Users\BillyBob
+reglookup "$HIVE" 2>/dev/null | grep -i 'ProfileList' | grep -i 'ProfileImagePath'
+# → /Microsoft/.../ProfileList/S-1-5-21-...-XXXX/ProfileImagePath|SZ|C:\Users\<username>
 # NOTE: RegisteredOwner is NOT the same as a user's SID — never use it for SID mapping.
 ```
 

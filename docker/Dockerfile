@@ -14,7 +14,6 @@ RUN apt-get update && apt-get install -y \
     binutils \
     xxd \
     kpartx \
-    chntpw \
     qemu-utils \
     ntfs-3g \
     fuse3 \

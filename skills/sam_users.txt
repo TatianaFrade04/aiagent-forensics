@@ -1,0 +1,118 @@
+SKILL: sam_users
+DESCRIPTION: Extract Windows local user information from the SAM registry hive — user list, RIDs, last login times, password hints, and account status. Replaces chntpw for all SAM-related forensic questions. Primary tool: regripper samparse. Fallback: python-registry.
+KEYWORDS: SAM, sam hive, local users, utilizadores locais, last login, ultimo login, ultimo acesso, login, logon, login date, login time, last logon time, last login time, RID, relative identifier, password hint, dica de password, account disabled, conta desativada, account enabled, conta ativa, logon password, has password, password enabled, password set, user list, lista de utilizadores, chntpw, samparse, regripper sam, windows users, contas windows, user account, conta de utilizador, administrator, guest, last logon, logon time, quando fez login, quando acedeu, ultimo utilizador, account flags, account status
+---
+
+## CRITICAL RULE — timestamp questions with multiple-choice answers
+
+When asked "when was the last login" and given options to choose from:
+1. Run the command below and get the EXACT timestamp from the output.
+2. Write out the exact timestamp you found (e.g. "samparse shows: 2014-03-07 09:14:22 UTC").
+3. Compare it EXACTLY, second by second, to each option.
+4. If the exact timestamp does not appear in any option → the answer is "None of these".
+NEVER choose an option based on memory or approximation. The timestamp must match exactly.
+
+## MANDATORY COMMAND — use this first for any SAM/user question
+
+When looking for a SPECIFIC user (e.g. last login, password hint, RID), run samparse and grep
+the saved file — do NOT rely on truncated output:
+
+```bash
+SAM_HIVE=$(find {evidence} -iname 'SAM' -not -ipath '*/Logs/*' -not -iname '*.log*' 2>/dev/null | head -1)
+regripper -r "$SAM_HIVE" -p samparse > /tmp/samparse_out.txt 2>&1
+grep -A 15 "<username>" /tmp/samparse_out.txt
+```
+
+Replace `<username>` with the user's name or part of it (case-insensitive: use `grep -i`).
+The `-A 15` shows 15 lines after the match — enough to capture Last Login, Password Hint, and flags.
+
+⚠️ If the output says "[Output grande: N linhas]", the result is TRUNCATED.
+   The user's entry may be AFTER the cutoff. ALWAYS grep the saved file before answering:
+   `grep -i -A 15 '<username>' /tmp/cmd_output_<timestamp>.txt`
+
+This single command answers ALL of these questions:
+- Who are the local user accounts?
+- What is the RID of user X?
+- When did user X last log in?
+- What is the password hint for user X?
+- Is account X enabled or disabled?
+- Does account X have a password set?
+
+## Sample output
+
+```
+Username        : Administrator [500]
+Full Name       :
+Last Login      : Never
+Password Hint   :
+  --> Password does not expire
+  --> Account Disabled
+
+Username        : Alice Example [1001]
+Full Name       : Alice Example
+Last Login      : YYYY-MM-DD HH:MM:SS UTC
+Password Hint   : <hint text>
+  --> Normal user account
+  --> Password does not expire
+
+Username        : Bob Sample [1002]
+Full Name       :
+Last Login      : Never
+Password Hint   :
+  --> Password not required
+```
+
+## Reading the output
+
+| Field                  | Meaning                                                          |
+|------------------------|------------------------------------------------------------------|
+| `Username : X [N]`     | Display name + RID in decimal. Hex: `hex(N)` e.g. 1001 → 0x3E9 |
+| `Last Login`           | UTC timestamp of last interactive logon; "Never" = never logged in |
+| `Password Hint`        | Text the user typed as a hint when setting the password          |
+| `Account Disabled`     | Line present → account is disabled; absent → account is ENABLED  |
+| `Password not required`| Blank password is accepted for this account                      |
+
+## RID conversion
+
+RID is shown as decimal in brackets. To convert to hex:
+```bash
+python3 -c "print(hex(<RID_decimal>))"   # decimal → hex
+python3 -c "print(int('<RID_hex>', 16))"  # hex → decimal
+```
+
+## Hive discovery
+
+```bash
+# Standard location (never use RegBack or Logs copies)
+find {evidence} -iname 'SAM' -not -ipath '*/Logs/*' -not -iname '*.log*' 2>/dev/null | head -3
+```
+
+## Fallback — python-registry (if regripper unavailable)
+
+```bash
+python3 -c "
+import Registry.Registry as reg, struct
+from datetime import datetime, timedelta, timezone
+h = reg.Registry('/path/to/SAM')
+users = h.open('SAM\\\\Domains\\\\Account\\\\Users')
+for sub in users.subkeys():
+    if sub.name() == 'Names': continue
+    try:
+        v = sub.value('V').raw_data()
+        ft = struct.unpack_from('<Q', v, 8)[0]
+        dt = 'never' if ft == 0 else str(datetime(1601,1,1,tzinfo=timezone.utc)+timedelta(microseconds=ft//10))
+        name_off = struct.unpack_from('<I', v, 0x0c)[0] + 0xcc
+        name_len = struct.unpack_from('<I', v, 0x10)[0]
+        name = v[name_off:name_off+name_len].decode('utf-16-le','ignore')
+        rid_dec = int(sub.name(), 16)
+        print(f'RID {sub.name()} ({rid_dec}) | {name} | LastLogin: {dt}')
+    except: pass
+" 2>&1
+```
+
+## Tips
+
+- NEVER use `chntpw` for last login — it is a password-reset tool and does not expose the LastLogin timestamp.
+- NEVER use Event ID 4624 to look up a user by display name — EVTX stores the SAM account name (short login name), not the full display name.
+- The SAM hive is the authoritative source for last login; event logs may be incomplete or cleared.
+- For password hint: `samparse` decodes the UTF-16LE binary hint automatically. If using reglookup, `grep -i UserPasswordHint` returns URL-encoded UTF-16LE — strip `%00` separators to read it.
