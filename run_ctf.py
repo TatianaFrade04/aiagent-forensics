@@ -88,12 +88,14 @@ if hasattr(signal, "SIGHUP"):
 # ─── Modelos a testar ─────────────────────────────────────────────────────────
 
 MODELOS_DEFAULT = [
-    "gemma4:e4b",
-    "qwen3.5:4b",
-    "qwen2.5:7b",
-    "llama3.1:8b",
-    "granite3.2:8b",
-    "mistral:7b",
+    #"gemma4:e4b",
+    #"qwen3.5:4b",
+    #"qwen2.5:7b",
+    #"llama3.1:8b",
+    #"granite3.2:8b",
+    #"mistral:7b",
+    #"deepseek-r1:8b",
+    "gemma4:26b"
 ]
 
 SESSOES_DEFAULT = 3
@@ -107,6 +109,7 @@ MODEL_CTX_12GB: dict[str, int] = {
     "qwen3.5:4b":       65536,  # 4B
     "qwen2.5:7b":       32768,  # 7B — pesos ~4.5 GB
     "qwen2.5:14b":      16384,  # 14B — pesos ~9 GB
+    "qwen3:8b":         65536,
     "llama3.2":         65536,  # 3B (default tag)
     "llama3.2:3b":      65536,  # 3B explícito
     "llama3.1:8b":      32768,  # 8B — pesos ~5 GB
@@ -117,9 +120,21 @@ MODEL_CTX_12GB: dict[str, int] = {
 }
 
 
+MODELOS_COM_THINKING = {
+    "gemma4:e4b", "gemma4:12b", "gemma4:27b",
+    "qwen3.5:4b", "qwen3:4b", "qwen3:8b", "qwen3:14b",
+    "deepseek-r1:8b", "deepseek-r1:14b", "deepseek-r1:32b",
+}
+
+
 def ctx_para_modelo(modelo: str) -> int:
     """Devolve o contexto máximo seguro para 12 GB VRAM. Fallback: 32768."""
     return MODEL_CTX_12GB.get(modelo, 32768)
+
+
+def suporta_thinking(modelo: str) -> bool:
+    """Retorna True se o modelo suporta o parâmetro reasoning=True do Ollama."""
+    return modelo in MODELOS_COM_THINKING
 
 # ─── Perguntas CTF com ground truth ──────────────────────────────────────────
 # Formato: (id, pergunta_para_agente, resposta_correta, tipo)
@@ -376,7 +391,7 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
         model=modelo,
         temperature=0.3,
         num_ctx=ctx,
-        reasoning=True,
+        reasoning=suporta_thinking(modelo),
     )
     agent = create_agent(model=llm, tools=TOOLS)
 
