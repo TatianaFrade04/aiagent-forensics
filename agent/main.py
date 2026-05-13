@@ -525,11 +525,11 @@ BANNER = """
 ║             Politécnico de Leiria - ESTG                 ║
 ║  Agente LLM para Investigação Forense Digital (ReAct)    ║
 ╠══════════════════════════════════════════════════════════╣
-║  Comandos especiais:                                     ║
-║    'sair' / 'exit'  -> termina o programa                ║
-║    'limpar'         -> limpa o historico de conversa     ║
-║    'estrutura'      -> mostra o que esta montado         ║
-║    'limpar_rag'     -> limpa documentos RAG indexados    ║
+║  Special commands:                                       ║
+║    /exit            -> terminates the program            ║
+║    /clear           -> clears conversation history       ║
+║    /structure       -> shows what is mounted             ║
+║    /clear_rag       -> clears indexed RAG documents      ║
 ╚══════════════════════════════════════════════════════════╝
 """
 
@@ -622,7 +622,7 @@ def main():
         try:
             user_input = input("Tu: ").strip()
         except KeyboardInterrupt:
-            print("\n[*] Cancelado. Use 'sair' para terminar.")
+            print("\n[*] Cancelled. Use /exit to quit.")
             continue
         except EOFError:
             print("\n[*] A encerrar...")
@@ -630,20 +630,20 @@ def main():
 
         if not user_input:
             continue
-        if user_input.lower() in ("sair", "exit", "quit"):
-            print("[*] Ate logo!")
+        if user_input.lower() in ("/exit", "/quit"):
+            print("[*] Goodbye!")
             break
-        if user_input.lower() == "limpar":
+        if user_input.lower() == "/clear":
             conversation = [SystemMessage(content=system_prompt)]
-            print("[*] Historico limpo.\n")
+            print("[*] Conversation history cleared.\n")
             continue
-        if user_input.lower() == "estrutura":
-            print("\n[Estrutura montada]\n" + run_in_sandbox("find /forensics -maxdepth 3 -type d"))
+        if user_input.lower() == "/structure":
+            print("\n[Mounted structure]\n" + run_in_sandbox("find /forensics -maxdepth 3 -type d"))
             continue
-        if user_input.lower() == "limpar_rag":
+        if user_input.lower() == "/clear_rag":
             from rag.indexer import clear_collection
             n = clear_collection()
-            print(f"[*] RAG: coleccao limpa ({n} chunks removidos).\n")
+            print(f"[*] RAG: collection cleared ({n} chunks removed).\n")
             continue
 
         # Skills
