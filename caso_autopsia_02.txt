@@ -1,0 +1,38 @@
+RELATÓRIO DE AUTÓPSIA MÉDICO-LEGAL — CASO Nº 2024-0087
+Documento fictício para fins educativos e testes de sistemas RAG.
+
+=== IDENTIFICAÇÃO ===
+Sexo: Feminino
+Idade estimada: 67 anos
+Data do óbito (estimada): 14 de Março de 2024
+Local: Residência privada, zona rural
+
+=== CIRCUNSTÂNCIAS DA MORTE ===
+O corpo foi descoberto pela filha da vítima após dois dias de ausência de contacto. A vítima foi encontrada no quarto, em decúbito dorsal, sobre a cama. Não havia sinais de arrombamento ou luta na residência. A janela do quarto estava fechada.
+
+=== EXAME EXTERNO ===
+- Livores cadavéricos fixos na região posterior do tronco e membros
+- Rigidez cadavérica em fase de resolução
+- Palidez cutânea generalizada
+- Ausência de lesões traumáticas externas visíveis
+- Edema bilateral nos membros inferiores (sinal crónico)
+- Cicatriz cirúrgica abdominal antiga (provável colecistectomia)
+
+=== EXAME INTERNO ===
+- Coração: Hipertrofia ventricular esquerda marcada; coronárias com aterosclerose severa (obstrução estimada em 80% da coronária descendente anterior esquerda)
+- Pulmões: Presença de edema pulmonar bilateral; congestão vascular acentuada
+- Fígado: Esteatose hepática moderada
+- Rins: Sinais de nefroesclerose bilateral
+- Cérebro: Sem lesões agudas identificadas; atrofia cortical compatível com a idade
+
+=== ANÁLISES COMPLEMENTARES ===
+- Toxicologia: Detetados níveis terapêuticos de metformina e atorvastatina; sem substâncias de abuso
+- Histologia: Fibrose miocárdica extensa; necrose coagulativa em focos dispersos no ventrículo esquerdo
+- Microbiologia: Negativa
+
+=== CONCLUSÃO ===
+Causa da morte: Enfarte agudo do miocárdio em contexto de doença coronária aterosclerótica severa.
+Forma de morte: Natural.
+
+=== OBSERVAÇÕES ===
+O historial clínico da vítima, obtido junto do médico de família, confirma diagnóstico prévio de hipertensão arterial, dislipidemia e diabetes mellitus tipo 2. A morte ocorreu de forma não assistida, sem intervenção de terceiros. Não há indícios de negligência ou crime.

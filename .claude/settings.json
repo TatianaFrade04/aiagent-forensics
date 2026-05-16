@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /home/ai-forensics/aiagent-forensics show 64071aa --stat)",
+      "Bash(git -C /home/ai-forensics/aiagent-forensics show 64071aa)"
+    ]
+  }
+}

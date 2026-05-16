@@ -213,7 +213,7 @@ def _extrair_metricas_msgs(msgs: list) -> dict:
     return metricas
 
 
-def guardar_log(dados: dict, pasta: str = "logs_ctf_temperaturas", run_ts: str = ""):
+def guardar_log(dados: dict, pasta: str = "logs_ctf_temperaturas_com_limpeza", run_ts: str = ""):
     os.makedirs(pasta, exist_ok=True)
 
     ms = modelo_safe(dados["modelo"])
@@ -313,7 +313,7 @@ def correr_sessao_ctf(
     debug: bool = False,
     run_ts: str = "",
     limpar_contexto: bool = False,
-    pasta: str = "logs_ctf_temperaturas",
+    pasta: str = "logs_ctf_temperaturas_com_limpeza",
 ) -> dict:
     print(f"\n{'=' * 70}")
     print(f"  MODELO: {modelo}  |  TEMP: {temperatura}  |  CTX: {ctx}  |  SESSÃO: {sessao}")
@@ -466,7 +466,7 @@ def parse_args():
     p.add_argument("--modelo", default=MODELO_DEFAULT)
     p.add_argument("--temperaturas", nargs="+", type=float, default=TEMPERATURAS_DEFAULT)
     p.add_argument("--sessoes", type=int, default=SESSOES_DEFAULT)
-    p.add_argument("--pasta", default="logs_ctf_temperaturas")
+    p.add_argument("--pasta", default="logs_ctf_temperaturas_com_limpeza")
     p.add_argument("--debug", action="store_true")
     p.add_argument(
         "--ctx",

@@ -1,9 +1,11 @@
 """
-rag/indexer.py — Ingestão e indexação de PDFs no ChromaDB.
+rag/indexer.py — Ingestão e indexação de documentos no ChromaDB.
+
+Formatos suportados: PDF, DOCX, CSV, TXT, MD
 
 Fluxo:
-  PDF → PDFPlumberLoader → RecursiveCharacterTextSplitter
-      → HuggingFaceEmbeddings → Chroma (persisted)
+  Documento → Loader (por extensão) → RecursiveCharacterTextSplitter
+            → HuggingFaceEmbeddings → Chroma (persisted)
 """
 
 import hashlib
@@ -11,7 +13,12 @@ import logging
 import os
 
 import chromadb
-from langchain_community.document_loaders import PDFPlumberLoader
+from langchain_community.document_loaders import (
+    CSVLoader,
+    Docx2txtLoader,
+    PDFPlumberLoader,
+    TextLoader,
+)
 from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -83,6 +90,26 @@ def _purge_stale_entries(filename: str, current_doc_id: str) -> None:
     except Exception as exc:
         logger.warning("Could not purge stale entries for %r: %s", filename, exc)
 
+# ─── Selecção de loader por extensão ─────────────────────────────────────────
+
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".csv", ".txt", ".md"}
+
+
+def _get_loader(filepath: str):
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext == ".pdf":
+        return PDFPlumberLoader(filepath)
+    if ext == ".docx":
+        return Docx2txtLoader(filepath)
+    if ext == ".csv":
+        return CSVLoader(filepath, encoding="utf-8")
+    if ext in {".txt", ".md"}:
+        return TextLoader(filepath, encoding="utf-8")
+    raise ValueError(
+        f"Unsupported file type {ext!r}. Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}"
+    )
+
+
 # ─── API pública ──────────────────────────────────────────────────────────────
 
 def _make_doc_id(filename: str) -> str:
@@ -90,53 +117,50 @@ def _make_doc_id(filename: str) -> str:
     return hashlib.md5(os.path.basename(filename).encode()).hexdigest()[:12]
 
 
-def ingest_pdf(filepath: str, doc_id: str | None = None) -> dict:
+def ingest_document(filepath: str, doc_id: str | None = None, original_filename: str | None = None) -> dict:
     """
-    Carrega um PDF, divide em chunks e indexa no ChromaDB.
+    Carrega um documento (PDF, DOCX, CSV ou TXT), divide em chunks e indexa no ChromaDB.
 
     Args:
-        filepath: Caminho absoluto ou relativo para o ficheiro PDF.
-        doc_id:   Ignorado — o doc_id é sempre gerado internamente a partir
-                  do nome do ficheiro via MD5 para garantir consistência
-                  entre sessões.
+        filepath:          Caminho para o ficheiro a ler (pode ser temporário).
+        doc_id:            Ignorado — gerado internamente via MD5 do nome do ficheiro.
+        original_filename: Nome canónico do ficheiro (usado para doc_id e metadata
+                           quando filepath aponta para um ficheiro temporário).
 
     Returns:
         Dict com status, doc_id e número de chunks indexados.
 
     Raises:
         FileNotFoundError: Se o ficheiro não existir.
-        ValueError: Se o PDF não tiver texto extraível (ex: scan de imagem).
+        ValueError: Se o tipo não for suportado ou sem texto extraível.
     """
     if not os.path.isfile(filepath):
-        raise FileNotFoundError(f"PDF not found: {filepath!r}")
+        raise FileNotFoundError(f"File not found: {filepath!r}")
 
-    # doc_id sempre derivado do nome do ficheiro — ignora argumento externo
-    doc_id = _make_doc_id(filepath)
-    logger.info("Generated doc_id=%r from filename %r", doc_id, os.path.basename(filepath))
+    canonical = original_filename if original_filename else os.path.basename(filepath)
+    doc_id = _make_doc_id(canonical)
+    logger.info("Generated doc_id=%r from filename %r", doc_id, canonical)
 
     # ── Limpeza de entradas obsoletas (mesmo ficheiro, doc_id antigo) ─────────
-    _purge_stale_entries(os.path.basename(filepath), doc_id)
+    _purge_stale_entries(canonical, doc_id)
 
     # ── Deduplicação ──────────────────────────────────────────────────────────
     if _is_already_indexed(doc_id):
         logger.info("Document %r already indexed — skipping.", doc_id)
         return {"doc_id": doc_id, "status": "already_indexed", "chunks": 0}
 
-    # ── Extracção de texto ────────────────────────────────────────────────────
-    logger.info("Loading PDF: %r", filepath)
-    loader = PDFPlumberLoader(filepath)
+    # ── Selecção do loader e extracção de texto ───────────────────────────────
+    logger.info("Loading document: %r", filepath)
+    loader = _get_loader(filepath)
     try:
         docs = loader.load()
     except Exception as exc:
-        raise ValueError(f"Failed to load PDF {filepath!r}: {exc}") from exc
+        raise ValueError(f"Failed to load {filepath!r}: {exc}") from exc
 
-    # Rejeita PDFs sem texto (scans de imagem)
     if not docs or all(not d.page_content.strip() for d in docs):
-        raise ValueError(
-            f"No text extracted from {filepath!r}. "
-            "The PDF may be an image-only scan — run OCR first "
-            "(e.g. ocrmypdf input.pdf output.pdf)."
-        )
+        ext = os.path.splitext(canonical)[1].lower()
+        hint = " The PDF may be an image-only scan — run OCR first." if ext == ".pdf" else ""
+        raise ValueError(f"No text extracted from {filepath!r}.{hint}")
 
     # ── Chunking ──────────────────────────────────────────────────────────────
     splitter = RecursiveCharacterTextSplitter(
@@ -145,16 +169,8 @@ def ingest_pdf(filepath: str, doc_id: str | None = None) -> dict:
     )
     chunks = splitter.split_documents(docs)
 
-    # Enriquecer metadata de cada chunk
-    filename = os.path.basename(filepath)
     for chunk in chunks:
-        chunk.metadata.update(
-            {
-                "doc_id": doc_id,
-                "filename": filename,
-                # PDFPlumberLoader já coloca "page" em chunk.metadata
-            }
-        )
+        chunk.metadata.update({"doc_id": doc_id, "filename": canonical})
 
     # ── Indexação ─────────────────────────────────────────────────────────────
     logger.info("Indexing %d chunks for document %r …", len(chunks), doc_id)
@@ -163,6 +179,10 @@ def ingest_pdf(filepath: str, doc_id: str | None = None) -> dict:
     logger.info("Document %r indexed successfully (%d chunks).", doc_id, len(chunks))
 
     return {"doc_id": doc_id, "status": "indexed", "chunks": len(chunks)}
+
+
+# alias de retrocompatibilidade
+ingest_pdf = ingest_document
 
 
 def list_indexed_documents() -> list[dict]:

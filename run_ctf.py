@@ -88,13 +88,13 @@ if hasattr(signal, "SIGHUP"):
 # ─── Modelos a testar ─────────────────────────────────────────────────────────
 
 MODELOS_DEFAULT = [
-    #"gemma4:e4b",
-    #"qwen3.5:4b",
-    #"qwen2.5:7b",
-    #"llama3.1:8b",
-    #"granite3.2:8b",
-    #"mistral:7b",
-    #"deepseek-r1:8b",
+    "gemma4:e4b",
+    "qwen3.5:4b",
+    "qwen2.5:7b",
+    "llama3.1:8b",
+    "granite3.2:8b",
+    "mistral:7b",
+    "deepseek-r1:8b",
     "gemma4:26b"
 ]
 
@@ -319,7 +319,7 @@ def _extrair_metricas_msgs(msgs: list) -> dict:
     return metricas
 
 
-def guardar_log(dados: dict, pasta: str = "logs_ctf_limpeza", run_ts: str = ""):
+def guardar_log(dados: dict, pasta: str = "logs_ctf_sem_limpeza_1505_limpeza", run_ts: str = ""):
     os.makedirs(pasta, exist_ok=True)
     ms = modelo_safe(dados["modelo"])
     ts = f"_{run_ts}" if run_ts else ""
@@ -364,7 +364,7 @@ def _invocar_agente(agent, conversation: list, debug: bool = False) -> list:
     return new_messages
 
 
-def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, run_ts: str = "", limpar_contexto: bool = False, pasta: str = "logs_ctf_limpeza") -> dict:
+def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, run_ts: str = "", limpar_contexto: bool = False, pasta: str = "logs_ctf_sem_limpeza_1505_limpeza") -> dict:
     """Inicia o agente directamente e envia todas as perguntas CTF em sequência."""
     print(f"\n{'='*60}")
     print(f"  MODELO: {modelo}  |  CTX: {ctx}  |  SESSÃO: {sessao}/{SESSOES_DEFAULT}")
@@ -521,7 +521,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="CTF scoring — AIAgent@forensics")
     p.add_argument("--modelos", nargs="+", default=MODELOS_DEFAULT)
     p.add_argument("--sessoes", type=int, default=SESSOES_DEFAULT)
-    p.add_argument("--pasta", default="logs_ctf_limpeza")
+    p.add_argument("--pasta", default="logs_ctf_sem_limpeza_1505_limpeza")
     p.add_argument("--debug", action="store_true")
     p.add_argument("--apenas-modelo", metavar="MODELO")
     p.add_argument("--ctx", type=int, default=None,

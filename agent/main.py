@@ -34,10 +34,16 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from langchain.agents import create_agent
 
-from .tools import run_in_sandbox, stop_container, start_container
+import shlex
+
+from .tools import run_in_sandbox, stop_container, start_container, EXPORTS_PATH
 from .skills import load_skills, select_skills, format_skills_context
 
 load_dotenv()
+
+def _q(path: str) -> str:
+    """Shell-quote a path for use inside run_in_sandbox commands."""
+    return shlex.quote(path)
 
 # ─── Ferramenta exposta ao agente ─────────────────────────────────────────────
 
@@ -60,40 +66,64 @@ def run_forensics_command(command: str) -> str:
 @tool
 def ingest_pdf_document(filename: str) -> str:
     """
-    Index a PDF document in the RAG vector store for later querying.
-    
+    Index a document (PDF, DOCX, CSV or TXT) in the RAG vector store for later querying.
+
+    Accepts paths on the host OR paths inside the forensic container
+    (e.g. /forensics/part006/USERS/Jimmy Wilson/Documents/report.pdf).
+    Container paths are copied to a temp file on the host before indexing.
+
+    Supported formats: .pdf, .docx, .csv, .txt, .md
+
     Args:
-        filename: Path to the PDF file (relative to current directory or absolute path).
-        
+        filename: Path to the document — either a host path or a container path
+                  (starting with /forensics/ or /exports/).
+
     Returns:
         Status message indicating success, failure, or if already indexed.
     """
-    import os
     import logging
-    from rag.indexer import ingest_pdf, is_document_indexed
+    from rag.indexer import ingest_document, is_document_indexed
 
     logger = logging.getLogger(__name__)
 
+    exports_tmp = None
     try:
-        # Check if file exists
-        if not os.path.isfile(filename):
-            return f"Error: PDF file '{filename}' not found."
-
-        # Check if already indexed (by filename only)
         basename = os.path.basename(filename)
+
+        # Check if already indexed before doing any file I/O
         if is_document_indexed(basename):
             return f"Document '{basename}' is already indexed. Use query_rag_documents to search it."
-        
-        # Ingest the document
-        result = ingest_pdf(filename)
-        
+
+        # If the path lives inside the container, copy via /exports/ (shared volume).
+        # This handles paths with spaces correctly — docker cp breaks with spaces.
+        if filename.startswith("/forensics/"):
+            safe_name = re.sub(r"[^\w.\-]", "_", basename)
+            exports_tmp_container = f"/exports/_rag_ingest_{safe_name}"
+            exports_tmp = os.path.join(EXPORTS_PATH, f"_rag_ingest_{safe_name}")
+
+            result_cp = run_in_sandbox(f"cp {_q(filename)} {_q(exports_tmp_container)}")
+            if not os.path.isfile(exports_tmp):
+                return (
+                    f"Error: could not copy '{basename}' to /exports/ — "
+                    f"{result_cp.strip() or 'cp failed inside container'}"
+                )
+            ingest_path = exports_tmp
+        elif filename.startswith("/exports/"):
+            ingest_path = os.path.join(EXPORTS_PATH, basename)
+            if not os.path.isfile(ingest_path):
+                return f"Error: file '{filename}' not found in exports."
+        else:
+            if not os.path.isfile(filename):
+                return f"Error: file '{filename}' not found."
+            ingest_path = filename
+
+        result = ingest_document(ingest_path, original_filename=basename)
         if result["status"] == "indexed":
             return f"Successfully indexed '{basename}' with doc_id={result['doc_id']} ({result['chunks']} chunks)."
         elif result["status"] == "already_indexed":
             return f"Document '{basename}' was already indexed with doc_id={result['doc_id']}."
         else:
             return f"Unknown status: {result}"
-            
     except FileNotFoundError as e:
         return f"Error: {e}"
     except ValueError as e:
@@ -101,6 +131,9 @@ def ingest_pdf_document(filename: str) -> str:
     except Exception as e:
         logger.error("Error in ingest_pdf_document: %s", e)
         return f"Error indexing document: {e}"
+    finally:
+        if exports_tmp and os.path.exists(exports_tmp):
+            os.unlink(exports_tmp)
 
 
 @tool
@@ -126,12 +159,11 @@ def query_rag_documents(query: str, top_k: int = 5, filename: str | None = None)
 
     # Auto-detect filename from query if not provided
     if not filename:
-        # Look for patterns like "Com base no ficheiro X" or "ficheiro X"
+        _ext = r'(?:pdf|docx?|csv|txt|md)'
         filename_patterns = [
-            r'(?:com base no|ficheiro|arquivo|documento)\s+([a-zA-Z0-9_\-.]+\.pdf)',
-            r'([a-zA-Z0-9_\-.]+\.pdf)',
+            rf'(?:com base no|ficheiro|arquivo|documento)\s+([a-zA-Z0-9_\-.]+\.{_ext})',
+            rf'([a-zA-Z0-9_\-.]+\.{_ext})',
         ]
-        
         for pattern in filename_patterns:
             match = re.search(pattern, query, re.IGNORECASE)
             if match:
@@ -273,6 +305,23 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "   NEVER modify, rewrite, or prefix it with {evidence}.\n"
     "   WRONG (user said 'cat /etc/hosts'): cat '{evidence}/etc/hosts'\n"
     "   RIGHT: cat /etc/hosts\n"
+    "10b. FILE SCOPE — only search inside /forensics/ when the user explicitly references\n"
+    "   the forensic image, container, or a path that starts with /forensics/.\n"
+    "   If the user refers to a file by name only (e.g. 'resume file 1.txt', 'read report.csv')\n"
+    "   WITHOUT mentioning the image, treat the file as being on the HOST filesystem.\n"
+    "   HOST_WORKDIR = {workdir}   (project directory on the host — files provided by the user live here)\n"
+    "   Search order for host files — try in this exact sequence:\n"
+    "     1. Try ingest_pdf_document('{workdir}/filename') directly.\n"
+    "        If it succeeds, follow up with query_rag_documents to answer the user's request.\n"
+    "     2. If step 1 fails (file not found), check /exports/:\n"
+    "        ls /exports/ | grep -i 'filename'\n"
+    "        If found: ingest_pdf_document('/exports/filename') then query_rag_documents.\n"
+    "     3. If still not found, reply EXACTLY:\n"
+    "        'File not found. Please copy it to /exports/ with:\n"
+    "         cp {workdir}/filename /exports/\n"
+    "         Then ask me again.'\n"
+    "   NEVER run find '/forensics' for a file the user did not place in the forensic image.\n"
+    "   NEVER trigger the VHD SEARCH (Rule 17) for host-scope file requests.\n"
     "11. To list Windows users on the evidence image, ALWAYS cross-reference TWO sources:\n"
     "   SOURCE 1 — filesystem: find '{evidence}/USERS' -mindepth 1 -maxdepth 1 -type d\n"
     "   SOURCE 2 — SAM registry: reglookup on the SAM hive, path /SAM/Domains/Account/Users/Names\n"
@@ -281,11 +330,17 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "   After running both commands, compare the results: report users present in BOTH,\n"
     "   users only in the filesystem (directory exists but no registry account), and\n"
     "   users only in the registry (account exists but no home directory).\n"
-    "12. RAG tools (ingest_pdf_document, query_rag_documents) are ONLY for PDF documents\n"
-    "   provided EXTERNALLY by the investigator — never for files inside the forensic image.\n"
-    "   To read any file inside /forensics/ (.txt, .doc, .csv, etc.), ALWAYS use\n"
+    "12. RAG tools (ingest_pdf_document, query_rag_documents) work for PDF, DOCX, CSV, TXT and MD documents\n"
+    "   both EXTERNAL (provided by the investigator) and INSIDE the forensic image.\n"
+    "   For documents inside /forensics/ pass the full container path directly to ingest_pdf_document\n"
+    "   (e.g. ingest_pdf_document('/forensics/part006/USERS/Jimmy Wilson/Documents/report.pdf')).\n"
+    "   The tool copies the file from the container automatically — no manual cp needed.\n"
+    "   Supported extensions: .pdf, .docx, .csv, .txt, .md\n"
+    "   CRITICAL — when querying a SPECIFIC document, ALWAYS pass filename= explicitly:\n"
+    "     query_rag_documents('summarise this document', filename='report.docx')\n"
+    "   NEVER call query_rag_documents without filename= when you know which document the user is asking about.\n"
+    "   To read other file types inside /forensics/ (.doc, .xls, etc.), ALWAYS use\n"
     "   run_forensics_command with strings or head (see Rule 14 — never cat).\n"
-    "   NEVER use ingest_pdf_document on files found inside /forensics/.\n"
     "13. EVERY finding you report MUST include its exact source so the investigator can verify it.\n"
     "   For filesystem findings: include the full path (e.g. '{evidence}/USERS/<username>/Documents/report.txt').\n"
     "   For registry findings: include the hive file path AND the registry key\n"
@@ -478,8 +533,10 @@ _SYSTEM_PROMPT_TEMPLATE = (
 )
 
 
-def build_system_prompt(evidence: str, allow_network: bool = False) -> str:
-    prompt = _SYSTEM_PROMPT_TEMPLATE.format(evidence=evidence)
+def build_system_prompt(evidence: str, workdir: str = "", allow_network: bool = False) -> str:
+    if not workdir:
+        workdir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    prompt = _SYSTEM_PROMPT_TEMPLATE.format(evidence=evidence, workdir=workdir)
     if allow_network:
         prompt += (
             "\nNETWORK MODE: Internet access is enabled in this container.\n"
@@ -615,7 +672,7 @@ def main():
     )
     agent = create_agent(model=llm, tools=TOOLS)
 
-    system_prompt = build_system_prompt(evidence, allow_network=args.allow_network)
+    system_prompt = build_system_prompt(evidence, workdir=os.getcwd(), allow_network=args.allow_network)
     conversation = [SystemMessage(content=system_prompt)]
 
     while True:
