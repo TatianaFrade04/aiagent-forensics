@@ -67,7 +67,7 @@ def start_container(no_mount: bool = False, allow_network: bool = False) -> bool
     """Destrói qualquer container existente e cria um novo de raiz."""
     rm_result = subprocess.run(["docker", "rm", "-f", CONTAINER_NAME], capture_output=True, text=True)
     if rm_result.returncode != 0 and rm_result.stderr.strip():
-        print(f"[!] Aviso rm: {rm_result.stderr.strip()}")
+        print(f"[!] Warning rm: {rm_result.stderr.strip()}")
     for _ in range(5):
         check = subprocess.run(["docker", "inspect", CONTAINER_NAME], capture_output=True)
         if check.returncode != 0:
@@ -83,36 +83,36 @@ def start_container(no_mount: bool = False, allow_network: bool = False) -> bool
     needs_build = img_check.returncode != 0
 
     if not needs_build and local_hash != _get_stored_hash():
-        print("[!] Imagem Docker desactualizada — a reconstruir automaticamente...")
+        print("[!] Docker image outdated — rebuilding automatically...")
         subprocess.run(["docker", "rmi", "forensics-sandbox"], capture_output=True)
         needs_build = True
 
     if needs_build:
-        print("[*] A fazer build da imagem 'forensics-sandbox'...")
+        print("[*] Building 'forensics-sandbox' image...")
         try:
             subprocess.run(
                 ["docker", "build", "-t", "forensics-sandbox", dockerfile_dir],
                 check=True
             )
             _store_hash(local_hash)
-            print("[+] Build concluído.")
+            print("[+] Build complete.")
         except FileNotFoundError:
-            print("[!] Docker não encontrado. Verifica se está instalado.")
+            print("[!] Docker not found. Check if it is installed.")
             return False
         except subprocess.CalledProcessError as e:
-            print(f"[!] Erro no build da imagem: {e}")
+            print(f"[!] Image build error: {e}")
             return False
 
     if no_mount:
         volume_arg = f"{FORENSICS_IMAGE_PATH}:/forensics:ro"
-        print("[*] Modo directo — sem montagem de imagem forense.")
+        print("[*] Direct mode — no forensic image mounting.")
     else:
         volume_arg = f"{FORENSICS_IMAGE_PATH}:/forensics_raw:ro"
 
-    print("[*] A iniciar container forense...")
+    print("[*] Starting forensic container...")
     try:
         if allow_network:
-            print("[!] AVISO: container com acesso à internet activo.")
+            print("[!] WARNING: container with internet access enabled.")
 
         docker_run_args = [
             "docker", "run", "-d",
@@ -135,9 +135,9 @@ def start_container(no_mount: bool = False, allow_network: bool = False) -> bool
         subprocess.run(docker_run_args, check=True, capture_output=True)
 
         if no_mount:
-            print("[+] Container iniciado em modo directo!")
+            print("[+] Container started in direct mode!")
         else:
-            print("[*] A aguardar montagem da imagem forense...")
+            print("[*] Waiting for forensic image to mount...")
             time.sleep(10)
 
             check = subprocess.run(
@@ -145,18 +145,18 @@ def start_container(no_mount: bool = False, allow_network: bool = False) -> bool
                 capture_output=True, text=True
             )
             if "ewf1" in check.stdout:
-                print("[+] Container iniciado e imagem E01 montada com sucesso!")
+                print("[+] Container started and E01 image mounted successfully!")
             else:
-                print("[!] Container iniciado mas ewf1 nao encontrado.")
-                print(f"[!] Verifica com: docker logs {CONTAINER_NAME}")
+                print("[!] Container started but ewf1 not found.")
+                print(f"[!] Check with: docker logs {CONTAINER_NAME}")
 
         return True
 
     except FileNotFoundError:
-        print("[!] Erro ao iniciar container: Docker não encontrado. Verifica se está instalado.")
+        print("[!] Error starting container: Docker not found. Check if it is installed.")
         return False
     except subprocess.CalledProcessError as e:
-        print(f"[!] Erro ao iniciar container: {e.stderr.decode()}")
+        print(f"[!] Error starting container: {e.stderr.decode()}")
         return False
 
 
@@ -176,7 +176,7 @@ def ensure_container_running() -> bool:
 
 def stop_container():
     """Para e remove o container (chamado no fecho do programa)."""
-    print("\n[*] A parar container...")
+    print("\n[*] Stopping container...")
     subprocess.run(
         ["docker", "exec", CONTAINER_NAME, "bash", "-c",
          "umount -l /forensics/part* 2>/dev/null; losetup -D 2>/dev/null; umount -l /forensics_ewf 2>/dev/null; true"],
@@ -184,7 +184,7 @@ def stop_container():
     )
     subprocess.run(["docker", "stop", CONTAINER_NAME], capture_output=True)
     subprocess.run(["docker", "rm",   CONTAINER_NAME], capture_output=True)
-    print("[+] Container removido.")
+    print("[+] Container removed.")
 
 
 # ─── Execução de comandos ─────────────────────────────────────────────────────

@@ -202,7 +202,10 @@ TOOLS = [run_forensics_command, ingest_pdf_document, query_rag_documents]
 
 _SYSTEM_PROMPT_TEMPLATE = (
     "You are a digital forensics expert agent operating in READ-ONLY forensic mode.\n"
-    "Always respond in English, regardless of the language of the user's message.\n"
+    "LANGUAGE — ABSOLUTE RULE: ALL your responses MUST be written in English.\n"
+    "This applies regardless of the language used in the user's message.\n"
+    "NEVER respond in Portuguese, Spanish, French, or any other language.\n"
+    "If the user writes in Portuguese, understand it but reply ONLY in English.\n"
     "\n"
     "ANSWER FORMAT:\n"
     "  If the question provides multiple-choice options (e.g. 'a) ... b) ... c) ...'),\n"
@@ -530,6 +533,9 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "\n"
     "   NEVER search Application.evtx or any .evtx file for application last run time.\n"
     "   NEVER repeat a failing grep on a binary .evtx file — if a command returns empty, switch to UserAssist.\n"
+    "\n"
+    "FINAL REMINDER — LANGUAGE: Every word of your response must be in English.\n"
+    "Do NOT use Portuguese, Spanish, or any other language, even if the user writes in one.\n"
 )
 
 
@@ -568,7 +574,7 @@ def auto_detect_evidence() -> str:
     result = run_in_sandbox(cmd)
     path = result.strip().splitlines()[0] if result.strip() else ""
     if not path or not path.startswith("/"):
-        print("[!] Nenhuma partição reconhecível encontrada em /forensics/.")
+        print("[!] No recognisable partition found under /forensics/.")
         print("    Use --evidence para especificar o caminho manualmente.")
         sys.exit(1)
     return path
@@ -579,8 +585,8 @@ def auto_detect_evidence() -> str:
 BANNER = """
 ╔══════════════════════════════════════════════════════════╗
 ║                AIAgent@forensics v1.0                    ║
-║             Politécnico de Leiria - ESTG                 ║
-║  Agente LLM para Investigação Forense Digital (ReAct)    ║
+║             Polytechnic of Leiria - ESTG                 ║
+║  LLM Agent for Digital Forensic Investigation (ReAct)    ║
 ╠══════════════════════════════════════════════════════════╣
 ║  Special commands:                                       ║
 ║    /exit            -> terminates the program            ║
@@ -631,37 +637,37 @@ def main():
     atexit.register(stop_container)
 
     print(BANNER)
-    print(f"[*] Modelo   : {args.model} via {args.url}")
-    print(f"[*] Contexto : {args.ctx} tokens | Temperatura: {args.temp}")
+    print(f"[*] Model    : {args.model} via {args.url}")
+    print(f"[*] Context  : {args.ctx} tokens | Temperature: {args.temp}")
     sys.modules["agent.tools"].FORENSICS_IMAGE_PATH = os.path.abspath(args.dir)
-    print(f"[*] Dir. imagem : {sys.modules['agent.tools'].FORENSICS_IMAGE_PATH}")
+    print(f"[*] Image dir: {sys.modules['agent.tools'].FORENSICS_IMAGE_PATH}")
     start_container(no_mount=args.no_mount, allow_network=args.allow_network)
 
     if args.evidence:
         check = run_in_sandbox(f"test -d '{args.evidence}' && echo ok")
         if check.strip() == "ok":
             evidence = args.evidence
-            print(f"[*] Evidencia: {evidence} (manual)")
+            print(f"[*] Evidence : {evidence} (manual)")
         else:
-            print(f"[!] Particao '{args.evidence}' nao encontrada. A usar auto-deteccao...")
+            print(f"[!] Partition '{args.evidence}' not found. Using auto-detection...")
             evidence = auto_detect_evidence()
-            print(f"[*] Evidencia: {evidence} (auto-detectada)")
+            print(f"[*] Evidence : {evidence} (auto-detected)")
     else:
         evidence = auto_detect_evidence()
-        print(f"[*] Evidencia: {evidence} (auto-detectada)")
+        print(f"[*] Evidence : {evidence} (auto-detected)")
 
     all_skills = load_skills()
-    print(f"[*] Skills carregadas: {len(all_skills)} ({', '.join(s.name for s in all_skills)})")
+    print(f"[*] Skills loaded: {len(all_skills)} ({', '.join(s.name for s in all_skills)})")
 
     from rag.indexer import clear_collection, list_indexed_documents
     indexed = list_indexed_documents()
     if args.clear_rag and indexed:
         n = clear_collection()
-        print(f"[*] RAG: coleccao limpa ({n} chunks removidos). Use --no-clear-rag para manter.")
+        print(f"[*] RAG: collection cleared ({n} chunks removed). Use --no-clear-rag to keep.")
     elif indexed:
-        print(f"[*] RAG: {len(indexed)} documento(s) indexado(s): {', '.join(indexed)}")
+        print(f"[*] RAG: {len(indexed)} document(s) indexed: {', '.join(indexed)}")
     else:
-        print("[*] RAG: coleccao vazia.")
+        print("[*] RAG: empty collection.")
 
     llm = ChatOllama(
         model=args.model,
@@ -677,12 +683,12 @@ def main():
 
     while True:
         try:
-            user_input = input("Tu: ").strip()
+            user_input = input("You: ").strip()
         except KeyboardInterrupt:
             print("\n[*] Cancelled. Use /exit to quit.")
             continue
         except EOFError:
-            print("\n[*] A encerrar...")
+            print("\n[*] Shutting down...")
             break
 
         if not user_input:
@@ -707,7 +713,7 @@ def main():
         selected = select_skills(user_input, all_skills, max_skills=2)
         skills_context = format_skills_context(selected, evidence)
         if selected:
-            print(f"[*] Skills selecionadas: {', '.join(s.name for s in selected)}")
+            print(f"[*] Skills selected: {', '.join(s.name for s in selected)}")
 
         conversation[0] = SystemMessage(
             content=system_prompt + (
@@ -716,7 +722,16 @@ def main():
                 if skills_context else ""
             )
         )
-        conversation.append(HumanMessage(content=user_input))
+        # Detect non-English input and prepend a language reminder
+        _ascii_ratio = sum(c.isascii() for c in user_input) / max(len(user_input), 1)
+        _looks_non_english = _ascii_ratio < 0.95 or any(
+            w in user_input.lower() for w in ("quantos", "quais", "onde", "como", "quando", "porque", "qual")
+        )
+        _msg_content = (
+            "[REMINDER: Reply in English only]\n" + user_input
+            if _looks_non_english else user_input
+        )
+        conversation.append(HumanMessage(content=_msg_content))
 
         print()
 
@@ -848,7 +863,7 @@ def main():
                     u = last_usage
                     pct = round(u["total_tokens"] / args.ctx * 100)
                     color, reset = (_ORANGE, _RESET) if args.debug else ("", "")
-                    print(f"{color}\n[Contexto: {u['input_tokens']} in + {u['output_tokens']} out = {u['total_tokens']}/{args.ctx} tokens ({pct}%)]{reset}")
+                    print(f"{color}\n[Context: {u['input_tokens']} in + {u['output_tokens']} out = {u['total_tokens']}/{args.ctx} tokens ({pct}%)]{reset}")
 
                 if needs_compress:
                     has_tool_results = any(isinstance(m, ToolMessage) for m in new_messages)
@@ -862,28 +877,28 @@ def main():
                     else:
                         part_n = len(intermediate_files) + 1
                         inter_file = f"/exports/investigation_part_{ts_query}_{part_n:02d}.txt"
-                        reason = f"Contexto a {round(last_usage['total_tokens']/args.ctx*100)}%"
-                        print(f"\n[*] {reason} — a guardar relatório intermédio {part_n} e continuar...")
+                        reason = f"Context at {round(last_usage['total_tokens']/args.ctx*100)}%"
+                        print(f"\n[*] {reason} — saving intermediate report {part_n} and continuing...")
 
                         if len(intermediate_files) >= MAX_COMPRESSIONS:
                             agent_active = False
-                            print(f"[!] Limite de {MAX_COMPRESSIONS} compressões atingido. A gerar relatório final...")
+                            print(f"[!] Compression limit of {MAX_COMPRESSIONS} reached. Generating final report...")
                             content = _consolidate()
                             elapsed = time.time() - t_start
                             print(f"\n{'='*60}")
-                            print(f"Agente: {content}")
+                            print(f"Agent: {content}")
                             print(f"{'='*60}")
-                            print(f"[*] Tempo de resposta: {elapsed:.1f}s\n")
+                            print(f"[*] Response time: {elapsed:.1f}s\n")
                             mins, secs = divmod(int(elapsed), 60)
                             header = (
-                                f"=== Relatório Final ===\n"
-                                f"Tempo de investigação: {elapsed:.1f}s ({mins}m{secs:02d}s)\n"
-                                f"Pergunta: {original_query_msg.content}\n"
+                                f"=== Final Report ===\n"
+                                f"Investigation time: {elapsed:.1f}s ({mins}m{secs:02d}s)\n"
+                                f"Question: {original_query_msg.content}\n"
                                 f"{'='*24}\n\n"
                             )
                             b64 = _b64.b64encode((header + content).encode("utf-8")).decode()
                             run_in_sandbox(f"echo '{b64}' | base64 -d > {out_file}")
-                            print(f"[*] Relatório final guardado em: {out_file}\n")
+                            print(f"[*] Final report saved to: {out_file}\n")
                         else:
                             # Call 1: sumário completo → ficheiro intermédio
                             full_resp = llm.invoke(conversation + [HumanMessage(content=(
@@ -899,11 +914,11 @@ def main():
                                 "End with a brief list of areas not yet explored."
                             ))])
                             full_summary = _llm_content(full_resp)
-                            header = f"=== Relatório Intermédio {part_n} [{int(time.time())}] ===\n"
+                            header = f"=== Intermediate Report {part_n} [{int(time.time())}] ===\n"
                             b64 = _b64.b64encode((header + full_summary).encode("utf-8")).decode()
                             run_in_sandbox(f"echo '{b64}' | base64 -d > {inter_file}")
                             intermediate_files.append(inter_file)
-                            print(f"[*] Relatório {part_n} guardado em: {inter_file}")
+                            print(f"[*] Report {part_n} saved to: {inter_file}")
 
                             # Call 2: sumário curto → conversa comprimida
                             short_resp = llm.invoke(conversation + [HumanMessage(content=(
@@ -953,7 +968,7 @@ def main():
                             "You MUST call run_forensics_command NOW to read the actual evidence. "
                             "The tool call must appear before any answer."
                         )))
-                        print(f"[!] Resposta sem tool call detectada — a forçar investigação "
+                        print(f"[!] Response without tool call detected — forcing investigation "
                               f"({forced_continuations}/{MAX_FORCED})...")
                     else:
                         low_usage = (last_usage is not None and
@@ -965,8 +980,8 @@ def main():
                                 "You stopped investigating too early. There are still unexplored areas. "
                                 "Continue running forensic commands — do NOT summarize yet."
                             )))
-                            print(f"[*] Investigação terminou cedo ({round(last_usage['total_tokens']/args.ctx*100)}% ctx) "
-                                  f"— a forçar continuação ({forced_continuations}/{MAX_FORCED})...")
+                            print(f"[*] Investigation ended early ({round(last_usage['total_tokens']/args.ctx*100)}% ctx) "
+                                  f"— forcing continuation ({forced_continuations}/{MAX_FORCED})...")
                         else:
                             agent_active = False
                             answer = next(
@@ -985,34 +1000,34 @@ def main():
                                 elapsed = time.time() - t_start
                                 mins, secs = divmod(int(elapsed), 60)
                                 header = (
-                                    f"=== Relatório Final ===\n"
-                                    f"Tempo de investigação: {elapsed:.1f}s ({mins}m{secs:02d}s)\n"
-                                    f"Pergunta: {original_query_msg.content}\n"
+                                    f"=== Final Report ===\n"
+                                    f"Investigation time: {elapsed:.1f}s ({mins}m{secs:02d}s)\n"
+                                    f"Question: {original_query_msg.content}\n"
                                     f"{'='*24}\n\n"
                                 )
                                 b64 = _b64.b64encode((header + content).encode("utf-8")).decode()
                                 run_in_sandbox(f"echo '{b64}' | base64 -d > {out_file}")
-                                print(f"[*] Relatório final guardado em: {out_file}\n")
+                                print(f"[*] Final report saved to: {out_file}\n")
 
                             print(f"\n{'='*60}")
-                            print(f"Agente: {content}" if content else "Agente: Não foi possível obter uma resposta final.")
+                            print(f"Agent: {content}" if content else "Agent: Unable to get a final response.")
                             print(f"{'='*60}")
-                            print(f"[*] Tempo de resposta: {time.time() - t_start:.1f}s\n")
+                            print(f"[*] Response time: {time.time() - t_start:.1f}s\n")
 
         except KeyboardInterrupt:
-            print("\n[!] Agente cancelado. A voltar ao prompt...")
+            print("\n[!] Agent cancelled. Returning to prompt...")
             if conversation and isinstance(conversation[-1], HumanMessage):
                 conversation.pop()
 
         except Exception as e:
-            print(f"\n[!] Erro: {str(e)}\n")
+            print(f"\n[!] Error: {str(e)}\n")
             if conversation and isinstance(conversation[-1], HumanMessage):
                 conversation.pop()
 
         # Limpar contexto após pergunta se flag ativada
         if args.limpar_apos_pergunta:
             conversation = [SystemMessage(content=system_prompt)]
-            print("[*] Contexto limpo após resposta.\n")
+            print("[*] Context cleared after response.\n")
 
 
 if __name__ == "__main__":
