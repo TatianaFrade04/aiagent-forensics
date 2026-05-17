@@ -332,6 +332,60 @@ if [ "$MOUNTED" -eq 0 ] && [ -n "$FDISK_OUTPUT" ]; then
     done < <(echo "$FDISK_OUTPUT")
 fi
 
+# ─── Fallback: sem tabela de partições — monta RAW_DEVICE directamente ────────
+# Nota: losetup falha em ficheiros FUSE (ewf1). Usamos "mount -o loop" que
+# usa um caminho kernel diferente (sem O_DIRECT explícito).
+
+if [ "$MOUNTED" -eq 0 ] && [ -n "$RAW_DEVICE" ]; then
+    echo ""
+    echo "[*] No partition table detected — trying direct filesystem mount..."
+    MOUNT_POINT="$FINAL_MOUNT/part0"
+    mkdir -p "$MOUNT_POINT"
+
+    FS_HINT=$(file -s "$RAW_DEVICE" 2>/dev/null)
+    echo "[*] Detected type: $FS_HINT"
+
+    if echo "$FS_HINT" | grep -qi "ext4"; then
+        FS_ORDER="ext4 ext3 ext2"
+    elif echo "$FS_HINT" | grep -qi "ext3"; then
+        FS_ORDER="ext3 ext4 ext2"
+    elif echo "$FS_HINT" | grep -qi "ext2"; then
+        FS_ORDER="ext2 ext3 ext4"
+    elif echo "$FS_HINT" | grep -qi "ntfs"; then
+        FS_ORDER="ntfs-3g"
+    else
+        FS_ORDER="ext4 ext3 ext2 ntfs-3g vfat"
+    fi
+
+    MOUNT_OK=0
+    for FS in $FS_ORDER; do
+        if [ "$FS" = "ntfs-3g" ]; then
+            MOUNT_OUT=$(mount -t ntfs-3g -o ro,norecovery,loop "$RAW_DEVICE" "$MOUNT_POINT" 2>&1)
+        elif [ "$FS" = "ext3" ]; then
+            MOUNT_OUT=$(mount -t ext3 -o ro,noload,loop "$RAW_DEVICE" "$MOUNT_POINT" 2>&1)
+        elif [ "$FS" = "ext4" ]; then
+            MOUNT_OUT=$(mount -t ext4 -o ro,norecovery,loop "$RAW_DEVICE" "$MOUNT_POINT" 2>&1)
+        else
+            MOUNT_OUT=$(mount -t "$FS" -o ro,loop "$RAW_DEVICE" "$MOUNT_POINT" 2>&1)
+        fi
+        if [ $? -eq 0 ]; then
+            echo "[+] Direct mount at $MOUNT_POINT (fs=$FS)"
+            echo "PART_0_MOUNT=$MOUNT_POINT" >> "$INFO_FILE"
+            echo "PART_0_FS=$FS" >> "$INFO_FILE"
+            MOUNT_OK=1
+            MOUNTED=1
+            break
+        else
+            echo "[!] mount -t $FS failed: $MOUNT_OUT"
+        fi
+    done
+
+    if [ "$MOUNT_OK" -eq 0 ]; then
+        echo "[!] All filesystems failed. Check errors above."
+        rmdir "$MOUNT_POINT" 2>/dev/null
+    fi
+fi
+
 # ─── Resumo ───────────────────────────────────────────────────────────────────
 
 echo ""

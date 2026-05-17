@@ -146,6 +146,19 @@ def start_container(no_mount: bool = False, allow_network: bool = False) -> bool
             )
             if "ewf1" in check.stdout:
                 print("[+] Container started and E01 image mounted successfully!")
+                # Verify that at least one partition was mounted
+                parts_check = subprocess.run(
+                    ["docker", "exec", CONTAINER_NAME, "ls", "/forensics/"],
+                    capture_output=True, text=True
+                )
+                if not parts_check.stdout.strip():
+                    print("[!] Warning: no partition mounted in /forensics/ — showing entrypoint log:")
+                    logs = subprocess.run(
+                        ["docker", "logs", CONTAINER_NAME],
+                        capture_output=True, text=True
+                    )
+                    output = (logs.stdout or "") + (logs.stderr or "")
+                    print(output[-3000:] if len(output) > 3000 else output)
             else:
                 print("[!] Container started but ewf1 not found.")
                 print(f"[!] Check with: docker logs {CONTAINER_NAME}")
