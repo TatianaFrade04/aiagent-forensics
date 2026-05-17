@@ -27,3 +27,6 @@ chroma_store/
 
 # Docker image hash (gerado localmente, não commitar)
 agent/.docker_image_hash
+
+#ficheiro e01 Linux
+evidenceLinux/

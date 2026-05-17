@@ -1,6 +1,6 @@
 SKILL: event_log
 DESCRIPTION: Parse Windows Event Log files (.evtx) to find system boot/shutdown times, user logins, application execution, and calculate system uptime using evtxdump or evtxexport.
-KEYWORDS: event log, event logs, evtx, windows event, uptime, system uptime, boot time, last boot, startup, shutdown, system logon event, last run, last used, last executed, application last run, windows mail last run, quando foi iniciado, tempo de actividade, tempo ligado, system started, system booted, event id, eventid, 6005, 6006, 4648, winevt, System.evtx, Security.evtx, Application.evtx, seconds uptime, uptime in seconds
+KEYWORDS: event log, event logs, evtx, windows event, uptime, system uptime, boot time, last boot, startup, shutdown, system logon event, last run, last used, last executed, application last run, windows mail last run, system started, system booted, event id, eventid, 6005, 6006, 4648, winevt, System.evtx, Security.evtx, Application.evtx, seconds uptime, uptime in seconds
 ---
 
 ## What are Windows Event Logs?

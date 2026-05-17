@@ -1,0 +1,35 @@
+{
+  "modelo": "gemma4:e4b",
+  "ctx": 131072,
+  "limpar_contexto": false,
+  "sessao": 1,
+  "timestamp_inicio": "2026-05-17T15:02:37.692026",
+  "timestamp_fim": "2026-05-17T15:05:39.281499",
+  "perguntas": [
+    {
+      "id": "Q1",
+      "pergunta": "What is the destination time zone offset in the first Received header of the email file 447018D5-00000006.eml? Choose from: a) +04:00  b) -07:00  c) -08:00  d) -05:00  e) -09:00. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "c",
+      "resposta_extraida": "c",
+      "correto": true,
+      "tempo_segundos": 165.68,
+      "metricas_ollama": {
+        "total_duration_ns": 133539401866,
+        "prompt_eval_count": 50863,
+        "eval_count": 1477,
+        "tool_calls": 4
+      }
+    }
+  ],
+  "resumo": {
+    "total_perguntas": 1,
+    "corretas": 1,
+    "incorretas": 0,
+    "score_percentagem": 100.0,
+    "tempo_total_segundos": 165.68,
+    "tempo_medio_segundos": 165.68,
+    "total_tool_calls": 4
+  }
+}

@@ -1,6 +1,6 @@
 SKILL: timestamps
 DESCRIPTION: Analyze file creation, modification, and access timestamps on NTFS to build timelines and detect timestomping (deliberate timestamp manipulation)
-KEYWORDS: timestamp, timestamps, data, date, created, criado, modified, modificado, accessed, acedido, mtime, atime, ctime, $MFT, timeline, cronologia, ntfs, metadata, stat, fls, istat, sleuthkit, mactime, timestomping, manipulacao, chronology, recent files, ficheiros recentes, newer, mais recentes, when was, quando foi, last modified, last accessed, entre, between, data de modificacao, data de criacao, quando foi modificado, quando foi criado, uptime, system uptime, tempo ativo, tempo de arranque, boot time, quanto tempo ligado, ligado desde, event log, evtx, winevt, 6005, 6006, kernel-general, sistema ligado, when was booted, quando foi iniciado, system boot, arranque do sistema
+KEYWORDS: timestamp, timestamps, date, created, modified, accessed, mtime, atime, ctime, $MFT, timeline, chronology, ntfs, metadata, stat, fls, istat, sleuthkit, mactime, timestomping, recent files, newer, when was, last modified, last accessed, between, uptime, system uptime, boot time, event log, evtx, winevt, 6005, 6006, kernel-general, when was booted, system boot
 ---
 
 ## What is timestamp analysis?

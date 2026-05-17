@@ -1,6 +1,6 @@
 SKILL: string_search
 DESCRIPTION: Search for text patterns, keywords, email addresses, URLs, or strings inside files using grep and strings. Use grep for text/document files and strings for binary files. Essential for finding hidden data, passwords, or specific content across the evidence.
-KEYWORDS: grep, strings, procurar texto, search text, encontrar texto, find text, conteudo, content, pesquisar, search, keyword, palavra chave, palavra, word, texto, text, email, url, padrao, pattern, binario, binary, rg, ripgrep, busca, procurar string, find string, search string, contém, contains, dentro do ficheiro, inside file, pesquisa de conteudo, content search, grep recursivo
+KEYWORDS: grep, strings, search text, find text, content, search, keyword, word, text, email, url, pattern, binary, rg, ripgrep, find string, search string, contains, inside file, content search
 ---
 
 ## What is string/content search?

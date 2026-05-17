@@ -1,6 +1,6 @@
 SKILL: sam_users
 DESCRIPTION: Extract Windows local user information from the SAM registry hive — user list, RIDs, last login times, password hints, and account status. Replaces chntpw for all SAM-related forensic questions. Primary tool: regripper samparse. Fallback: python-registry.
-KEYWORDS: SAM, sam hive, local users, utilizadores locais, last login, ultimo login, ultimo acesso, login, logon, login date, login time, last logon time, last login time, RID, relative identifier, password hint, dica de password, account disabled, conta desativada, account enabled, conta ativa, logon password, has password, password enabled, password set, user list, lista de utilizadores, chntpw, samparse, regripper sam, windows users, contas windows, user account, conta de utilizador, administrator, guest, last logon, logon time, quando fez login, quando acedeu, ultimo utilizador, account flags, account status
+KEYWORDS: SAM, sam hive, users, local users, how many users, list users, user count, last login, login, logon, login date, login time, last logon time, last login time, RID, relative identifier, password hint, account disabled, account enabled, logon password, has password, password enabled, password set, user list, chntpw, samparse, regripper sam, windows users, user account, administrator, guest, last logon, logon time, account flags, account status
 ---
 
 ## CRITICAL RULE — timestamp questions with multiple-choice answers

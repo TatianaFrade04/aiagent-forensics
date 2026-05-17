@@ -1,6 +1,6 @@
 SKILL: prefetch
 DESCRIPTION: Analyse Windows Prefetch files to determine which programs were executed, how many times, and when they last ran. Prefetch files (.pf) are in Windows\Prefetch\ and are named PROGRAM.EXE-XXXXXXXX.pf.
-KEYWORDS: prefetch, execucao, execution, executado, executed, ran, program, programa, quando executou, when executed, when ran, prefetch file, .pf, windows prefetch, application execution, execucao de programas, program execution, executavel, executable, historico de execucao, execution history, foi executado, foi corrido, correu, ran program, last run, ultima execucao, ultima vez executado, suspicious tools, ferramentas suspeitas, malware, malicious, ferramenta maliciosa, suspeito, suspeita, que programas suspeitos, tools that were run, ran malware, executou malware, foi executado malware, prove executed, prove that ran, cmd.exe was executed, prove cmd, was ever executed, ever run, alguma vez executado, alguma vez correu, foi alguma vez
+KEYWORDS: prefetch, execution, executed, ran, program, when executed, when ran, prefetch file, .pf, windows prefetch, application execution, program execution, executable, execution history, was executed, ran program, last run, suspicious tools, malware, malicious, tools that were run, prove executed, prove that ran, cmd.exe was executed, prove cmd, was ever executed, ever run
 ---
 
 ## What are Prefetch files?

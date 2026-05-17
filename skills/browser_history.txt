@@ -1,6 +1,6 @@
 SKILL: browser_history
 DESCRIPTION: Extract browser history, visited URLs, downloads, and searches from Chrome, Firefox, and Edge SQLite databases. SQLite files must be copied to /exports/ before querying (evidence is READ-ONLY).
-KEYWORDS: browser, history, historico, chrome, firefox, edge, internet explorer, ie, sqlite, url, visited, visitado, downloads, search, pesquisa, web, navegacao, navegador, bookmark, marcadores, favoritos, cookies, cache, historico de navegacao, sites visitados, browsing history, web history, internet history, pasco, index.dat, places.sqlite, History, timeline, web activity, atividade web, credentials, login, passwords, saved passwords, form data, dados formulario, credenciais, logins guardados, signons, keyword search, search terms, termos pesquisa
+KEYWORDS: browser, history, chrome, firefox, edge, internet explorer, ie, sqlite, url, visited, downloads, search, web, bookmark, cookies, cache, browsing history, web history, internet history, pasco, index.dat, places.sqlite, History, timeline, web activity, credentials, login, passwords, saved passwords, form data, signons, keyword search, search terms
 ---
 
 ## What is browser history analysis?

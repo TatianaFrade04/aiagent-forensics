@@ -1,6 +1,6 @@
 SKILL: rag
 DESCRIPTION: Query the content of indexed PDF documents (autopsy reports, forensic reports, investigation summaries) using the RAG pipeline
-KEYWORDS: rag, pdf, documento, document, relatorio, relatório, autopsia, autopsy, causa da morte, cause of death, vitima, vitima, sexo, idade, age, sex, forensic report, conteudo, conteúdo, com base no ficheiro, no documento, no pdf, segundo o relatorio, segundo o relatório, de acordo com, what does, o que diz, ingestao, indexar, indexar pdf
+KEYWORDS: rag, pdf, document, report, autopsy, cause of death, victim, age, sex, forensic report, content, based on file, based on document, according to, what does, ingest, index, summarize, summary, resume
 ---
 
 ## What is `rag`?

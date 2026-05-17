@@ -1,6 +1,6 @@
 SKILL: installed_software
 DESCRIPTION: Find installed or used programs on a Windows system by querying the registry uninstall keys and prefetch files. Use this when asked what programs, tools, or software were installed or used — especially encryption tools, suspicious programs, or specific applications.
-KEYWORDS: installed, installed programs, software installed, que programas, programas instalados, que ferramentas, what programs, what software, programs used, what was installed, o que esta instalado, o que foi instalado, encryption programs, encryption software, encriptacao, cifra, cipher, veracrypt, bitlocker, truecrypt, bctextencoder, file vault, program list, lista de programas, ferramentas instaladas, tools installed, applications, aplicacoes, what tools, que ferramentas foram usadas, que software, installed tools, encryption tool, ferramenta de encriptacao
+KEYWORDS: installed, installed programs, software installed, what programs, what software, programs used, what was installed, encryption programs, encryption software, cipher, veracrypt, bitlocker, truecrypt, bctextencoder, file vault, program list, tools installed, applications, what tools, installed tools, encryption tool
 ---
 
 ## CRITICAL: run each step as a SEPARATE tool call — never combine into one command

@@ -12,12 +12,14 @@ Uso:
 import argparse
 import atexit
 import json
+import logging
 import os
 import re
 import signal
 import subprocess
 import sys
 import time
+import traceback
 from datetime import datetime
 
 # ─── Imports do agente ────────────────────────────────────────────────────────
@@ -33,6 +35,88 @@ from langchain.agents import create_agent
 from agent.tools import start_container, stop_container, run_in_sandbox
 from agent.main import auto_detect_evidence, build_system_prompt, TOOLS
 from agent.skills import load_skills, select_skills, format_skills_context
+
+# ─── Logging ──────────────────────────────────────────────────────────────────
+
+_log_path = os.path.join(os.path.dirname(__file__), "run_ctf_errors.log")
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler(_log_path, encoding="utf-8"),
+        logging.StreamHandler(sys.stderr),
+    ],
+)
+_logger = logging.getLogger("run_ctf")
+
+# ─── Timing logger (tail -f run_ctf_timing.log) ───────────────────────────────
+
+_timing_log_path = os.path.join(os.path.dirname(__file__), "run_ctf_timing.log")
+_timing_logger = logging.getLogger("run_ctf.timing")
+_timing_logger.setLevel(logging.INFO)
+_th = logging.FileHandler(_timing_log_path, encoding="utf-8")
+_th.setFormatter(logging.Formatter("%(message)s"))
+_timing_logger.addHandler(_th)
+_timing_logger.propagate = False
+
+
+# ─── Callback de timing ───────────────────────────────────────────────────────
+
+from langchain_core.callbacks import BaseCallbackHandler
+
+
+class TimingCallback(BaseCallbackHandler):
+    """Loga para stdout e run_ctf_timing.log o timing de cada passo do agente."""
+
+    def __init__(self, id_q: str):
+        super().__init__()
+        self.id_q = id_q
+        self._llm_t0: float | None = None
+        self._first_token_t: float | None = None
+        self._tool_t0: float | None = None
+        self._tool_name: str = "?"
+
+    def _ts(self) -> str:
+        return datetime.now().strftime("%H:%M:%S.%f")[:12]
+
+    def _log(self, msg: str) -> None:
+        line = f"[{self._ts()}] {self.id_q} → {msg}"
+        print(f"  {line}", flush=True)
+        _timing_logger.info(line)
+
+    def on_llm_start(self, serialized, messages, **kwargs):
+        self._llm_t0 = time.time()
+        self._first_token_t = None
+        chars = sum(len(str(m)) for batch in messages for m in (batch if isinstance(batch, list) else [batch]))
+        self._log(f"LLM START  (~{chars // 4:,} tokens estimados no prompt)")
+
+    def on_llm_new_token(self, token: str, **kwargs):
+        if self._first_token_t is None and token.strip():
+            self._first_token_t = time.time()
+            elapsed = self._first_token_t - (self._llm_t0 or self._first_token_t)
+            self._log(f"FIRST TOKEN  (prompt eval: {elapsed:.1f}s)")
+
+    def on_llm_end(self, response, **kwargs):
+        elapsed = time.time() - (self._llm_t0 or time.time())
+        gen_tokens, prompt_tokens = 0, 0
+        for gen_list in (response.generations or []):
+            for gen in gen_list:
+                info = getattr(gen, "generation_info", {}) or {}
+                gen_tokens += info.get("eval_count", 0)
+                prompt_tokens = max(prompt_tokens, info.get("prompt_eval_count", 0))
+        token_info = f" | prompt={prompt_tokens:,} | gerados={gen_tokens}" if prompt_tokens else ""
+        self._log(f"LLM END    ({elapsed:.1f}s total{token_info})")
+
+    def on_tool_start(self, serialized, input_str: str, **kwargs):
+        self._tool_t0 = time.time()
+        self._tool_name = serialized.get("name", "?")
+        short = str(input_str)[:80].replace("\n", "↵")
+        self._log(f"TOOL START  {self._tool_name}({short}…)")
+
+    def on_tool_end(self, output: str, **kwargs):
+        elapsed = time.time() - (self._tool_t0 or time.time())
+        preview = str(output)[:60].replace("\n", "↵")
+        self._log(f"TOOL END    {self._tool_name}  ({elapsed:.1f}s) → {preview!r}")
 
 # ─── Cleanup garantido (Ctrl+C, SIGTERM, SSH drop) ────────────────────────────
 
@@ -85,38 +169,34 @@ signal.signal(signal.SIGINT,  lambda *_: sys.exit(0))
 if hasattr(signal, "SIGHUP"):
     signal.signal(signal.SIGHUP, lambda *_: sys.exit(0))
 
+# ─── Timeout por pergunta ─────────────────────────────────────────────────────
+
+TIMEOUT_PER_QUESTION = 600  # segundos — ajusta com --timeout
+
+
+class _QuestionTimeout(Exception):
+    pass
+
+
+def _sigalrm_handler(signum, frame):
+    raise _QuestionTimeout()
+
 # ─── Modelos a testar ─────────────────────────────────────────────────────────
 
 MODELOS_DEFAULT = [
-    "gemma4:e4b",
+    #"gemma4:e4b",
+    #"gemma4:26b",
     "qwen3.5:4b",
-    "qwen2.5:7b",
-    "llama3.1:8b",
-    "granite3.2:8b",
-    "mistral:7b",
-    "deepseek-r1:8b",
-    "gemma4:26b"
 ]
 
-SESSOES_DEFAULT = 3
+SESSOES_DEFAULT = 1
 
 # Contexto máximo seguro por modelo para 12 GB VRAM (Q4 quantization)
 # Pesos do modelo + KV cache não devem exceder ~11.5 GB (margem de segurança)
 MODEL_CTX_12GB: dict[str, int] = {
     "gemma4:e4b":      131072,  # 4B, GQA com poucos KV heads — KV cache muito eficiente
-    "gemma3:4b":        65536,  # 4B standard
-    "gemma3:12b":       16384,  # 12B — pesos ~8 GB, pouco espaço para KV cache
+    "gemma4:26b":       32768,  # 26B — pesos ~8 GB, pouco espaço para KV cache
     "qwen3.5:4b":       65536,  # 4B
-    "qwen2.5:7b":       32768,  # 7B — pesos ~4.5 GB
-    "qwen2.5:14b":      16384,  # 14B — pesos ~9 GB
-    "qwen3:8b":         65536,
-    "llama3.2":         65536,  # 3B (default tag)
-    "llama3.2:3b":      65536,  # 3B explícito
-    "llama3.1:8b":      32768,  # 8B — pesos ~5 GB
-    "llama3.3:70b":      4096,  # 70B quantizado — apenas cabe com ctx mínimo
-    "deepseek-r1:8b":   32768,  # 8B reasoning — usa mais memória em inferência
-    "mistral":          32768,  # 7B
-    "mistral:7b":       32768,  # 7B explícito
 }
 
 
@@ -143,102 +223,126 @@ def suporta_thinking(modelo: str) -> bool:
 # Para verdadeiro/falso é "true" ou "false"
 
 PERGUNTAS_CTF = [
-    (
-        "Q1",
-        'What is the destination time zone offset in the first Received header of the email file 447018D5-00000006.eml? Choose from: a) +04:00  b) -07:00  c) -08:00  d) -05:00  e) -09:00. Reply with only the letter.',
-        "c",
-        "mc",
-    ),
-    (
-        "Q2",
-        'True or False: The total capacity in bytes of the "J. Wilson" partition in System.vhd is 734,003,200. Reply with only "true" or "false".',
-        "true",
-        "tf",
-    ),
-    (
-        "Q3",
-        'What was the date and time the email "447018D5-00000006.eml" received by Jimmy Wilson was originally sent? Choose from: a) Sun, 16 February 2014 10:55:09 -05:00  b) Sun, 16 February 2014 07:55:09 -05:00  c) Sun, 16 February 2014 12:55:09 -05:00  d) Sun, 16 February 2014 11:55:09 -05:00  e) Sun, 16 February 2014 13:55:09 -05:00. Reply with only the letter.',
-        "c",
-        "mc",
-    ),
-    (
-        "Q6",
-        'True or False: On February 20, 2014 at 17:02:35 UTC, the system uptime in seconds was 9,634. Reply with only "true" or "false".',
-        "true",
-        "tf",
-    ),
-    (
-        "Q7",
-        'True or False: The MD5 hash value of the pdf.pdf file is C1F95108A34228535A9262085E784D7C3E27FC68. Reply with only "true" or "false".',
-        "false",
-        "tf",
-    ),
-    (
-        "Q8",
-        'True or False: The user account Jimmy Wilson has his logon password enabled and the password hint is "safeone". Reply with only "true" or "false".',
-        "true",
-        "tf",
-    ),
-    (
-        "Q10",
-        'True or False: The final destination IP address for the email "447018D5-00000006.eml" received by Jimmy Wilson is 10.221.48.196. Reply with only "true" or "false".',
-        "true",
-        "tf",
-    ),
-    (
-        "Q12",
-        "What is the logical size in bytes (decimal) of the pdf.pdf file? Choose from: a) 444,332  b) 433,994  c) 395,232  d) 253,283. Reply with only the letter.",
-        "b",
-        "mc",
-    ),
-    (
-        "Q13",
-        'True or False: The user account BillyBob sent the following files to the $recyclebin: "New Price List.txt" and "New Price List Encoded". Reply with only "true" or "false".',
-        "true",
-        "tf",
-    ),
-    (
-        "Q14",
-        "What is the logical file size in bytes (decimal) of the PLEAS.txt file? Choose from: a) 110,592  b) 122,336  c) 122,880  d) 108,227. Reply with only the letter.",
-        "b",
-        "mc",
-    ),
-    (
-        "Q15",
-        "What is the full name of the user that has the RID number 0x3EB? Choose from: a) Administrator  b) Betty Boop  c) Joe T. Nameless  d) BillyBob  e) Guest. Reply with only the letter.",
-        "c",
-        "mc",
-    ),
-    (
-        "Q16",
-        'When was the last login date and time for the user "Jimmy Wilson"? Choose from: a) February 18, 2014 12:38:16 UTC  b) January 19, 2014 06:22:12 UTC  c) March 03, 2014 11:11:11 UTC  d) None of these times are correct  e) February 19, 2014 13:30:58 UTC  f) April 01, 2014 00:00:01 UTC  g) February 17, 2014 17:38:22 UTC. Reply with only the letter.',
-        "d",
-        "mc",
-    ),
-    (
-        "Q17",
-        'True or False: jose.Badguy@hushmail.com and robert.ripoff@gmx.com sent emails to the user Jimmy Wilson. Reply with only "true" or "false".',
-        "true",
-        "tf",
-    ),
-    (
-        "Q18",
-        "What program did the user Jimmy Wilson have set to run when he logged on to the computer? Choose from: a) None of the other answers are correct  b) Notepad.exe  c) StinkyNot.exe  d) MSAccess.exe  e) MSWord.exe. Reply with only the letter.",
-        "c",
-        "mc",
-    ),
-    (
-        "Q19",
-        'True or False: The SHA1 hash value for the AISB08.pdf file is BDEBF09E8B2D404D1C483C3EBFB8AD37C780D909. Reply with only "true" or "false".',
-        "true",
-        "tf",
-    ),
-    (
-        "Q20",
-        "What encryption programs were used on this computer? Choose from: a) Veracrypt/BitLocker  b) BitLocker/Veracrypt  c) File Vault/Truecrypt  d) BCTextEncoder/Veracrypt  e) No encryption programs were used  f) Truecrypt/BCTextEncoder. Reply with only the letter, read all options before reply.",
-        "f",
-        "mc",
-    ),
+    # (
+    #     "Q1",
+    #     'What is the destination time zone offset in the first Received header of the email file 447018D5-00000006.eml? Choose from: a) +04:00  b) -07:00  c) -08:00  d) -05:00  e) -09:00. Reply with only the letter.',
+    #     "c",
+    #     "mc",
+    # ),
+    # (
+    #     "Q2",
+    #     'True or False: The total capacity in bytes of the "J. Wilson" partition in System.vhd is 734,003,200. Reply with only "true" or "false".',
+    #     "true",
+    #     "tf",
+    # ),
+    # (
+    #     "Q3",
+    #     'What was the date and time the email "447018D5-00000006.eml" received by Jimmy Wilson was originally sent? Choose from: a) Sun, 16 February 2014 10:55:09 -05:00  b) Sun, 16 February 2014 07:55:09 -05:00  c) Sun, 16 February 2014 12:55:09 -05:00  d) Sun, 16 February 2014 11:55:09 -05:00  e) Sun, 16 February 2014 13:55:09 -05:00. Reply with only the letter.',
+    #     "c",
+    #     "mc",
+    # ),
+    # (
+    #     "Q4",
+    #     'The disk GUID (in hex) of the physical disk is: 6FAE8D386C441743AE3298C4BDE04830. Reply with only "true" or "false".',
+    #     "true",
+    #     "tf",
+    # ),
+    # (
+    #     "Q5",
+    #     'What is the cluster size in bytes within the second partition of the physical disk? Reply with only "true" or "false".',
+    #     "false",
+    #     "tf",
+    # ),
+    # (
+    #     "Q6",
+    #     'True or False: On February 20, 2014 at 17:02:35 UTC, the system uptime in seconds was 9,634. Reply with only "true" or "false".',
+    #     "true",
+    #     "tf",
+    # ),
+    # (
+    #     "Q7",
+    #     'True or False: The MD5 hash value of the pdf.pdf file is C1F95108A34228535A9262085E784D7C3E27FC68. Reply with only "true" or "false".',
+    #     "false",
+    #     "tf",
+    # ),
+    # (
+    #     "Q8",
+    #     'True or False: The user account Jimmy Wilson has his logon password enabled and the password hint is "safeone". Reply with only "true" or "false".',
+    #     "true",
+    #     "tf",
+    # ),
+    # (
+    #     "Q9",
+    #     'What is the partitioning format (Schema) of the physical disk? Choose from: a) None of the other answers are correct  b) GPT  c) The Physical disk is not partitioned  d) MBE. Reply with only the letter. ',
+    #     "b",
+    #     "mc",
+    # ),
+    # (
+    #     "Q10",
+    #     'True or False: The final destination IP address for the email "447018D5-00000006.eml" received by Jimmy Wilson is 10.221.48.196. Reply with only "true" or "false".',
+    #     "true",
+    #     "tf",
+    # ),
+    # (
+    #     "Q11",
+    #     'The 2nd partitions unique GUID (in hex) of the physical disk is: 423FDC8AA701EE46AF5A70C06738E819. Reply with only "true" or "false".',
+    #     "false",
+    #     "tf",
+    # ),
+    # (
+    #     "Q12",
+    #     "What is the logical size in bytes (decimal) of the pdf.pdf file? Choose from: a) 444,332  b) 433,994  c) 395,232  d) 253,283. Reply with only the letter.",
+    #     "b",
+    #     "mc",
+    # ),
+    # (
+    #     "Q13",
+    #     'True or False: The user account BillyBob sent the following files to the $recyclebin: "New Price List.txt" and "New Price List Encoded". Reply with only "true" or "false".',
+    #     "true",
+    #     "tf",
+    # ),
+    # (
+    #     "Q14",
+    #     "What is the logical file size in bytes (decimal) of the PLEAS.txt file? Choose from: a) 110,592  b) 122,336  c) 122,880  d) 108,227. Reply with only the letter.",
+    #     "b",
+    #     "mc",
+    # ),
+    # (
+    #     "Q15",
+    #     "What is the full name of the user that has the RID number 0x3EB? Choose from: a) Administrator  b) Betty Boop  c) Joe T. Nameless  d) BillyBob  e) Guest. Reply with only the letter.",
+    #     "c",
+    #     "mc",
+    # ),
+    # (
+    #     "Q16",
+    #     'When was the last login date and time for the user "Jimmy Wilson"? Choose from: a) February 18, 2014 12:38:16 UTC  b) January 19, 2014 06:22:12 UTC  c) March 03, 2014 11:11:11 UTC  d) None of these times are correct  e) February 19, 2014 13:30:58 UTC  f) April 01, 2014 00:00:01 UTC  g) February 17, 2014 17:38:22 UTC. Reply with only the letter.',
+    #     "d",
+    #     "mc",
+    # ),
+    # (
+    #     "Q17",
+    #     'True or False: jose.Badguy@hushmail.com and robert.ripoff@gmx.com sent emails to the user Jimmy Wilson. Reply with only "true" or "false".',
+    #     "true",
+    #     "tf",
+    # ),
+    # (
+    #     "Q18",
+    #     "What program did the user Jimmy Wilson have set to run when he logged on to the computer? Choose from: a) None of the other answers are correct  b) Notepad.exe  c) StinkyNot.exe  d) MSAccess.exe  e) MSWord.exe. Reply with only the letter.",
+    #     "c",
+    #     "mc",
+    # ),
+    # (
+    #     "Q19",
+    #     'True or False: The SHA1 hash value for the AISB08.pdf file is BDEBF09E8B2D404D1C483C3EBFB8AD37C780D909. Reply with only "true" or "false".',
+    #     "true",
+    #     "tf",
+    # ),
+    # (
+    #     "Q20",
+    #     "What encryption programs were used on this computer? Choose from: a) Veracrypt/BitLocker  b) BitLocker/Veracrypt  c) File Vault/Truecrypt  d) BCTextEncoder/Veracrypt  e) No encryption programs were used  f) Truecrypt/BCTextEncoder. Reply with only the letter, read all options before reply.",
+    #     "f",
+    #     "mc",
+    # ),
     (
         "Q22",
         'True or False: The SHA1 hash value for the Card Printers.htm file is F6CF04DB3D1BA828E375BBFE988876CE06164126. Reply with only "true" or "false".',
@@ -340,11 +444,18 @@ def _llm_content(msg) -> str:
     return c
 
 
-def _invocar_agente(agent, conversation: list, debug: bool = False) -> list:
+def _invocar_agente(agent, conversation: list, debug: bool = False, id_q: str = "",
+                    timeout_s: int = TIMEOUT_PER_QUESTION) -> list:
     """Corre agent.stream() e devolve a lista de novas mensagens."""
     new_messages = []
+    callback = TimingCallback(id_q)
+    old_handler = signal.signal(signal.SIGALRM, _sigalrm_handler)
+    signal.alarm(timeout_s)
     try:
-        for chunk in agent.stream({"messages": conversation}, {"recursion_limit": 999}):
+        for chunk in agent.stream(
+            {"messages": conversation},
+            {"recursion_limit": 999, "callbacks": [callback]},
+        ):
             for node_output in chunk.values():
                 for msg in node_output.get("messages", []):
                     new_messages.append(msg)
@@ -359,12 +470,20 @@ def _invocar_agente(agent, conversation: list, debug: bool = False) -> list:
                         elif isinstance(msg, ToolMessage):
                             out = msg.content[:300] if isinstance(msg.content, str) else str(msg.content)[:300]
                             print(f"  [ToolMessage] {out!r}")
+    except _QuestionTimeout:
+        print(f"\n  [!] [{id_q}] Timeout após {timeout_s}s — pergunta marcada como errada.")
+        _logger.warning("[%s] timeout após %ds — pergunta sem resposta.", id_q, timeout_s)
     except Exception as e:
+        tb = traceback.format_exc()
         print(f"\n  [!] Erro no agente: {e}")
+        _logger.error("Excepção em _invocar_agente (msgs recolhidas: %d):\n%s", len(new_messages), tb)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
     return new_messages
 
 
-def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, run_ts: str = "", limpar_contexto: bool = False, pasta: str = "logs_ctf_sem_limpeza_1505_limpeza") -> dict:
+def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, run_ts: str = "", limpar_contexto: bool = False, pasta: str = "logs_ctf_sem_limpeza_1505_limpeza", timeout_s: int = TIMEOUT_PER_QUESTION) -> dict:
     """Inicia o agente directamente e envia todas as perguntas CTF em sequência."""
     print(f"\n{'='*60}")
     print(f"  MODELO: {modelo}  |  CTX: {ctx}  |  SESSÃO: {sessao}/{SESSOES_DEFAULT}")
@@ -387,11 +506,14 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
     system_prompt = build_system_prompt(evidence)
     all_skills = load_skills()
 
+    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
     llm = ChatOllama(
         model=modelo,
         temperature=0.3,
         num_ctx=ctx,
+        keep_alive=-1,
         reasoning=suporta_thinking(modelo),
+        base_url=ollama_url,
     )
     agent = create_agent(model=llm, tools=TOOLS)
 
@@ -420,7 +542,7 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
         print(f"  A aguardar resposta...", end="", flush=True)
         inicio = time.time()
 
-        new_messages = _invocar_agente(agent, conversation, debug=debug)
+        new_messages = _invocar_agente(agent, conversation, debug=debug, id_q=id_q, timeout_s=timeout_s)
         conversation.extend(new_messages)
 
         tempo = time.time() - inicio
@@ -431,6 +553,14 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
             None,
         )
         content = _llm_content(answer) if answer else ""
+
+        if not new_messages:
+            _logger.error("[%s] agente devolveu 0 mensagens — possível crash silencioso.", id_q)
+        elif not content.strip():
+            _logger.warning("[%s] resposta final vazia (tool_calls=%d, msgs=%d).",
+                            id_q,
+                            sum(len(getattr(m, "tool_calls", None) or []) for m in new_messages),
+                            len(new_messages))
 
         metricas = _extrair_metricas_msgs(new_messages)
         resposta_extraida = extrair_resposta_modelo(content, tipo)
@@ -528,6 +658,8 @@ def parse_args():
                    help="Contexto em tokens (default: auto-detectado por modelo para 12 GB VRAM)")
     p.add_argument("--limpar-contexto", action="store_true", default=False,
                    help="Limpa o contexto da conversa entre perguntas (cada pergunta é independente)")
+    p.add_argument("--timeout", type=int, default=TIMEOUT_PER_QUESTION,
+                   help=f"Timeout por pergunta em segundos (default: {TIMEOUT_PER_QUESTION})")
     return p.parse_args()
 
 
@@ -561,7 +693,7 @@ def main():
         ctx = args.ctx if args.ctx else ctx_para_modelo(modelo)
         for sessao in range(1, sessoes + 1):
             try:
-                dados = correr_sessao_ctf(modelo, sessao, ctx=ctx, debug=args.debug, run_ts=run_ts, limpar_contexto=args.limpar_contexto, pasta=args.pasta)
+                dados = correr_sessao_ctf(modelo, sessao, ctx=ctx, debug=args.debug, run_ts=run_ts, limpar_contexto=args.limpar_contexto, pasta=args.pasta, timeout_s=args.timeout)
                 guardar_log(dados, pasta=args.pasta, run_ts=run_ts)
                 todos_resultados.append(dados)
 

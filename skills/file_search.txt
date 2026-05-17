@@ -1,6 +1,6 @@
 SKILL: file_search
 DESCRIPTION: Search for files by name, extension, type, or size across the evidence image using find, file, and ls. Use this for generic file discovery — finding all PDFs, executables, images, specific filenames, or large files.
-KEYWORDS: encontrar ficheiro, procurar ficheiro, search file, find file, localizar, locate, listar ficheiros, list files, extensao, extension, tipo de ficheiro, file type, tamanho, size, nome, name, pdf, docx, xlsx, doc, xls, jpg, jpeg, png, mp3, mp4, zip, rar, exe, dll, bat, ps1, csv, txt, todos os ficheiros, all files, ficheiros de, files with, que ficheiros, what files, mostrar ficheiros, show files
+KEYWORDS: search file, find file, locate, list files, extension, file type, size, name, pdf, docx, xlsx, doc, xls, jpg, jpeg, png, mp3, mp4, zip, rar, exe, dll, bat, ps1, csv, txt, all files, files with, what files, show files
 ---
 
 ## Golden rule: one combined search command

@@ -1,121 +1,191 @@
 SKILL: disk_images
-DESCRIPTION: Analyse virtual disk images (VHD, VMDK, DD, raw) found inside the evidence partition — list partitions, read volume labels, and calculate capacity in bytes using mmls and fsstat.
-KEYWORDS: vhd, vmdk, qcow2, disk image, virtual disk, imagem de disco, disco virtual, partition, partição, partition label, volume label, capacity, capacidade, total size, tamanho total, partition size, sector, sectors, mmls, fsstat, nested disk, disco aninhado, System.vhd, virtual hard disk, guid, disk guid, disco guid, partition guid, partição guid, gpt guid, unique id, identificador disco
+DESCRIPTION: Analyse the physical evidence disk and virtual disk images (VHD, VMDK) found inside it — partition schema, disk/partition GUIDs, cluster size, volume labels, and partition capacity using mmls and fsstat.
+KEYWORDS: vhd, vmdk, qcow2, disk image, virtual disk, partition, partition label, volume label, capacity, total size, partition size, sector, sectors, mmls, fsstat, nested disk, System.vhd, virtual hard disk, guid, disk guid, partition guid, gpt guid, unique id, physical disk, ewf, schema, partitioning format, cluster size, second partition
 ---
 
-## What are nested disk images?
-Virtual disk files (`.vhd`, `.vmdk`, `.dd`, `.raw`) found inside an evidence partition are
-disk images in their own right — they contain their own partition tables and filesystems.
-Use `mmls` to read their partition tables and `fsstat` to get filesystem details
-(label, size, cluster size) for each partition.
+## TWO types of disk — discover both before starting
 
-## Step-by-step workflow
+| Question refers to… | What to use | How to find it |
+|---|---|---|
+| **Physical disk** (schema, disk GUID, partition GUIDs, cluster size of a physical partition) | Raw disk image file | `find` for `ewf1` or raw image formats |
+| **Nested virtual disk** (VHD/VMDK file inside the evidence) | VHD/VMDK file path | `find` inside the mounted evidence directories |
+
+**CRITICAL: mounted partition directories are NOT disk images.**
+Mounted filesystems are directories — opening them as binary files always fails with `IsADirectoryError`.
+Always use the raw image file (step 0 below) for binary-level analysis.
+
+---
+
+## Step 0 — Discover the environment (ALWAYS run first)
+
 ```bash
-# 1. Find the virtual disk file — ALWAYS assign to $VHD to avoid case-sensitivity errors
-#    NEVER retype the filename manually: Linux is case-sensitive (SYSTEM.vhd ≠ System.vhd)
-VHD=$(find '{evidence}' \( -iname '*.vhd' -o -iname '*.vmdk' -o -iname '*.dd' -o -iname '*.img' \) -type f 2>/dev/null | head -1)
+# Find the raw physical disk image.
+# EWF images are mounted and exposed as a file named 'ewf1'.
+# Raw images may have extensions: .dd, .img, .raw, .001
+DISK=$(find / -maxdepth 6 -name 'ewf1' -type f 2>/dev/null | head -1)
+[ -z "$DISK" ] && DISK=$(find / -maxdepth 6 \( -name '*.dd' -o -name '*.img' -o -name '*.raw' \) \
+    -not -path '*/proc/*' -not -path '*/sys/*' -type f 2>/dev/null | head -1)
+echo "Physical disk image: $DISK"
+
+# Find where the evidence partitions are mounted (for file-level access)
+mount | grep -iE 'loop|fuseblk|ntfs|ext[234]' | awk '{print NR". "$1" → "$3}'
+```
+
+Once you have `$DISK`, use it for all physical-disk operations below.
+
+---
+
+## A — Physical disk analysis
+
+Questions about "the physical disk": partition schema, disk GUID, partition GUIDs, cluster size.
+
+```bash
+# Partition schema and list
+# The FIRST LINE of mmls output names the schema: "GUID Partition Table (EFI)" = GPT, "DOS Partition Table" = MBR.
+# Data partitions have a numeric slot (000, 001 …); skip Meta and Unallocated rows.
+# 1st data partition = lowest numeric slot, 2nd = next, etc.
+mmls "$DISK"
+
+# Cluster size and volume name for a physical partition
+# Copy start= exactly from mmls output for the target partition, let bash do the arithmetic.
+start=<value_from_mmls>
+offset=$(( 10#$start ))        # strips leading zeros — MANDATORY (bare octal trap)
+fsstat -o "$offset" "$DISK" | grep -i 'volume name\|cluster size'
+# No -i flag needed: ewfmount/loopback exposes the raw image transparently to TSK
+```
+
+### Disk GUID and partition GUIDs (GPT format)
+
+**The two GUID types use different byte representations — do NOT mix them:**
+- **Disk GUID** → raw hex bytes as stored in the file (no field reordering).
+- **Partition GUIDs** → standard Windows UUID notation (bytes_le reordering of the first three fields).
+
+```bash
+python3 << 'EOF'
+import uuid
+
+# Replace $DISK with the actual path found in Step 0
+disk = "<path_found_in_step0>"
+
+with open(disk, 'rb') as f:
+
+    # Disk GUID — GPT header at LBA 1 (byte 512), GUID at offset 56 (16 bytes).
+    # Output: raw hex bytes as stored in the file.
+    f.seek(512)
+    gpt = f.read(512)
+    print('Disk GUID:', gpt[56:72].hex().upper())
+
+    # Partition GUIDs — entry array at LBA 2 (byte 1024), 128 bytes per entry.
+    # Unique GUID is at offset 16 within each entry.
+    # Output: UUID bytes_le (standard Windows GUID display format).
+    f.seek(1024)
+    for i in range(128):
+        entry = f.read(128)
+        if entry[:16] == b'\x00' * 16:   # all-zero type GUID = empty slot
+            break
+        guid = uuid.UUID(bytes_le=entry[16:32])
+        print(f'Partition {i+1}: {str(guid).upper().replace("-", "")}')
+EOF
+```
+
+---
+
+## B — Nested virtual disk analysis (VHD/VMDK inside evidence)
+
+```bash
+# 1. Find the virtual disk file inside the mounted evidence.
+#    Use the mount points found in Step 0 as the search root.
+#    ALWAYS assign to $VHD — never retype the filename (Linux is case-sensitive).
+EVIDENCE_ROOT="<mount_point_from_step0>"
+VHD=$(find "$EVIDENCE_ROOT" -type f \( -iname '*.vhd' -o -iname '*.vmdk' -o -iname '*.dd' -o -iname '*.img' \) 2>/dev/null | head -1)
 echo "$VHD"   # verify the exact path before proceeding
-# If the question names a specific file (e.g. "System.vhd"), search for it explicitly:
-#   VHD=$(find '{evidence}' -iname 'system.vhd' -type f 2>/dev/null | head -1)
+# For a named file (e.g. "System.vhd"):
+#   VHD=$(find "$EVIDENCE_ROOT" -iname 'system.vhd' -type f 2>/dev/null | head -1)
 
 # 2. Identify the image type
 file "$VHD"
 
-# 3. ALWAYS pipe mmls through awk — NEVER run plain mmls (raw output is too long and columns are confusing)
+# 3. List data partitions — pipe mmls through awk, NEVER run plain mmls
 #    Columns: $1=row, $2=SlotType(Meta/-------/00:NN), $3=Start, $4=End, $5=Length
-#    Filter: $2~/[0-9]/ keeps only data partitions (skips Meta and Unallocated rows)
+#    Filter: $2~/[0-9]/ keeps only data partitions
 mmls "$VHD" 2>/dev/null | awk 'NR>5 && $2~/[0-9]/{print $1, "start="$3, "len="$5}'
-#    Example output (Meta and Unallocated already excluded):
+#    Example output:
 #      004: start=0000000034 len=0000065536
 #      006: start=0000065664 len=0001331200
-#      007: start=0001396864 len=0001433600
-#    NOTE: if fsstat returns "Cannot determine file system type" for a row, skip it
-#          and continue to the next — it's a reserved area without a readable filesystem.
-#          Count only rows where fsstat SUCCEEDS as "first partition", "second partition", etc.
+#    If fsstat returns "Cannot determine file system type" for a row, skip it —
+#    it's a reserved area. Count only rows where fsstat SUCCEEDS as numbered partitions.
 
-# 4+5. ALWAYS use this exact shell variables pattern for EVERY fsstat call — NEVER compute offsets manually.
-#       $(( 10#$start )) is MANDATORY: leading zeros make bash treat the number as octal.
-#       Example: 0065664 as octal = 27060 (WRONG). $(( 10#0065664 )) = 65664 (correct).
-#       Copy start= and len= EXACTLY from step 3 output, let bash do ALL arithmetic.
-#       WARNING: NEVER compute capacity from fsstat's "Total Sector Range" or "Total Cluster Range"
-#                — those are filesystem-internal values, NOT partition capacity.
-#                The ONLY correct source for capacity is mmls len × 512.
-#       Example: step 3 shows  007: start=0001396864 len=0001433600
-start=0001396864
-len=0001433600
+# 4. Get volume name, cluster size, and capacity for a partition
+#    $(( 10#$start )) strips leading zeros — MANDATORY (leading zeros = octal in bash)
+#    NEVER compute capacity from fsstat totals — use mmls len × 512 only.
+start=0000065664
+len=0001331200
 offset=$(( 10#$start ))
 capacity=$(( 10#$len * 512 )); echo "Capacity: $capacity bytes"
 fsstat -i vhd -o "$offset" "$VHD" | grep -i 'volume name\|cluster size'
-# Repeat for EVERY data partition (006:, 007:, 008: ...) until Volume Name matches the target.
-# For .vmdk files use: fsstat -i vmdk -o "$offset" "$VHD"
+# For .vmdk files: fsstat -i vmdk -o "$offset" "$VHD"
 
-# CRITICAL — when searching for a partition by name (e.g. "J. Wilson"):
-# YOU MUST run fsstat on ALL data partitions before concluding the partition does not exist.
-# Do NOT stop after the first partition that does not match.
-# Pattern: check 006 → not a match → check 007 → not a match → check 008 → … → found!
-# Answering "not found" after checking only ONE partition is ALWAYS wrong.
+# CRITICAL — searching for a partition by name (e.g. "J. Wilson"):
+# Run fsstat on EVERY data partition. Never stop after the first mismatch.
+# Pattern: check 004 → no match → check 006 → no match → check 007 → … → found!
 ```
+
+---
 
 ## Key fields in mmls output
+
 ```
-DOS Partition Table
+GUID Partition Table (EFI)          ← schema on the FIRST line
 Offset Sector: 0
 Units are in 512-byte sectors
 
      Slot    Start        End          Length       Description
-00:  Meta    0000000000   0000000000   0000000001   Primary Table (#0)
-01:  -----   0000000000   0000002047   0000002048   Unallocated
-02:  00:00   0000002048   0001333247   0001331200   NTFS / exFAT (0x07)
+00:  Meta    0000000000   …            …             Safety Table
+01:  -----   …            …            …             Unallocated
+02:  Meta    …            …            …             GPT Header
+03:  Meta    …            …            …             Partition Table
+04:  000     0000000034   0000065569   0000065536    Microsoft reserved partition  ← 1st data partition
+06:  001     0000065664   0001736831   0001671168    Basic data partition           ← 2nd data partition
 ```
-- **Length** × 512 = capacity in bytes for that partition
-- Use **Start** as the `-o` offset for `fsstat` (decimal, not hex)
+- First line = partition schema ("GUID Partition Table" = GPT, "DOS Partition Table" = MBR)
+- **Length** × 512 = partition capacity in bytes
+- **Start** value → strip leading zeros with `$(( 10#$start ))` → pass as `-o` to `fsstat`
 
-## Getting the volume label
-```bash
-# Option A: fsstat with image type flag (shows FS Type, Volume Name, total sectors)
-fsstat -i vhd -o <start_sector> "$VHD" | grep -i 'volume name\|total range\|sector size'
+## C — Extracting a file from a VHD partition with icat
 
-# Option B: ntfslabel (faster, label only)
-# Requires mounting — use fsstat instead for read-only analysis
-```
-
-## Extracting disk GUID and partition GUIDs (GPT)
-
-The **disk GUID** lives in the GPT header (LBA 1 = byte offset 512 from disk start), at offset 56 (16 bytes, mixed-endian). The physical evidence disk is at `/forensics_ewf/ewf1`.
+**CRITICAL: `icat` takes an INODE NUMBER — NEVER a filename.**
+The filename must NOT appear in the `icat` command line. Passing a filename after the inode causes:
+  `Invalid inode address: Printers.htm` (the shell splits on spaces and passes words as extra args).
 
 ```bash
-# Disk GUID — physical evidence disk
-python3 -c "
-import uuid
-with open('/forensics_ewf/ewf1', 'rb') as f:
-    f.seek(512)
-    gpt = f.read(512)
-    print(str(uuid.UUID(bytes_le=gpt[56:72])).upper().replace('-',''))
-"
+# Step 1 — find the inode number with fls (filter by filename)
+offset=$(( 10#$start ))
+INODE=$(fls -i vhd -r -o "$offset" "$VHD" 2>/dev/null \
+        | grep -i 'Card Printers.htm' \
+        | awk '{print $2}' | tr -d ':')
+echo "Inode: $INODE"   # must be a plain number, e.g. 12345
 
-# Partition GUIDs — each GPT partition entry is 128 bytes starting at LBA 2 (byte 1024).
-# The partition's unique GUID is at offset 16 within each entry (16 bytes, mixed-endian).
-python3 -c "
-import uuid
-with open('/forensics_ewf/ewf1', 'rb') as f:
-    f.seek(1024)  # LBA 2 = partition entry array
-    for i in range(8):  # first 8 partitions
-        entry = f.read(128)
-        if entry[:16] == b'\x00'*16:
-            continue
-        guid = uuid.UUID(bytes_le=entry[16:32])
-        print(f'Partition {i+1}: {str(guid).upper().replace(\"-\",\"\")}')
-"
+# Step 2 — extract using ONLY the inode — no filename argument after it
+icat -i vhd -o "$offset" "$VHD" "$INODE" > /exports/target_file
+stat -c "%s" /exports/target_file   # verify non-zero size
+
+# Step 3 — hash if needed
+sha1sum /exports/target_file | awk '{print toupper($1)}'
+md5sum  /exports/target_file | awk '{print toupper($1)}'
+```
+
+WRONG commands that produce `Invalid inode address`:
+```bash
+# WRONG — filename after inode number
+icat -i vhd -o "$offset" "$VHD" 12345 Card Printers.htm
+
+# WRONG — filename instead of inode
+icat -i vhd -o "$offset" "$VHD" 'Card Printers.htm'
 ```
 
 ## Tips
-- NEVER retype the VHD/VMDK filename manually — always use `$VHD` assigned from `find` output. Linux is case-sensitive: `SYSTEM.vhd ≠ System.vhd`. Retyping causes "no such file" errors.
-- ALWAYS run `mmls` piped through `awk 'NR>5{print $1, "start="$3, "len="$5}'` — NEVER run plain `mmls` (raw output is too long and Start/End/Length columns are easy to confuse)
-- Always `find` the file first — never assume the path
-- Sector size is almost always 512 bytes; confirm with `mmls` header ("Units are in 512-byte sectors")
-- `mmls` may need `-t dos` or `-t gpt` if auto-detection fails
-- For `.vmdk` files, `mmls` may require `-i vmdk` flag
-- For `.vhd` files always pass `-i vhd` to `fsstat` — without it, TSK reads raw bytes and dynamic VHDs return wrong volume names
-- `fsstat -o` requires a DECIMAL offset. Use `$(( 10#<start> ))` to strip leading zeros — bash `printf '%d'` with a leading-zero string interprets as OCTAL.
-- NEVER compute the offset manually from the awk output — always assign `start=<value>` and let bash compute `offset=$(( 10#$start ))`. Example: `0065664` looks like 65664 but bash evaluates it as octal 27060 if you do arithmetic on it directly.
-- To identify a partition by name/label: run `fsstat` on EVERY data partition and check `Volume Name` — never guess by position. Never stop early: only after ALL partitions have been checked can you conclude a named partition is absent.
+- NEVER retype VHD/VMDK filenames — always use `$VHD` from `find`. Case matters: `SYSTEM.vhd ≠ System.vhd`
+- For `.vhd` files always pass `-i vhd` to `fsstat` — without it, TSK reads raw bytes and dynamic VHDs return garbage
+- `fsstat -o` requires a DECIMAL offset — use `$(( 10#<start> ))` to strip leading zeros
+- To identify a partition by name: run `fsstat` on EVERY data partition, check `Volume Name` — never stop early
+- Disk GUID (raw bytes) ≠ partition GUID (UUID bytes_le): the scripts above handle each format correctly

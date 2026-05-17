@@ -1,6 +1,6 @@
 SKILL: recycle_bin
 DESCRIPTION: Analyse the Windows Recycle Bin ($RECYCLE.BIN) to find deleted files, their original paths, deletion timestamps, and file sizes. Each deleted file has a $I metadata file and a $R content file.
-KEYWORDS: recycle bin, reciclagem, lixo, lixeira, deleted, apagado, eliminado, deletado, removido, removed, recycle, recycled, recyclebin, $recyclebin, $RECYCLE.BIN, $I, $R, ficheiros apagados, deleted files, recovery, recuperacao, apagar, delete, trash, lixeira do windows, ficheiro eliminado, foi apagado, foi eliminado, what was deleted, o que foi apagado, enviou para o lixo, mandou para o lixo, atirou para o lixo, sent to recycle, moved to trash, who deleted, quem apagou, user deleted, which files deleted, $I file size, $R file size, deleted file size
+KEYWORDS: recycle bin, deleted, removed, recycle, recycled, recyclebin, $recyclebin, $RECYCLE.BIN, $I, $R, deleted files, recovery, delete, trash, what was deleted, sent to recycle, moved to trash, who deleted, user deleted, which files deleted, $I file size, $R file size, deleted file size
 ---
 
 ## What is the Recycle Bin?

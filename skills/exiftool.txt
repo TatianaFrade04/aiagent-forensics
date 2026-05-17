@@ -1,6 +1,6 @@
 SKILL: exiftool
 DESCRIPTION: Read and analyze metadata from files (images, documents, PDFs, videos, audio)
-KEYWORDS: exiftool, metadata, metadados, EXIF, GPS, geolocation, geolocalizacao, coordinates, coordenadas, camera, photo, foto, fotografia, image, imagem, JPEG, JPG, PNG, PDF, document metadata, creation date, modification date, data criacao, data modificacao, author, autor, timestamp, IPTC, XMP, tags, properties, propriedades, origin, origem, location, localizacao, latitude, longitude
+KEYWORDS: exiftool, metadata, EXIF, GPS, geolocation, coordinates, camera, photo, JPEG, JPG, PNG, document metadata, creation date, modification date, author, IPTC, XMP, tags, properties, origin, location, latitude, longitude
 ---
 
 ## What is `exiftool`?

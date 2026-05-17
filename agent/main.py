@@ -35,6 +35,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain.agents import create_agent
 
 import shlex
+import json
+import urllib.request
 
 from .tools import run_in_sandbox, stop_container, start_container, EXPORTS_PATH
 from .skills import load_skills, select_skills, format_skills_context
@@ -53,12 +55,19 @@ def run_forensics_command(command: str) -> str:
     Run any bash command inside the forensic Linux container and get back stdout and stderr.
 
     FILESYSTEM LAYOUT:
-      /forensics/  - mounted forensic partitions (READ-ONLY evidence)
-      /exports/    - writable directory for saving output files
+      Raw disk image  - EWF images are mounted and exposed as a file named 'ewf1';
+                        find it with: find / -maxdepth 6 -name 'ewf1' -type f 2>/dev/null
+      Mounted partitions - evidence partitions are mounted as directories (READ-ONLY);
+                           find them with: mount | grep -iE 'loop|fuseblk|ntfs'
+      /exports/       - writable directory for saving output files
+
+    IMPORTANT: mounted partition directories are NOT disk image files.
+      Opening a directory as a binary file always fails with IsADirectoryError.
+      For raw disk analysis (GUIDs, schema, cluster size) use the raw image file found above.
 
     NOTES:
       - Paths with spaces MUST use single quotes
-      - /forensics is READ-ONLY — never redirect or write there
+      - Evidence partitions are READ-ONLY — never redirect or write there
     """
     return run_in_sandbox(command)
 
@@ -487,8 +496,18 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "         [ -n \"$result\" ] && echo \"FOUND in VHD offset=$offset: $result\"\n"
     "       done\n"
     "     fi\n"
-    "   If FOUND in VHD: extract with icat -i vhd -o <OFFSET> \"$VHD\" <INODE> > /exports/file\n"
-    "   then stat -c \"%s\" /exports/file\n"
+    "   If FOUND in VHD — extract the file with icat:\n"
+    "   CRITICAL: icat takes an INODE NUMBER, NOT a filename. The filename MUST NOT appear in the icat command.\n"
+    "   WRONG: icat -i vhd -o $offset \"$VHD\" 12345 Card Printers.htm   ← filename after inode = ERROR\n"
+    "   WRONG: icat -i vhd -o $offset \"$VHD\" 'Card Printers.htm'        ← filename instead of inode = ERROR\n"
+    "   RIGHT workflow — two steps:\n"
+    "     Step 1: get the inode number from fls output:\n"
+    "       INODE=$(fls -i vhd -r -o $offset \"$VHD\" 2>/dev/null | grep -i 'Card Printers.htm' | awk '{{print $2}}' | tr -d ':')\n"
+    "       echo \"Inode: $INODE\"   # verify it is a number, e.g. 12345\n"
+    "     Step 2: extract using ONLY the inode number — NO filename argument:\n"
+    "       icat -i vhd -o $offset \"$VHD\" \"$INODE\" > /exports/target_file\n"
+    "       stat -c \"%s\" /exports/target_file\n"
+    "   For SHA1/MD5 hash: sha1sum /exports/target_file | awk '{{print toupper($1)}}'\n"
     "\n"
     "19. WINDOWS APPLICATION LAST RUN TIME — use UserAssist in NTUSER.DAT, NOT Application.evtx.\n"
     "   Application.evtx is a BINARY file — grep/strings will NEVER find plain-text usernames or\n"
@@ -501,11 +520,19 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "   All entry names are ROT-13 encoded. Decode with: codecs.decode(name, 'rot13')\n"
     "   Examples: 'wlmail.exe' → ROT-13 → 'jyznvy.rkr'  |  'Windows Live Mail.lnk' → 'Jvaqbjf Yvir Znvy.yax'\n"
     "\n"
-    "   STEP 1 — Dump all UserAssist entries and decode ROT-13:\n"
-    "     python3 -c \"\n"
+    "   CRITICAL — python3 -c \"...\" BREAKS for multi-line scripts. ALWAYS use heredoc:\n"
+    "     WRONG: python3 -c \"import struct\\n...\"\n"
+    "     RIGHT: python3 << 'PYEOF'\\n...\\nPYEOF\n"
+    "\n"
+    "   STEP 1a — Check whether python-registry is available:\n"
+    "     python3 -c 'import Registry; print(\"Registry OK\")' 2>&1 || echo 'NOT AVAILABLE'\n"
+    "\n"
+    "   STEP 1b — If python-registry available, use heredoc (NEVER python3 -c for multi-line):\n"
+    "     python3 << 'PYEOF'\n"
     "     import Registry.Registry as reg, struct, codecs\n"
     "     from datetime import datetime, timedelta, timezone\n"
     "     h = reg.Registry('{evidence}/USERS/<username>/NTUSER.DAT')\n"
+    "     epoch = datetime(1601,1,1,tzinfo=timezone.utc)\n"
     "     for guid in ['{{CEBFF5CD-ACE2-4F4F-9178-9926F41749EA}}','{{F4E57C4B-2036-45F0-A9AB-443BCFE33D9F}}']:\n"
     "       try:\n"
     "         key = h.open('Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Explorer\\\\UserAssist\\\\'+guid+'\\\\Count')\n"
@@ -514,11 +541,28 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "           data = v.raw_data()\n"
     "           if len(data) >= 68:\n"
     "             ft = struct.unpack_from('<Q', data, 60)[0]\n"
-    "             dt = datetime(1601,1,1,tzinfo=timezone.utc)+timedelta(microseconds=ft//10) if ft else 'never'\n"
-    "           else: dt='no timestamp'\n"
+    "             dt = epoch + timedelta(microseconds=ft//10) if ft else 'never'\n"
+    "           else: dt = 'no timestamp'\n"
     "           print(guid[-8:], name, dt)\n"
     "       except Exception as e: print(guid[-8:], 'ERROR', e)\n"
-    "     \" 2>&1 | grep -i 'mail\\|browser\\|<appname>'\n"
+    "     PYEOF\n"
+    "\n"
+    "   STEP 1c — If python-registry NOT available, use jump lists FILETIME scan (stdlib only):\n"
+    "     python3 << 'PYEOF'\n"
+    "     import struct, datetime, glob, os\n"
+    "     epoch = datetime.datetime(1601, 1, 1, tzinfo=datetime.timezone.utc)\n"
+    "     pattern = '{evidence}/USERS/*/AppData/Roaming/Microsoft/Windows/Recent/AutomaticDestinations/*.automaticDestinations-ms'\n"
+    "     for jl in glob.glob(pattern):\n"
+    "       with open(jl, 'rb') as f: raw = f.read()\n"
+    "       appid = os.path.basename(jl).split('.')[0]\n"
+    "       results = []\n"
+    "       for i in range(0, len(raw) - 8, 4):\n"
+    "         ft = struct.unpack_from('<Q', raw, i)[0]\n"
+    "         if 0x01BF000000000000 < ft < 0x01D5000000000000:\n"
+    "           results.append(epoch + datetime.timedelta(microseconds=ft // 10))\n"
+    "       if results:\n"
+    "         print(appid, max(results).strftime('%a, %d %B %Y %H:%M:%S UTC'))\n"
+    "     PYEOF\n"
     "\n"
     "   STEP 2 — If no match in UserAssist, check LNK file access timestamps:\n"
     "     find '{evidence}/USERS/<username>/AppData/Roaming/Microsoft/Windows/Recent' \\\n"
@@ -630,6 +674,30 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def get_model_context(base_url: str, model: str, fallback: int = 32768) -> int:
+    """Query Ollama /api/show to get the model's actual native context window size."""
+    try:
+        req = urllib.request.Request(
+            f"{base_url}/api/show",
+            data=json.dumps({"model": model}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            info = json.loads(resp.read())
+        model_info = info.get("model_info", {})
+        for key in ("llama.context_length", "general.context_length", "context_length"):
+            if key in model_info:
+                return int(model_info[key])
+        params = info.get("parameters", "")
+        for line in params.splitlines():
+            if line.strip().startswith("num_ctx"):
+                return int(line.split()[-1])
+    except Exception:
+        pass
+    return fallback
+
+
 def main():
     args = parse_args()
     
@@ -674,8 +742,12 @@ def main():
         base_url=args.url,
         temperature=args.temp,
         num_ctx=args.ctx,
+        keep_alive=-1,
         reasoning=True,  # Always enabled for better user experience
     )
+    effective_ctx = get_model_context(args.url, args.model, fallback=args.ctx)
+    if effective_ctx != args.ctx:
+        print(f"[*] Native ctx : {effective_ctx} tokens (configured: {args.ctx} — Ollama uses native context)")
     agent = create_agent(model=llm, tools=TOOLS)
 
     system_prompt = build_system_prompt(evidence, workdir=os.getcwd(), allow_network=args.allow_network)
@@ -780,6 +852,7 @@ def main():
                 ))]
             return _llm_content(llm.invoke(prompt))
 
+        last_prompt_eval = 0
         agent_active = True
         try:
             while agent_active:
@@ -842,6 +915,11 @@ def main():
                                     ratio = last_usage["total_tokens"] / args.ctx
                                     if ratio >= 0.70:
                                         needs_compress = True
+
+                                meta = getattr(msg, "response_metadata", {}) or {}
+                                pec = meta.get("prompt_eval_count", 0)
+                                if pec:
+                                    last_prompt_eval = pec
 
                             elif isinstance(msg, ToolMessage):
                                 pending_tool_calls = max(0, pending_tool_calls - 1)
@@ -1023,6 +1101,36 @@ def main():
             print(f"\n[!] Error: {str(e)}\n")
             if conversation and isinstance(conversation[-1], HumanMessage):
                 conversation.pop()
+
+        # Cross-question context overflow detection (interactive mode)
+        if not args.limpar_apos_pergunta and last_prompt_eval > 0:
+            ctx_pct = last_prompt_eval / effective_ctx * 100
+            if ctx_pct >= 95:
+                print(f"\n{'─'*60}")
+                print(f"⚠️  Context window is {ctx_pct:.0f}% full ({last_prompt_eval:,}/{effective_ctx:,} tokens).")
+                print("    Auto-compressing conversation history to free up context...")
+                try:
+                    sum_resp = llm.invoke(conversation + [HumanMessage(content=(
+                        "Summarize ALL forensic findings from this investigation in 10-15 bullet points. "
+                        "Include: users found, key file paths and their content, registry findings, "
+                        "timestamps, suspicious items, and confirmed conclusions. "
+                        "Be specific — include exact values, paths, and dates. "
+                        "Do NOT call any tools. Do NOT include code blocks."
+                    ))])
+                    summary = _llm_content(sum_resp)
+                except Exception:
+                    summary = "(Auto-summary failed — key findings visible in conversation above.)"
+                conversation[:] = [
+                    conversation[0],
+                    AIMessage(content=f"[Conversation compressed — summary of prior investigation:]\n\n{summary}"),
+                ]
+                print("[*] Conversation history compressed. Context freed.")
+                print("    Type /clear to fully reset the conversation if responses seem degraded.")
+                print(f"{'─'*60}\n")
+            elif ctx_pct >= 75:
+                print(f"\n⚠️  Context window is {ctx_pct:.0f}% full "
+                      f"({last_prompt_eval:,}/{effective_ctx:,} tokens). "
+                      f"Type /clear to start a new conversation and avoid degraded responses.")
 
         # Limpar contexto após pergunta se flag ativada
         if args.limpar_apos_pergunta:

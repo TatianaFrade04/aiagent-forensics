@@ -169,8 +169,9 @@ def ingest_document(filepath: str, doc_id: str | None = None, original_filename:
     )
     chunks = splitter.split_documents(docs)
 
-    for chunk in chunks:
-        chunk.metadata.update({"doc_id": doc_id, "filename": canonical})
+    for i, chunk in enumerate(chunks):
+        page = chunk.metadata.get("page", chunk.metadata.get("page_number", i))
+        chunk.metadata.update({"doc_id": doc_id, "filename": canonical, "page": page})
 
     # ── Indexação ─────────────────────────────────────────────────────────────
     logger.info("Indexing %d chunks for document %r …", len(chunks), doc_id)
