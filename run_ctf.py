@@ -590,7 +590,11 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
     print(f" {evidence}")
 
     system_prompt = build_system_prompt(evidence)
-    all_skills = load_skills()
+
+    import agent.main as _agent_main
+    _agent_main._evidence_path = evidence
+    if not _agent_main._skills_cache:
+        _agent_main._skills_cache = load_skills()
 
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
     llm = ChatOllama(
@@ -611,18 +615,7 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
         if limpar_contexto:
             conversation = [SystemMessage(content=system_prompt)]
 
-        selected = select_skills(pergunta, all_skills, max_skills=2)
-        skills_context = format_skills_context(selected, evidence)
-        if selected and debug:
-            print(f"  [Skills: {', '.join(s.name for s in selected)}]")
-
-        conversation[0] = SystemMessage(
-            content=system_prompt + (
-                "\nMANDATORY FORENSIC PROCEDURES — copy these scripts EXACTLY into run_forensics_command when the task matches. Do NOT write your own commands when a procedure is provided:\n"
-                + skills_context + "\n"
-                if skills_context else ""
-            )
-        )
+        conversation[0] = SystemMessage(content=system_prompt)
         conversation.append(HumanMessage(content=pergunta))
 
         print(f"  A aguardar resposta...", end="", flush=True)

@@ -205,7 +205,38 @@ def query_rag_documents(query: str, top_k: int = 5, filename: str | None = None)
         return f"Error querying documents: {e}"
 
 
-TOOLS = [run_forensics_command, ingest_pdf_document, query_rag_documents]
+_skills_cache: list = []
+_evidence_path: str = ""
+
+
+@tool
+def get_forensic_procedure(task: str) -> str:
+    """
+    Get step-by-step forensic procedures and exact commands for a specific task.
+
+    Call this BEFORE running commands when you need guidance on HOW to perform
+    a forensic operation. Describe what you need to do, for example:
+      - "extract file from VHD partition and compute SHA1 hash"
+      - "get disk GUID and partition schema from physical disk"
+      - "read SAM registry hive for user account information and last login"
+      - "analyse prefetch files for application execution history"
+      - "search recycle bin for deleted files by user"
+      - "get cluster size and volume label from a partition"
+      - "read Windows event log for system uptime or shutdown times"
+
+    Returns exact commands and procedures to follow. Only call this when you
+    genuinely need procedural guidance — do not call it for every question.
+    """
+    global _skills_cache, _evidence_path
+    if not _skills_cache:
+        _skills_cache = load_skills()
+    selected = select_skills(task, _skills_cache, max_skills=2, min_score=0.10)
+    if not selected:
+        return "No specific procedure found for this task. Use standard forensic tools in the container."
+    return format_skills_context(selected, _evidence_path or "{evidence}")
+
+
+TOOLS = [run_forensics_command, ingest_pdf_document, query_rag_documents, get_forensic_procedure]
 
 # ─── System prompt ────────────────────────────────────────────────────────────
 
@@ -305,7 +336,11 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "   Only report failure after at least TWO distinct approaches have been tried and both failed.\n"
     "   If a registry path fails, try the EVENT LOG. If a tool is missing, try an alternative tool.\n"
     "   NEVER repeat an identical failing command — always change something.\n"
-    "8. MANDATORY TOOL CALL — you MUST call run_forensics_command before answering ANY question.\n"
+    "8. FORENSIC PROCEDURES — when you need guidance on HOW to perform a specific forensic task\n"
+    "   (e.g. extract a file from a VHD, read a disk GUID, parse a registry hive),\n"
+    "   call get_forensic_procedure(task) FIRST to get exact commands.\n"
+    "   Only call it when you genuinely need procedural guidance, not for every question.\n"
+    "8b. MANDATORY TOOL CALL — you MUST call run_forensics_command before answering ANY question.\n"
     "   Answering without first calling the tool is FORBIDDEN, even if you think you know the answer.\n"
     "   Every new question requires a NEW tool call — no exceptions.\n"
     "   NEVER answer from memory or from results seen earlier in this conversation.\n"
@@ -737,8 +772,10 @@ def main():
         evidence = auto_detect_evidence()
         print(f"[*] Evidence : {evidence} (auto-detected)")
 
-    all_skills = load_skills()
-    print(f"[*] Skills loaded: {len(all_skills)} ({', '.join(s.name for s in all_skills)})")
+    global _evidence_path, _skills_cache
+    _evidence_path = evidence
+    _skills_cache = load_skills()
+    print(f"[*] Skills loaded: {len(_skills_cache)} ({', '.join(s.name for s in _skills_cache)})")
 
     from rag.indexer import clear_collection, list_indexed_documents
     indexed = list_indexed_documents()
@@ -794,19 +831,7 @@ def main():
             print(f"[*] RAG: collection cleared ({n} chunks removed).\n")
             continue
 
-        # Skills
-        selected = select_skills(user_input, all_skills, max_skills=2)
-        skills_context = format_skills_context(selected, evidence)
-        if selected:
-            print(f"[*] Skills selected: {', '.join(s.name for s in selected)}")
-
-        conversation[0] = SystemMessage(
-            content=system_prompt + (
-                "\nMANDATORY FORENSIC PROCEDURES — copy these scripts EXACTLY into run_forensics_command when the task matches. Do NOT write your own commands when a procedure is provided:\n"
-                + skills_context + "\n"
-                if skills_context else ""
-            )
-        )
+        conversation[0] = SystemMessage(content=system_prompt)
         # Detect non-English input and prepend a language reminder
         _ascii_ratio = sum(c.isascii() for c in user_input) / max(len(user_input), 1)
         _looks_non_english = _ascii_ratio < 0.95 or any(
