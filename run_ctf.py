@@ -171,7 +171,16 @@ if hasattr(signal, "SIGHUP"):
 
 # ─── Timeout por pergunta ─────────────────────────────────────────────────────
 
-TIMEOUT_PER_QUESTION = 600  # segundos — ajusta com --timeout
+TIMEOUT_PER_QUESTION = 600  # seconds — override with --timeout
+
+# Questions that require slow operations (icat file extraction, binary disk reads,
+# jump list parsing) get extra time on top of the base timeout.
+TIMEOUT_EXTRA: dict[str, int] = {
+    "Q4":  300,  # disk GUID — binary GPT header read
+    "Q11": 300,  # partition GUID — binary GPT entry array read
+    "Q22": 600,  # SHA1 of Card Printers.htm — icat extraction + hash
+    "Q24": 600,  # Windows Mail last run — jump list parsing
+}
 
 
 class _QuestionTimeout(Exception):
@@ -626,10 +635,11 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
         conversation[0] = SystemMessage(content=system_prompt)
         conversation.append(HumanMessage(content=pergunta))
 
+        q_timeout = timeout_s + TIMEOUT_EXTRA.get(id_q, 0)
         print(f"  Waiting for response...", end="", flush=True)
         inicio = time.time()
 
-        new_messages = _invocar_agente(agent, conversation, debug=debug, id_q=id_q, timeout_s=timeout_s)
+        new_messages = _invocar_agente(agent, conversation, debug=debug, id_q=id_q, timeout_s=q_timeout)
         conversation.extend(new_messages)
 
         tempo = time.time() - inicio
