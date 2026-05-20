@@ -541,8 +541,8 @@ def _invocar_agente(agent, conversation: list, debug: bool = False, id_q: str = 
                             out = msg.content[:300] if isinstance(msg.content, str) else str(msg.content)[:300]
                             print(f"  [ToolMessage] {out!r}")
     except _QuestionTimeout:
-        print(f"\n  [!] [{id_q}] Timeout após {timeout_s}s — pergunta marcada como errada.")
-        _logger.warning("[%s] timeout após %ds — pergunta sem resposta.", id_q, timeout_s)
+        print(f"\n  [!] [{id_q}] Timeout after {timeout_s}s — question marked as wrong.")
+        _logger.warning("[%s] timeout after %ds — question unanswered.", id_q, timeout_s)
     except Exception as e:
         err_str = str(e).lower()
         is_connect_err = (
@@ -554,15 +554,15 @@ def _invocar_agente(agent, conversation: list, debug: bool = False, id_q: str = 
         )
         if is_connect_err and not new_messages:
             # Ollama caiu — espera até 120s e tenta uma vez mais
-            print(f"\n  [!] [{id_q}] Ollama inacessível — a aguardar até 120s e a tentar de novo...")
-            _logger.warning("[%s] ConnectError — a aguardar Ollama...", id_q)
+            print(f"\n  [!] [{id_q}] Ollama unreachable — waiting up to 120s and retrying...")
+            _logger.warning("[%s] ConnectError — waiting for Ollama...", id_q)
             signal.alarm(0)
             for wait in [10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10]:
                 time.sleep(wait)
                 if _ollama_online(ollama_url):
                     break
             else:
-                _logger.error("[%s] Ollama não voltou online após 120s.", id_q)
+                _logger.error("[%s] Ollama did not come back online after 120s.", id_q)
                 signal.signal(signal.SIGALRM, old_handler)
                 return new_messages
             print(f"  [*] [{id_q}] Ollama online — a reintentar pergunta...")
@@ -570,7 +570,7 @@ def _invocar_agente(agent, conversation: list, debug: bool = False, id_q: str = 
             return _invocar_agente(agent, conversation, debug=debug, id_q=id_q + "(retry)", timeout_s=timeout_s)
         tb = traceback.format_exc()
         print(f"\n  [!] Erro no agente: {e}")
-        _logger.error("Excepção em _invocar_agente (msgs recolhidas: %d):\n%s", len(new_messages), tb)
+        _logger.error("Exception in _invocar_agente (msgs collected: %d):\n%s", len(new_messages), tb)
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, old_handler)
@@ -578,22 +578,22 @@ def _invocar_agente(agent, conversation: list, debug: bool = False, id_q: str = 
 
 
 def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, run_ts: str = "", limpar_contexto: bool = False, pasta: str = "logs_ctf_sem_limpeza_1505_limpeza", timeout_s: int = TIMEOUT_PER_QUESTION) -> dict:
-    """Inicia o agente directamente e envia todas as perguntas CTF em sequência."""
+    """Runs the agent directly and sends all CTF questions in sequence."""
     print(f"\n{'='*60}")
-    print(f"  MODELO: {modelo}  |  CTX: {ctx}  |  SESSÃO: {sessao}/{SESSOES_DEFAULT}")
-    modo_str = "contexto limpo entre perguntas" if limpar_contexto else "contexto normal"
-    print(f"  MODO: {modo_str}")
+    print(f"  MODEL: {modelo}  |  CTX: {ctx}  |  SESSION: {sessao}/{SESSOES_DEFAULT}")
+    modo_str = "clean context between questions" if limpar_contexto else "accumulated context"
+    print(f"  MODE: {modo_str}")
     print(f"{'='*60}")
 
     timestamp_inicio = datetime.now().isoformat()
     t_wall_inicio = time.time()
     resultados = []
 
-    print("  A iniciar container...", end="", flush=True)
+    print("  Starting container...", end="", flush=True)
     start_container()
     print(" OK")
 
-    print("  A detectar partição de evidência...", end="", flush=True)
+    print("  Detecting evidence partition...", end="", flush=True)
     evidence = auto_detect_evidence()
     print(f" {evidence}")
 
@@ -626,7 +626,7 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
         conversation[0] = SystemMessage(content=system_prompt)
         conversation.append(HumanMessage(content=pergunta))
 
-        print(f"  A aguardar resposta...", end="", flush=True)
+        print(f"  Waiting for response...", end="", flush=True)
         inicio = time.time()
 
         new_messages = _invocar_agente(agent, conversation, debug=debug, id_q=id_q, timeout_s=timeout_s)
@@ -642,7 +642,7 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
         content = _llm_content(answer) if answer else ""
 
         if not new_messages:
-            _logger.error("[%s] agente devolveu 0 mensagens — possível crash silencioso.", id_q)
+            _logger.error("[%s] agent returned 0 messages — possible silent crash.", id_q)
         elif not content.strip():
             _logger.warning("[%s] resposta final vazia (tool_calls=%d, msgs=%d).",
                             id_q,
@@ -667,7 +667,7 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
                     content = retry_content
                     resposta_extraida = extrair_resposta_modelo(content, tipo)
                     correto = avaliar_resposta(content, correta, tipo)
-                    _logger.info("[%s] retry formatação — extraído: %r", id_q, resposta_extraida)
+                    _logger.info("[%s] format retry — extracted: %r", id_q, resposta_extraida)
             except Exception:
                 pass
 
@@ -677,7 +677,7 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
         eta = int(restantes * tempo_medio) if resultados else 0
 
         status = "✅" if correto else "❌"
-        print(f" {tempo:.1f}s  |  {status} (extraído: '{resposta_extraida}', correcto: '{correta}')  |  ETA: ~{eta}s")
+        print(f" {tempo:.1f}s  |  {status} (extracted: '{resposta_extraida}', correct: '{correta}')  |  ETA: ~{eta}s")
 
         resultados.append({
             "id": id_q,
@@ -704,7 +704,7 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
             if last_prompt_tokens > 0:
                 ctx_pct = last_prompt_tokens / ctx * 100
                 if ctx_pct >= 95:
-                    print(f"\n  ⚠  Contexto {ctx_pct:.0f}% cheio ({last_prompt_tokens:,}/{ctx:,} tokens) — a comprimir...")
+                    print(f"\n  ⚠  Context {ctx_pct:.0f}% full ({last_prompt_tokens:,}/{ctx:,} tokens) — compressing...")
                     try:
                         sum_resp = llm.invoke(conversation + [HumanMessage(content=(
                             "Summarize ALL forensic findings from this investigation in 10-15 bullet points. "
@@ -720,9 +720,9 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
                         conversation[0],
                         AIMessage(content=f"[Conversation compressed — summary of prior investigation:]\n\n{summary}"),
                     ]
-                    print(f"  Conversa comprimida. Contexto libertado.")
+                    print(f"  Conversation compressed. Context freed.")
                 elif ctx_pct >= 75:
-                    print(f"\n  ⚠  Contexto {ctx_pct:.0f}% cheio ({last_prompt_tokens:,}/{ctx:,} tokens).")
+                    print(f"\n  ⚠  Context {ctx_pct:.0f}% full ({last_prompt_tokens:,}/{ctx:,} tokens).")
 
     _cleanup_container()
     res = _resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto)
@@ -757,7 +757,7 @@ def _resumo(modelo, sessao, timestamp_inicio, resultados, ctx: int = 0, limpar_c
 # ─── Helpers de apresentação ──────────────────────────────────────────────────
 
 def _imprimir_tabela_contextos(modelos: list, ctx_manual: int | None):
-    print(f"   {'Modelo':<22} {'Contexto (tokens)':>18}  Fonte")
+    print(f"   {'Model':<22} {'Context (tokens)':>18}  Source")
     print(f"   {'-'*22} {'-'*18}  {'-'*7}")
     for m in modelos:
         if ctx_manual:
@@ -765,7 +765,7 @@ def _imprimir_tabela_contextos(modelos: list, ctx_manual: int | None):
             fonte = "manual"
         else:
             ctx = MODEL_CTX_12GB.get(m, 32768)
-            fonte = "tabela" if m in MODEL_CTX_12GB else "default"
+            fonte = "table" if m in MODEL_CTX_12GB else "default"
         print(f"   {m:<22} {ctx:>18,}  {fonte}")
     print()
 
@@ -785,47 +785,52 @@ def _formatar_duracao(seg: float) -> str:
 
 def parse_args():
     p = argparse.ArgumentParser(description="CTF scoring — AIAgent@forensics")
-    p.add_argument("--modelos", nargs="+", default=MODELOS_DEFAULT)
-    p.add_argument("--sessoes", type=int, default=SESSOES_DEFAULT)
-    p.add_argument("--pasta", default="logs_ctf_sem_limpeza_1505_limpeza")
-    p.add_argument("--debug", action="store_true")
-    p.add_argument("--apenas-modelo", metavar="MODELO")
-    p.add_argument("--ctx", type=int, default=None,
-                   help="Contexto em tokens (default: auto-detectado por modelo para 12 GB VRAM)")
-    p.add_argument("--limpar-contexto", action="store_true", default=False,
-                   help="Limpa o contexto da conversa entre perguntas (cada pergunta é independente)")
-    p.add_argument("--timeout", type=int, default=TIMEOUT_PER_QUESTION,
-                   help=f"Timeout por pergunta em segundos (default: {TIMEOUT_PER_QUESTION})")
+    p.add_argument("--models",         nargs="+", default=MODELOS_DEFAULT,
+                   help="Models to evaluate (default: MODELOS_DEFAULT)")
+    p.add_argument("--sessions",       type=int, default=SESSOES_DEFAULT,
+                   help=f"Number of sessions per model (default: {SESSOES_DEFAULT})")
+    p.add_argument("--output-dir",     default="logs_ctf_sem_limpeza_1505_limpeza",
+                   help="Output directory for logs (default: logs_ctf_sem_limpeza_1505_limpeza)")
+    p.add_argument("--debug",          action="store_true",
+                   help="Show raw AIMessage fields for inspection")
+    p.add_argument("--only-model",     metavar="MODEL",
+                   help="Run only this model (overrides --models)")
+    p.add_argument("--ctx",            type=int, default=None,
+                   help="Context size in tokens (default: auto-detected per model for 12 GB VRAM)")
+    p.add_argument("--clear-context",  action="store_true", default=False,
+                   help="Clear conversation context between questions (each question is independent)")
+    p.add_argument("--timeout",        type=int, default=TIMEOUT_PER_QUESTION,
+                   help=f"Timeout per question in seconds (default: {TIMEOUT_PER_QUESTION})")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
-    modelos = [args.apenas_modelo] if args.apenas_modelo else args.modelos
-    sessoes = args.sessoes
+    modelos = [args.only_model] if args.only_model else args.models
+    sessoes = args.sessions
 
     total = len(modelos) * sessoes
-    modo_label = "contexto limpo entre perguntas" if args.limpar_contexto else "contexto normal"
+    modo_label = "clean context between questions" if args.clear_context else "accumulated context"
     print(f"\n🔬 CTF Scoring — AIAgent@forensics")
-    print(f"   Modo     : {modo_label}")
-    print(f"   Sessões  : {sessoes} por modelo")
-    print(f"   Perguntas: {len(PERGUNTAS_CTF)} (com ground truth)")
-    print(f"   Total    : {total} sessões\n")
-    print(f"   Modelos e contextos máximos (12 GB VRAM):")
+    print(f"   Mode     : {modo_label}")
+    print(f"   Sessions : {sessoes} per model")
+    print(f"   Questions: {len(PERGUNTAS_CTF)} (with ground truth)")
+    print(f"   Total    : {total} sessions\n")
+    print(f"   Models and max context (12 GB VRAM):")
     _imprimir_tabela_contextos(modelos, args.ctx)
 
-    print("  Limpando container Docker residual e loop devices órfãos...")
+    print("  Cleaning up residual Docker container and orphan loop devices...")
     subprocess.run(["docker", "rm", "-f", "forensics"], capture_output=True, text=True)
     _cleanup_orphan_loops()
     print("  OK\n")
 
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
     if ollama_url != "http://localhost:11434" and not _ollama_online(ollama_url, timeout=3):
-        print(f"  [!] {ollama_url} inacessível — a usar http://localhost:11434")
+        print(f"  [!] {ollama_url} unreachable — falling back to http://localhost:11434")
         ollama_url = "http://localhost:11434"
         os.environ["OLLAMA_URL"] = ollama_url
 
-    print("  A descarregar modelos Ollama residuais...", end="", flush=True)
+    print("  Unloading residual Ollama models...", end="", flush=True)
     _unload_all_models(ollama_url)
     print(" OK")
 
@@ -842,7 +847,7 @@ def main():
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         _llm_warm = ChatOllama(model=modelo, num_ctx=ctx, keep_alive=-1,
                                reasoning=suporta_thinking(modelo), base_url=ollama_url)
-        print(f"\n  A carregar {modelo} (ctx={ctx})...", end="", flush=True)
+        print(f"\n  Loading {modelo} (ctx={ctx})...", end="", flush=True)
         for _pw in range(24):  # até 240s
             try:
                 _llm_warm.invoke([HumanMessage(content="ok")])
@@ -850,15 +855,15 @@ def main():
                 break
             except Exception:
                 if _pw == 0:
-                    print(" aguardar...", end="", flush=True)
+                    print(" waiting...", end="", flush=True)
                 time.sleep(10)
         else:
-            print(" FALHOU — a continuar na mesma")
+            print(" FAILED — continuing anyway")
 
         for sessao in range(1, sessoes + 1):
             try:
-                dados = correr_sessao_ctf(modelo, sessao, ctx=ctx, debug=args.debug, run_ts=run_ts, limpar_contexto=args.limpar_contexto, pasta=args.pasta, timeout_s=args.timeout)
-                guardar_log(dados, pasta=args.pasta, run_ts=run_ts)
+                dados = correr_sessao_ctf(modelo, sessao, ctx=ctx, debug=args.debug, run_ts=run_ts, limpar_contexto=args.clear_context, pasta=args.output_dir, timeout_s=args.timeout)
+                guardar_log(dados, pasta=args.output_dir, run_ts=run_ts)
                 todos_resultados.append(dados)
 
                 dur_sessao = dados.get("duracao_wall_segundos", 0.0)
@@ -869,30 +874,30 @@ def main():
                 restantes = total - sessoes_concluidas
                 if restantes > 0:
                     media = sum(tempos_sessoes) / len(tempos_sessoes)
-                    eta_str = f"  |  ETA restante: ~{_formatar_duracao(restantes * media)}"
+                    eta_str = f"  |  ETA remaining: ~{_formatar_duracao(restantes * media)}"
                 else:
-                    eta_str = "  |  Última sessão concluída"
-                print(f"\n  📊 {modelo} sessão {sessao}: {r['corretas']}/{r['total_perguntas']} ({r['score_percentagem']}%)  |  duração: {_formatar_duracao(dur_sessao)}{eta_str}")
+                    eta_str = "  |  Last session done"
+                print(f"\n  📊 {modelo} session {sessao}: {r['corretas']}/{r['total_perguntas']} ({r['score_percentagem']}%)  |  duration: {_formatar_duracao(dur_sessao)}{eta_str}")
 
             except KeyboardInterrupt:
-                print("\n[!] Interrompido.")
+                print("\n[!] Interrupted.")
                 sys.exit(0)
             except Exception as e:
-                print(f"\n[ERRO] {modelo} sessão {sessao}: {e}")
+                print(f"\n[ERROR] {modelo} session {sessao}: {e}")
                 continue
 
     duracao = round(time.time() - inicio_global, 1)
     print(f"\n{'='*90}")
-    print(f"  RESULTADOS FINAIS")
+    print(f"  FINAL RESULTS")
     print(f"{'='*90}")
-    print(f"  {'Modelo':<20} {'Contexto':>10} {'Sessão':>7} {'Score':>8} {'Corretas':>10} {'Duração sessão':>16} {'T.médio/Q':>11}")
+    print(f"  {'Model':<20} {'Context':>10} {'Session':>7} {'Score':>8} {'Correct':>10} {'Session duration':>16} {'Avg/Q':>11}")
     print(f"  {'-'*86}")
     for d in todos_resultados:
         r = d["resumo"]
         ctx_str = f"{d.get('ctx', 0):,}"
         dur = _formatar_duracao(d.get("duracao_wall_segundos", r["tempo_total_segundos"]))
         print(f"  {d['modelo']:<20} {ctx_str:>10} {d['sessao']:>7} {r['score_percentagem']:>7}%  {r['corretas']:>4}/{r['total_perguntas']:<4}  {dur:>14}  {r['tempo_medio_segundos']:>8.1f}s")
-    print(f"\n✅ Concluído em {_formatar_duracao(duracao)} ({duracao}s)  |  Logs em: {args.pasta}/\n")
+    print(f"\n✅ Done in {_formatar_duracao(duracao)} ({duracao}s)  |  Logs: {args.output_dir}/\n")
 
 
 if __name__ == "__main__":

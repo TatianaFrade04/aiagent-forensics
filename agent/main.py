@@ -704,8 +704,8 @@ def parse_args() -> argparse.Namespace:
                         help="Monta a directoria de evidência directamente em /forensics (sem imagem E01/DD)")
     parser.add_argument("--allow-network", dest="allow_network", action="store_true", default=False,
                         help="Activa acesso à internet no container (para sudo apt-get install)")
-    parser.add_argument("--limpar-apos-pergunta", dest="limpar_apos_pergunta", action="store_true", default=False,
-                        help="Limpa o contexto automaticamente após cada pergunta (modo teste com contexto limpo)")
+    parser.add_argument("--clear-after-question", dest="limpar_apos_pergunta", action="store_true", default=False,
+                        help="Clear context automatically after each question (test mode with clean context)")
     return parser.parse_args()
 
 
