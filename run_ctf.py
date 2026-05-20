@@ -184,12 +184,12 @@ def _sigalrm_handler(signum, frame):
 # ─── Modelos a testar ─────────────────────────────────────────────────────────
 
 MODELOS_DEFAULT = [
-    #"gemma4:e4b",
-    #"gemma4:26b",
     "qwen3.5:4b",
+    "gemma4:e4b",
+    "gemma4:26b"
 ]
 
-SESSOES_DEFAULT = 1
+SESSOES_DEFAULT = 3
 
 # Contexto máximo seguro por modelo para 12 GB VRAM (Q4 quantization)
 # Pesos do modelo + KV cache não devem exceder ~11.5 GB (margem de segurança)
@@ -223,132 +223,132 @@ def suporta_thinking(modelo: str) -> bool:
 # Para verdadeiro/falso é "true" ou "false"
 
 PERGUNTAS_CTF = [
-    # (
-    #     "Q1",
-    #     'What is the destination time zone offset in the first Received header of the email file 447018D5-00000006.eml? Choose from: a) +04:00  b) -07:00  c) -08:00  d) -05:00  e) -09:00. Reply with only the letter.',
-    #     "c",
-    #     "mc",
-    # ),
-    # (
-    #     "Q2",
-    #     'True or False: The total capacity in bytes of the "J. Wilson" partition in System.vhd is 734,003,200. Reply with only "true" or "false".',
-    #     "true",
-    #     "tf",
-    # ),
-    # (
-    #     "Q3",
-    #     'What was the date and time the email "447018D5-00000006.eml" received by Jimmy Wilson was originally sent? Choose from: a) Sun, 16 February 2014 10:55:09 -05:00  b) Sun, 16 February 2014 07:55:09 -05:00  c) Sun, 16 February 2014 12:55:09 -05:00  d) Sun, 16 February 2014 11:55:09 -05:00  e) Sun, 16 February 2014 13:55:09 -05:00. Reply with only the letter.',
-    #     "c",
-    #     "mc",
-    # ),
-    # (
-    #     "Q4",
-    #     'The disk GUID (in hex) of the physical disk is: 6FAE8D386C441743AE3298C4BDE04830. Reply with only "true" or "false".',
-    #     "true",
-    #     "tf",
-    # ),
-    # (
-    #     "Q5",
-    #     'What is the cluster size in bytes within the second partition of the physical disk? Reply with only "true" or "false".',
-    #     "false",
-    #     "tf",
-    # ),
-    # (
-    #     "Q6",
-    #     'True or False: On February 20, 2014 at 17:02:35 UTC, the system uptime in seconds was 9,634. Reply with only "true" or "false".',
-    #     "true",
-    #     "tf",
-    # ),
-    # (
-    #     "Q7",
-    #     'True or False: The MD5 hash value of the pdf.pdf file is C1F95108A34228535A9262085E784D7C3E27FC68. Reply with only "true" or "false".',
-    #     "false",
-    #     "tf",
-    # ),
-    # (
-    #     "Q8",
-    #     'True or False: The user account Jimmy Wilson has his logon password enabled and the password hint is "safeone". Reply with only "true" or "false".',
-    #     "true",
-    #     "tf",
-    # ),
-    # (
-    #     "Q9",
-    #     'What is the partitioning format (Schema) of the physical disk? Choose from: a) None of the other answers are correct  b) GPT  c) The Physical disk is not partitioned  d) MBE. Reply with only the letter. ',
-    #     "b",
-    #     "mc",
-    # ),
-    # (
-    #     "Q10",
-    #     'True or False: The final destination IP address for the email "447018D5-00000006.eml" received by Jimmy Wilson is 10.221.48.196. Reply with only "true" or "false".',
-    #     "true",
-    #     "tf",
-    # ),
-    # (
-    #     "Q11",
-    #     'The 2nd partitions unique GUID (in hex) of the physical disk is: 423FDC8AA701EE46AF5A70C06738E819. Reply with only "true" or "false".',
-    #     "false",
-    #     "tf",
-    # ),
-    # (
-    #     "Q12",
-    #     "What is the logical size in bytes (decimal) of the pdf.pdf file? Choose from: a) 444,332  b) 433,994  c) 395,232  d) 253,283. Reply with only the letter.",
-    #     "b",
-    #     "mc",
-    # ),
-    # (
-    #     "Q13",
-    #     'True or False: The user account BillyBob sent the following files to the $recyclebin: "New Price List.txt" and "New Price List Encoded". Reply with only "true" or "false".',
-    #     "true",
-    #     "tf",
-    # ),
-    # (
-    #     "Q14",
-    #     "What is the logical file size in bytes (decimal) of the PLEAS.txt file? Choose from: a) 110,592  b) 122,336  c) 122,880  d) 108,227. Reply with only the letter.",
-    #     "b",
-    #     "mc",
-    # ),
-    # (
-    #     "Q15",
-    #     "What is the full name of the user that has the RID number 0x3EB? Choose from: a) Administrator  b) Betty Boop  c) Joe T. Nameless  d) BillyBob  e) Guest. Reply with only the letter.",
-    #     "c",
-    #     "mc",
-    # ),
-    # (
-    #     "Q16",
-    #     'When was the last login date and time for the user "Jimmy Wilson"? Choose from: a) February 18, 2014 12:38:16 UTC  b) January 19, 2014 06:22:12 UTC  c) March 03, 2014 11:11:11 UTC  d) None of these times are correct  e) February 19, 2014 13:30:58 UTC  f) April 01, 2014 00:00:01 UTC  g) February 17, 2014 17:38:22 UTC. Reply with only the letter.',
-    #     "d",
-    #     "mc",
-    # ),
-    # (
-    #     "Q17",
-    #     'True or False: jose.Badguy@hushmail.com and robert.ripoff@gmx.com sent emails to the user Jimmy Wilson. Reply with only "true" or "false".',
-    #     "true",
-    #     "tf",
-    # ),
-    # (
-    #     "Q18",
-    #     "What program did the user Jimmy Wilson have set to run when he logged on to the computer? Choose from: a) None of the other answers are correct  b) Notepad.exe  c) StinkyNot.exe  d) MSAccess.exe  e) MSWord.exe. Reply with only the letter.",
-    #     "c",
-    #     "mc",
-    # ),
-    # (
-    #     "Q19",
-    #     'True or False: The SHA1 hash value for the AISB08.pdf file is BDEBF09E8B2D404D1C483C3EBFB8AD37C780D909. Reply with only "true" or "false".',
-    #     "true",
-    #     "tf",
-    # ),
-    # (
-    #     "Q20",
-    #     "What encryption programs were used on this computer? Choose from: a) Veracrypt/BitLocker  b) BitLocker/Veracrypt  c) File Vault/Truecrypt  d) BCTextEncoder/Veracrypt  e) No encryption programs were used  f) Truecrypt/BCTextEncoder. Reply with only the letter, read all options before reply.",
-    #     "f",
-    #     "mc",
-    # ),
-    (
-        "Q22",
-        'True or False: The SHA1 hash value for the Card Printers.htm file is F6CF04DB3D1BA828E375BBFE988876CE06164126. Reply with only "true" or "false".',
-        "true",
-        "tf",
-    ),
+     (
+         "Q1",
+         'What is the destination time zone offset in the first Received header of the email file 447018D5-00000006.eml? Choose from: a) +04:00  b) -07:00  c) -08:00  d) -05:00  e) -09:00. Reply with only the letter.',
+         "c",
+         "mc",
+     ),
+     (
+         "Q2",
+         'True or False: The total capacity in bytes of the "J. Wilson" partition in System.vhd is 734,003,200. Reply with only "true" or "false".',
+         "true",
+         "tf",
+     ),
+     (
+         "Q3",
+         'What was the date and time the email "447018D5-00000006.eml" received by Jimmy Wilson was originally sent? Choose from: a) Sun, 16 February 2014 10:55:09 -05:00  b) Sun, 16 February 2014 07:55:09 -05:00  c) Sun, 16 February 2014 12:55:09 -05:00  d) Sun, 16 February 2014 11:55:09 -05:00  e) Sun, 16 February 2014 13:55:09 -05:00. Reply with only the letter.',
+         "c",
+         "mc",
+     ),
+     (
+         "Q4",
+          'The disk GUID (in hex) of the physical disk is: 6FAE8D386C441743AE3298C4BDE04830. Reply with only "true" or "false".',
+          "true",
+          "tf",
+     ),
+      (
+          "Q5",
+          'True or False: The cluster size in bytes within the second partition of the physical disk is 512. Reply with only "true" or "false".',
+          "false",
+          "tf",
+      ),
+      (
+          "Q6",
+         'True or False: On February 20, 2014 at 17:02:35 UTC, the system uptime in seconds was 9,634. Reply with only "true" or "false".',
+         "true",
+         "tf",
+     ),
+     (
+         "Q7",
+         'True or False: The MD5 hash value of the pdf.pdf file is C1F95108A34228535A9262085E784D7C3E27FC68. Reply with only "true" or "false".',
+         "false",
+         "tf",
+     ),
+     (
+         "Q8",
+         'True or False: The user account Jimmy Wilson has his logon password enabled and the password hint is "safeone". Reply with only "true" or "false".',
+         "true",
+         "tf",
+     ),
+     (
+         "Q9",
+         'What is the partitioning format (Schema) of the physical disk? Choose from: a) None of the other answers are correct  b) GPT  c) The Physical disk is not partitioned  d) MBE. Reply with only the letter. ',
+         "b",
+         "mc",
+     ),
+     (
+         "Q10",
+         'True or False: The final destination IP address for the email "447018D5-00000006.eml" received by Jimmy Wilson is 10.221.48.196. Reply with only "true" or "false".',
+         "true",
+         "tf",
+     ),
+     (
+         "Q11",
+         'The 2nd partitions unique GUID (in hex) of the physical disk is: 423FDC8AA701EE46AF5A70C06738E819. Reply with only "true" or "false".',
+         "false",
+         "tf",
+     ),
+     (
+         "Q12",
+         "What is the logical size in bytes (decimal) of the pdf.pdf file? Choose from: a) 444,332  b) 433,994  c) 395,232  d) 253,283. Reply with only the letter.",
+         "b",
+         "mc",
+     ),
+      (
+          "Q13",
+          'True or False: The user account BillyBob sent the following files to the $recyclebin: "New Price List.txt" and "New Price List Encoded". Reply with only "true" or "false".',
+          "false",
+          "tf",
+      ),
+     (
+         "Q14",
+         "What is the logical file size in bytes (decimal) of the PLEAS.txt file? Choose from: a) 110,592  b) 122,336  c) 122,880  d) 108,227. Reply with only the letter.",
+         "b",
+         "mc",
+     ),
+     (
+         "Q15",
+         "What is the full name of the user that has the RID number 0x3EB? Choose from: a) Administrator  b) Betty Boop  c) Joe T. Nameless  d) BillyBob  e) Guest. Reply with only the letter.",
+         "c",
+         "mc",
+     ),
+     (
+         "Q16",
+         'When was the last login date and time for the user "Jimmy Wilson"? Choose from: a) February 18, 2014 12:38:16 UTC  b) January 19, 2014 06:22:12 UTC  c) March 03, 2014 11:11:11 UTC  d) None of these times are correct  e) February 19, 2014 13:30:58 UTC  f) April 01, 2014 00:00:01 UTC  g) February 17, 2014 17:38:22 UTC. Reply with only the letter.',
+         "d",
+         "mc",
+     ),
+     (
+         "Q17",
+         'True or False: jose.Badguy@hushmail.com and robert.ripoff@gmx.com sent emails to the user Jimmy Wilson. Reply with only "true" or "false".',
+         "true",
+         "tf",
+     ),
+     (
+         "Q18",
+         "What program did the user Jimmy Wilson have set to run when he logged on to the computer? Choose from: a) None of the other answers are correct  b) Notepad.exe  c) StinkyNot.exe  d) MSAccess.exe  e) MSWord.exe. Reply with only the letter.",
+         "c",
+         "mc",
+     ),
+     (
+         "Q19",
+         'True or False: The SHA1 hash value for the AISB08.pdf file is BDEBF09E8B2D404D1C483C3EBFB8AD37C780D909. Reply with only "true" or "false".',
+         "true",
+         "tf",
+     ),
+      (
+          "Q20",
+          "What encryption programs were used on this computer? Choose from: a) Veracrypt/BitLocker  b) BitLocker/Veracrypt  c) File Vault/Truecrypt  d) BCTextEncoder/Veracrypt  e) No encryption programs were used  f) Truecrypt/BCTextEncoder. Reply with only the letter, read all options before reply.",
+          "f",
+          "mc",
+      ),
+     (
+         "Q22",
+         'True or False: The SHA1 hash value for the Card Printers.htm file is F6CF04DB3D1BA828E375BBFE988876CE06164126. Reply with only "true" or "false".',
+         "true",
+         "tf",
+     ),
     (
         "Q23",
         'What search engine did the user "Jimmy Wilson" use to search for "how to steal identities"? Choose from: a) Yahoo  b) Bing  c) DuckDuckGo  d) Dogpile  e) Google. Reply with only the letter.',
@@ -388,16 +388,29 @@ def extrair_resposta_modelo(texto: str, tipo: str) -> str:
             return "true"
         if "false" in texto_lower[:50]:
             return "false"
+        # "the answer is false", "therefore false", "answer: false", etc.
+        m = re.search(r"\b(?:answer(?:\s+is)?|therefore)[:\s]+(true|false)\b", texto_lower)
+        if m:
+            return m.group(1)
+        # last word-boundary occurrence anywhere in text
+        m = re.search(r"\b(false|true)\b(?!.*\b(?:false|true)\b)", texto_lower)
+        if m:
+            return m.group(1)
         return texto_lower[:20]
 
     if tipo == "mc":
         m = re.match(r"^\s*([a-g])\b", texto_lower)
         if m:
             return m.group(1)
-        m = re.search(r"(?:answer is|answer:|correct answer is|correct:)\s*([a-g])\b", texto_lower)
+        # "answer is: **b**", "answer: b)", "the answer is b", etc. — allow markdown/punct around letter
+        m = re.search(r"(?:answer(?:\s+is)?|correct(?:\s+answer)?)[:\s*]+\**([a-g])\b", texto_lower)
         if m:
             return m.group(1)
         m = re.search(r"\b([a-g])\b", texto_lower[:100])
+        if m:
+            return m.group(1)
+        # last standalone letter anywhere in text (catches "... the answer is **b**" at end)
+        m = re.search(r"\b([a-g])\b(?!.*\b[a-g]\b)", texto_lower)
         if m:
             return m.group(1)
         return texto_lower[:10]
@@ -444,9 +457,58 @@ def _llm_content(msg) -> str:
     return c
 
 
+def _ollama_online(base_url: str, timeout: int = 5) -> bool:
+    """Verifica se o Ollama aceita inferência (não só /api/tags)."""
+    import urllib.request, urllib.error
+    try:
+        req = urllib.request.Request(
+            f"{base_url}/api/generate",
+            data=b'{"model":"_ping_","prompt":"","stream":false}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            # 404 = Ollama respondeu mas modelo não existe → servidor está up
+            if e.code == 404:
+                return True
+            # 400/500 também significa que o servidor está a responder
+            if e.code in (400, 500):
+                return True
+        return True
+    except Exception:
+        return False
+
+
+def _unload_all_models(base_url: str) -> None:
+    """Força o Ollama a descarregar todos os modelos carregados."""
+    import urllib.request, json
+    try:
+        resp = urllib.request.urlopen(f"{base_url}/api/tags", timeout=5)
+        data = json.loads(resp.read())
+        for m in data.get("models", []):
+            name = m.get("name", "")
+            if not name:
+                continue
+            req = urllib.request.Request(
+                f"{base_url}/api/generate",
+                data=json.dumps({"model": name, "keep_alive": 0}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(req, timeout=5)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def _invocar_agente(agent, conversation: list, debug: bool = False, id_q: str = "",
                     timeout_s: int = TIMEOUT_PER_QUESTION) -> list:
     """Corre agent.stream() e devolve a lista de novas mensagens."""
+    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
     new_messages = []
     callback = TimingCallback(id_q)
     old_handler = signal.signal(signal.SIGALRM, _sigalrm_handler)
@@ -474,6 +536,30 @@ def _invocar_agente(agent, conversation: list, debug: bool = False, id_q: str = 
         print(f"\n  [!] [{id_q}] Timeout após {timeout_s}s — pergunta marcada como errada.")
         _logger.warning("[%s] timeout após %ds — pergunta sem resposta.", id_q, timeout_s)
     except Exception as e:
+        err_str = str(e).lower()
+        is_connect_err = (
+            "connection refused" in err_str
+            or "connecterror" in err_str
+            or "errno 111" in err_str
+            or "server disconnected" in err_str
+            or "remoteprotocolerror" in err_str
+        )
+        if is_connect_err and not new_messages:
+            # Ollama caiu — espera até 120s e tenta uma vez mais
+            print(f"\n  [!] [{id_q}] Ollama inacessível — a aguardar até 120s e a tentar de novo...")
+            _logger.warning("[%s] ConnectError — a aguardar Ollama...", id_q)
+            signal.alarm(0)
+            for wait in [10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10]:
+                time.sleep(wait)
+                if _ollama_online(ollama_url):
+                    break
+            else:
+                _logger.error("[%s] Ollama não voltou online após 120s.", id_q)
+                signal.signal(signal.SIGALRM, old_handler)
+                return new_messages
+            print(f"  [*] [{id_q}] Ollama online — a reintentar pergunta...")
+            signal.signal(signal.SIGALRM, old_handler)
+            return _invocar_agente(agent, conversation, debug=debug, id_q=id_q + "(retry)", timeout_s=timeout_s)
         tb = traceback.format_exc()
         print(f"\n  [!] Erro no agente: {e}")
         _logger.error("Excepção em _invocar_agente (msgs recolhidas: %d):\n%s", len(new_messages), tb)
@@ -588,6 +674,37 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
 
         guardar_log(_resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto), pasta=pasta, run_ts=run_ts)
 
+        # Proteção de contexto entre perguntas (só sem limpeza activa)
+        if not limpar_contexto and ctx > 0:
+            last_prompt_tokens = max(
+                (msg.response_metadata.get("prompt_eval_count", 0)
+                 for msg in new_messages
+                 if isinstance(msg, AIMessage) and hasattr(msg, "response_metadata")),
+                default=0,
+            )
+            if last_prompt_tokens > 0:
+                ctx_pct = last_prompt_tokens / ctx * 100
+                if ctx_pct >= 95:
+                    print(f"\n  ⚠  Contexto {ctx_pct:.0f}% cheio ({last_prompt_tokens:,}/{ctx:,} tokens) — a comprimir...")
+                    try:
+                        sum_resp = llm.invoke(conversation + [HumanMessage(content=(
+                            "Summarize ALL forensic findings from this investigation in 10-15 bullet points. "
+                            "Include: users found, key file paths and their content, registry findings, "
+                            "timestamps, suspicious items, and confirmed conclusions. "
+                            "Be specific — include exact values, paths, and dates. "
+                            "Do NOT call any tools. Do NOT include code blocks."
+                        ))])
+                        summary = _llm_content(sum_resp)
+                    except Exception:
+                        summary = "(Auto-summary failed.)"
+                    conversation[:] = [
+                        conversation[0],
+                        AIMessage(content=f"[Conversation compressed — summary of prior investigation:]\n\n{summary}"),
+                    ]
+                    print(f"  Conversa comprimida. Contexto libertado.")
+                elif ctx_pct >= 75:
+                    print(f"\n  ⚠  Contexto {ctx_pct:.0f}% cheio ({last_prompt_tokens:,}/{ctx:,} tokens).")
+
     _cleanup_container()
     res = _resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto)
     res["duracao_wall_segundos"] = round(time.time() - t_wall_inicio, 1)
@@ -683,6 +800,16 @@ def main():
     _cleanup_orphan_loops()
     print("  OK\n")
 
+    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    if ollama_url != "http://localhost:11434" and not _ollama_online(ollama_url, timeout=3):
+        print(f"  [!] {ollama_url} inacessível — a usar http://localhost:11434")
+        ollama_url = "http://localhost:11434"
+        os.environ["OLLAMA_URL"] = ollama_url
+
+    print("  A descarregar modelos Ollama residuais...", end="", flush=True)
+    _unload_all_models(ollama_url)
+    print(" OK")
+
     run_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     inicio_global = time.time()
     todos_resultados = []
@@ -691,6 +818,24 @@ def main():
 
     for modelo in modelos:
         ctx = args.ctx if args.ctx else ctx_para_modelo(modelo)
+
+        # Pre-warm: carrega o modelo uma única vez antes das sessões
+        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+        _llm_warm = ChatOllama(model=modelo, num_ctx=ctx, keep_alive=-1,
+                               reasoning=suporta_thinking(modelo), base_url=ollama_url)
+        print(f"\n  A carregar {modelo} (ctx={ctx})...", end="", flush=True)
+        for _pw in range(24):  # até 240s
+            try:
+                _llm_warm.invoke([HumanMessage(content="ok")])
+                print(" OK")
+                break
+            except Exception:
+                if _pw == 0:
+                    print(" aguardar...", end="", flush=True)
+                time.sleep(10)
+        else:
+            print(" FALHOU — a continuar na mesma")
+
         for sessao in range(1, sessoes + 1):
             try:
                 dados = correr_sessao_ctf(modelo, sessao, ctx=ctx, debug=args.debug, run_ts=run_ts, limpar_contexto=args.limpar_contexto, pasta=args.pasta, timeout_s=args.timeout)

@@ -8,10 +8,17 @@ KEYWORDS: installed, installed programs, software installed, what programs, what
 Each step produces up to 100 lines of output. Combining steps into one command shares that budget
 and will truncate results, causing you to miss programs. Run one command per tool call.
 
-## Step 1 — Registry uninstall keys (installed programs — most reliable)
+**DO NOT use file searches alone** — they miss installer-registered tools (TrueCrypt, VeraCrypt).
+**ALWAYS start with Steps 1 and 2** (registry). File searches (Steps 3-4) are supplemental only.
+
+## Step 1 — Registry uninstall keys (START HERE — most reliable)
+
+TrueCrypt and VeraCrypt register in the Uninstall key. BCTextEncoder does NOT (it is portable).
+ALWAYS exclude RegBack — `find` returns `RegBack/SOFTWARE` first if you don't.
 
 ```bash
 SOFTWARE=$(find '/forensics' -iname 'SOFTWARE' -not -path '*/Users/*' -not -path '*/diagnostics/*' -not -path '*/RegBack/*' 2>/dev/null | head -1)
+echo "Using: $SOFTWARE"
 reglookup -p '/Microsoft/Windows/CurrentVersion/Uninstall' "$SOFTWARE" 2>/dev/null | grep -i -E 'veracrypt|bitlocker|truecrypt|bctextencoder|file.?vault' | head -20
 reglookup -p '/WOW6432Node/Microsoft/Windows/CurrentVersion/Uninstall' "$SOFTWARE" 2>/dev/null | grep -i -E 'veracrypt|bitlocker|truecrypt|bctextencoder|file.?vault' | head -20
 ```

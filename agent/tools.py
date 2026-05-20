@@ -189,7 +189,8 @@ def stop_container():
 
 # ─── Execução de comandos ─────────────────────────────────────────────────────
 
-MAX_LINES = 100  # Linhas acima deste limite → guarda em ficheiro no container
+MAX_LINES = 100   # Linhas acima deste limite → guarda em ficheiro no container
+MAX_CHARS = 20_000  # Caracteres — linhas longas (SQLite, cache) ultrapassam MAX_LINES
 
 # Apanha: cat [flags] 'path'  /  cat [flags] "path"  /  cat [flags] path
 # Apenas um ficheiro, path começa com / ou .
@@ -326,7 +327,7 @@ def run_in_sandbox(command: str) -> str:
 
             # Output grande: guarda em ficheiro dentro do container
             lines = output.splitlines()
-            if len(lines) > MAX_LINES:
+            if len(lines) > MAX_LINES or len(output) > MAX_CHARS:
                 ts = int(time.time())
                 out_file = f"/tmp/cmd_output_{ts}.txt"
                 save_result = subprocess.run(
@@ -335,19 +336,25 @@ def run_in_sandbox(command: str) -> str:
                     capture_output=True, text=True, encoding='utf-8',
                     errors='replace', timeout=15
                 )
+                # Preview: primeiras MAX_LINES linhas, truncadas a MAX_CHARS total
+                preview_lines = lines[:MAX_LINES]
+                preview = "\n".join(preview_lines)
+                if len(preview) > MAX_CHARS:
+                    preview = preview[:MAX_CHARS] + "\n[... truncado — usa o ficheiro acima]"
+                size_info = f"{len(lines)} linhas / {len(output):,} chars"
                 if save_result.returncode != 0:
                     return (
                         _meta_prefix
-                        + f"[Output grande: {len(lines)} linhas — truncado a {MAX_LINES}]\n"
-                        + "\n".join(lines[:MAX_LINES])
+                        + f"[Output grande: {size_info} — truncado]\n"
+                        + preview
                     )
                 return (
                     _meta_prefix
-                    + f"[Output grande: {len(lines)} linhas — guardado em {out_file}]\n"
+                    + f"[Output grande: {size_info} — guardado em {out_file}]\n"
                     f"Usa grep, head ou tail para analisar:\n"
                     f"  grep 'keyword' {out_file}\n"
                     f"  head -50 {out_file}\n\n"
-                    f"Primeiras {MAX_LINES} linhas:\n" + "\n".join(lines[:MAX_LINES])
+                    f"Primeiras linhas:\n" + preview
                 )
 
             return _meta_prefix + output

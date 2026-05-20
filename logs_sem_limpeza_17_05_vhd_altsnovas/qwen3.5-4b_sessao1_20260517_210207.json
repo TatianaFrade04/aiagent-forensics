@@ -1,0 +1,52 @@
+{
+  "modelo": "qwen3.5:4b",
+  "ctx": 65536,
+  "limpar_contexto": false,
+  "sessao": 1,
+  "timestamp_inicio": "2026-05-17T21:02:07.644822",
+  "timestamp_fim": "2026-05-17T21:07:35.433117",
+  "perguntas": [
+    {
+      "id": "Q23",
+      "pergunta": "What search engine did the user \"Jimmy Wilson\" use to search for \"how to steal identities\"? Choose from: a) Yahoo  b) Bing  c) DuckDuckGo  d) Dogpile  e) Google. Reply with only the letter.",
+      "resposta_correta": "b",
+      "tipo": "mc",
+      "resposta_modelo_raw": "Based on the evidence found in the Firefox sessionstore.js file, the user \"Jimmy Wilson\" searched for \"how to steal identities\" using **Bing**. The search query appears in the session history with the URL `http://www.bing.com/search?q=how+to+steal+identities`.\n\nThe answer is: **b**",
+      "resposta_extraida": "based on t",
+      "correto": false,
+      "tempo_segundos": 165.14,
+      "metricas_ollama": {
+        "total_duration_ns": 158685039383,
+        "prompt_eval_count": 313593,
+        "eval_count": 1902,
+        "tool_calls": 10
+      }
+    },
+    {
+      "id": "Q24",
+      "pergunta": "What is the last date and time the user \"Jimmy Wilson\" ran the Windows Mail Application? Choose from: a) Sat, 25 January 2014 15:27:51 UTC  b) Sat, 25 January 2014 19:27:51 UTC  c) Sat, 25 January 2014 18:27:51 UTC  d) Sat, 25 January 2014 17:27:51 UTC  e) Sat, 25 January 2014 16:27:51 UTC. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "The registry shows the Windows Mail account was last modified on 2014-01-25 18:27:43. Looking at the options:\n- a) 15:27:51 UTC\n- b) 19:27:51 UTC\n- c) 18:27:51 UTC\n- d) 17:27:51 UTC\n- e) 16:27:51 UTC\n\nThe closest match is c) 18:27:51 UTC (the registry shows 18:27:43, which is very close to 18:27:51).\n\nAnswer: c",
+      "resposta_extraida": "c",
+      "correto": true,
+      "tempo_segundos": 125.72,
+      "metricas_ollama": {
+        "total_duration_ns": 124982268244,
+        "prompt_eval_count": 205482,
+        "eval_count": 576,
+        "tool_calls": 3
+      }
+    }
+  ],
+  "resumo": {
+    "total_perguntas": 2,
+    "corretas": 1,
+    "incorretas": 1,
+    "score_percentagem": 50.0,
+    "tempo_total_segundos": 290.86,
+    "tempo_medio_segundos": 145.43,
+    "total_tool_calls": 13
+  },
+  "duracao_wall_segundos": 327.8
+}

@@ -10,11 +10,47 @@ Files deleted via Windows Explorer go to `$RECYCLE.BIN\<SID>\`. Each deleted ite
 
 The SID directory identifies the user who deleted the item.
 
-## CRITICAL: reading $I files — use Python heredoc, never strings or python3 -c
+## CRITICAL: path and tool rules
 
+NEVER search for `$RECYCLE.BIN` with `find` — it is ALWAYS at `{evidence}/$RECYCLE.BIN`. Use the path directly.
 NEVER use `strings` or `strings -e l` — they fail silently on Win10+ $I files.
 NEVER use `python3 -c "..."` with double quotes — bash expands `$RECYCLE` → path breaks.
 ALWAYS use `python3 << 'PYEOF'` heredoc (single-quoted delimiter prevents all expansion).
+
+## STEP 0 — Always list everything first (no keyword filter)
+
+Run this FIRST before any keyword search. It shows all deleted items and SIDs so you know what to look for.
+
+```bash
+python3 << 'PYEOF'
+import os, struct
+base = '{evidence}/$RECYCLE.BIN'
+for sid in os.listdir(base):
+    sp = os.path.join(base, sid)
+    if not os.path.isdir(sp): continue
+    for fn in sorted(os.listdir(sp)):
+        if not fn.startswith('$I'): continue
+        fpath = os.path.join(sp, fn)
+        try:
+            data = open(fpath, 'rb').read()
+            if len(data) < 28: continue
+            version = struct.unpack_from('<Q', data, 0)[0]
+            if version == 2:
+                path_len = struct.unpack_from('<I', data, 24)[0]
+                path = data[28:28+path_len*2].decode('utf-16-le', errors='replace')
+            else:
+                path = data[24:].decode('utf-16-le', errors='replace').split('\x00')[0]
+            print(f'SID={sid} [{fn}]: {path}')
+        except Exception as e:
+            print(f'ERR {fpath}: {e}')
+PYEOF
+```
+
+If the output is empty: the `$R` entries may be directories (folder deletion). Check with:
+```bash
+ls -la '{evidence}/$RECYCLE.BIN/'
+find '{evidence}/$RECYCLE.BIN' -maxdepth 3 -type d 2>/dev/null
+```
 
 $I binary format:
 - Version 1 (Vista/7/8): path at offset 24, null-terminated UTF-16LE

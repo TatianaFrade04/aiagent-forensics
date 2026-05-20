@@ -646,7 +646,7 @@ _default_evidence_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="AIAgent@forensics — Agente LLM para investigação forense")
-    parser.add_argument("--model",    default=os.getenv("OLLAMA_MODEL", "gemma4:e4b"),
+    parser.add_argument("--model",    default=os.getenv("OLLAMA_MODEL", "gemma4:26b"),
                         help="Modelo Ollama (default: llama3.2:9b)")
     parser.add_argument("--url",      default=os.getenv("OLLAMA_URL", "http://localhost:11434"),
                         help="URL do servidor Ollama (default: http://localhost:11434)")
@@ -698,9 +698,22 @@ def get_model_context(base_url: str, model: str, fallback: int = 32768) -> int:
     return fallback
 
 
+def _url_reachable(url: str, timeout: int = 3) -> bool:
+    try:
+        urllib.request.urlopen(f"{url}/api/tags", timeout=timeout)
+        return True
+    except Exception:
+        return False
+
+
 def main():
     args = parse_args()
-    
+
+    # Se o URL configurado não responder, cai para o Ollama direto (mitmweb opcional)
+    if args.url != "http://localhost:11434" and not _url_reachable(args.url):
+        print(f"[!] {args.url} inacessível — a usar http://localhost:11434 diretamente")
+        args.url = "http://localhost:11434"
+
     # Register cleanup function only when main program runs
     atexit.register(stop_container)
 
