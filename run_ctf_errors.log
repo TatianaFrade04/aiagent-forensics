@@ -25176,3 +25176,323 @@ httpx.RemoteProtocolError: Server disconnected without sending a response.
 2026-05-20 22:17:43,829 [WARNING] run_ctf: [Q24] timeout após 600s — pergunta sem resposta.
 2026-05-20 22:17:43,829 [WARNING] run_ctf: [Q24] resposta final vazia (tool_calls=6, msgs=12).
 2026-05-20 22:29:40,120 [WARNING] run_ctf: [Q4] resposta final vazia (tool_calls=1, msgs=3).
+2026-05-20 23:05:51,096 [WARNING] run_ctf: [Q1] timeout after 600s — question unanswered.
+2026-05-20 23:05:51,097 [WARNING] run_ctf: [Q1] resposta final vazia (tool_calls=10, msgs=20).
+2026-05-20 23:53:44,310 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 1):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 534, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2725, in stream
+    for _ in runner.tick(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/_runner.py", line 167, in tick
+    run_with_retry(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/_retry.py", line 96, in run_with_retry
+    return task.proc.invoke(task.input, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/_internal/_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/_internal/_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 813, in _func
+    outputs = list(
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 621, in result_iterator
+    yield _result_or_cancel(fs.pop())
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 319, in _result_or_cancel
+    return fut.result(timeout)
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 458, in result
+    return self.__get_result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 403, in __get_result
+    raise self._exception
+  File "/usr/lib/python3.10/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/runnables/config.py", line 579, in _wrapped_fn
+    return contexts.pop().run(fn, *args)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 1024, in _run_one
+    return self._execute_tool_sync(tool_request, input_type, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 973, in _execute_tool_sync
+    content = _handle_tool_error(e, flag=self._handle_tool_errors)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 430, in _handle_tool_error
+    content = flag(e)  # type: ignore [assignment, call-arg]
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 387, in _default_handle_tool_errors
+    raise e
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 930, in _execute_tool_sync
+    response = tool.invoke(call_args, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 642, in invoke
+    return self.run(tool_input, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 1001, in run
+    raise error_to_raise
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 967, in run
+    response = context.run(self._run, *tool_args, **tool_kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/structured.py", line 97, in _run
+    return self.func(*args, **kwargs)
+  File "/home/ai-forensics/aiagent-forensics/agent/main.py", line 237, in get_forensic_procedure
+    selected = select_skills(task, _skills_cache, max_skills=2, min_score=0.10)
+  File "/home/ai-forensics/aiagent-forensics/agent/skills.py", line 133, in select_skills
+    query_lower = _normalize(_translate_pt(query).lower())  # translated + accent-stripped
+NameError: name '_translate_pt' is not defined
+
+2026-05-20 23:53:44,311 [WARNING] run_ctf: [Q2] resposta final vazia (tool_calls=1, msgs=1).
+2026-05-20 23:53:49,754 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 1):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 534, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2725, in stream
+    for _ in runner.tick(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/_runner.py", line 167, in tick
+    run_with_retry(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/_retry.py", line 96, in run_with_retry
+    return task.proc.invoke(task.input, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/_internal/_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/_internal/_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 813, in _func
+    outputs = list(
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 621, in result_iterator
+    yield _result_or_cancel(fs.pop())
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 319, in _result_or_cancel
+    return fut.result(timeout)
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 451, in result
+    return self.__get_result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 403, in __get_result
+    raise self._exception
+  File "/usr/lib/python3.10/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/runnables/config.py", line 579, in _wrapped_fn
+    return contexts.pop().run(fn, *args)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 1024, in _run_one
+    return self._execute_tool_sync(tool_request, input_type, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 973, in _execute_tool_sync
+    content = _handle_tool_error(e, flag=self._handle_tool_errors)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 430, in _handle_tool_error
+    content = flag(e)  # type: ignore [assignment, call-arg]
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 387, in _default_handle_tool_errors
+    raise e
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 930, in _execute_tool_sync
+    response = tool.invoke(call_args, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 642, in invoke
+    return self.run(tool_input, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 1001, in run
+    raise error_to_raise
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 967, in run
+    response = context.run(self._run, *tool_args, **tool_kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/structured.py", line 97, in _run
+    return self.func(*args, **kwargs)
+  File "/home/ai-forensics/aiagent-forensics/agent/main.py", line 237, in get_forensic_procedure
+    selected = select_skills(task, _skills_cache, max_skills=2, min_score=0.10)
+  File "/home/ai-forensics/aiagent-forensics/agent/skills.py", line 133, in select_skills
+    query_lower = _normalize(_translate_pt(query).lower())  # translated + accent-stripped
+NameError: name '_translate_pt' is not defined
+
+2026-05-20 23:53:49,755 [WARNING] run_ctf: [Q3] resposta final vazia (tool_calls=1, msgs=1).
+2026-05-20 23:53:59,365 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 3):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 534, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2725, in stream
+    for _ in runner.tick(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/_runner.py", line 167, in tick
+    run_with_retry(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/_retry.py", line 96, in run_with_retry
+    return task.proc.invoke(task.input, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/_internal/_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/_internal/_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 813, in _func
+    outputs = list(
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 621, in result_iterator
+    yield _result_or_cancel(fs.pop())
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 319, in _result_or_cancel
+    return fut.result(timeout)
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 458, in result
+    return self.__get_result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 403, in __get_result
+    raise self._exception
+  File "/usr/lib/python3.10/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/runnables/config.py", line 579, in _wrapped_fn
+    return contexts.pop().run(fn, *args)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 1024, in _run_one
+    return self._execute_tool_sync(tool_request, input_type, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 973, in _execute_tool_sync
+    content = _handle_tool_error(e, flag=self._handle_tool_errors)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 430, in _handle_tool_error
+    content = flag(e)  # type: ignore [assignment, call-arg]
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 387, in _default_handle_tool_errors
+    raise e
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 930, in _execute_tool_sync
+    response = tool.invoke(call_args, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 642, in invoke
+    return self.run(tool_input, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 1001, in run
+    raise error_to_raise
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 967, in run
+    response = context.run(self._run, *tool_args, **tool_kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/structured.py", line 97, in _run
+    return self.func(*args, **kwargs)
+  File "/home/ai-forensics/aiagent-forensics/agent/main.py", line 237, in get_forensic_procedure
+    selected = select_skills(task, _skills_cache, max_skills=2, min_score=0.10)
+  File "/home/ai-forensics/aiagent-forensics/agent/skills.py", line 133, in select_skills
+    query_lower = _normalize(_translate_pt(query).lower())  # translated + accent-stripped
+NameError: name '_translate_pt' is not defined
+
+2026-05-20 23:53:59,366 [WARNING] run_ctf: [Q4] resposta final vazia (tool_calls=2, msgs=3).
+2026-05-20 23:54:03,754 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 1):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 534, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2725, in stream
+    for _ in runner.tick(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/_runner.py", line 167, in tick
+    run_with_retry(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/_retry.py", line 96, in run_with_retry
+    return task.proc.invoke(task.input, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/_internal/_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/_internal/_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 813, in _func
+    outputs = list(
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 621, in result_iterator
+    yield _result_or_cancel(fs.pop())
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 319, in _result_or_cancel
+    return fut.result(timeout)
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 458, in result
+    return self.__get_result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 403, in __get_result
+    raise self._exception
+  File "/usr/lib/python3.10/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/runnables/config.py", line 579, in _wrapped_fn
+    return contexts.pop().run(fn, *args)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 1024, in _run_one
+    return self._execute_tool_sync(tool_request, input_type, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 973, in _execute_tool_sync
+    content = _handle_tool_error(e, flag=self._handle_tool_errors)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 430, in _handle_tool_error
+    content = flag(e)  # type: ignore [assignment, call-arg]
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 387, in _default_handle_tool_errors
+    raise e
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 930, in _execute_tool_sync
+    response = tool.invoke(call_args, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 642, in invoke
+    return self.run(tool_input, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 1001, in run
+    raise error_to_raise
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 967, in run
+    response = context.run(self._run, *tool_args, **tool_kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/structured.py", line 97, in _run
+    return self.func(*args, **kwargs)
+  File "/home/ai-forensics/aiagent-forensics/agent/main.py", line 237, in get_forensic_procedure
+    selected = select_skills(task, _skills_cache, max_skills=2, min_score=0.10)
+  File "/home/ai-forensics/aiagent-forensics/agent/skills.py", line 133, in select_skills
+    query_lower = _normalize(_translate_pt(query).lower())  # translated + accent-stripped
+NameError: name '_translate_pt' is not defined
+
+2026-05-20 23:54:03,754 [WARNING] run_ctf: [Q5] resposta final vazia (tool_calls=1, msgs=1).
+2026-05-20 23:57:19,687 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 1):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 534, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2725, in stream
+    for _ in runner.tick(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/_runner.py", line 167, in tick
+    run_with_retry(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/_retry.py", line 96, in run_with_retry
+    return task.proc.invoke(task.input, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/_internal/_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/_internal/_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 813, in _func
+    outputs = list(
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 621, in result_iterator
+    yield _result_or_cancel(fs.pop())
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 319, in _result_or_cancel
+    return fut.result(timeout)
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 451, in result
+    return self.__get_result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 403, in __get_result
+    raise self._exception
+  File "/usr/lib/python3.10/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/runnables/config.py", line 579, in _wrapped_fn
+    return contexts.pop().run(fn, *args)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 1024, in _run_one
+    return self._execute_tool_sync(tool_request, input_type, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 973, in _execute_tool_sync
+    content = _handle_tool_error(e, flag=self._handle_tool_errors)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 430, in _handle_tool_error
+    content = flag(e)  # type: ignore [assignment, call-arg]
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 387, in _default_handle_tool_errors
+    raise e
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 930, in _execute_tool_sync
+    response = tool.invoke(call_args, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 642, in invoke
+    return self.run(tool_input, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 1001, in run
+    raise error_to_raise
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 967, in run
+    response = context.run(self._run, *tool_args, **tool_kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/structured.py", line 97, in _run
+    return self.func(*args, **kwargs)
+  File "/home/ai-forensics/aiagent-forensics/agent/main.py", line 237, in get_forensic_procedure
+    selected = select_skills(task, _skills_cache, max_skills=2, min_score=0.10)
+  File "/home/ai-forensics/aiagent-forensics/agent/skills.py", line 133, in select_skills
+    query_lower = _normalize(_translate_pt(query).lower())  # translated + accent-stripped
+NameError: name '_translate_pt' is not defined
+
+2026-05-20 23:57:19,687 [WARNING] run_ctf: [Q9] resposta final vazia (tool_calls=1, msgs=1).
+2026-05-20 23:57:35,408 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 1):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 534, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2725, in stream
+    for _ in runner.tick(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/_runner.py", line 167, in tick
+    run_with_retry(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/_retry.py", line 96, in run_with_retry
+    return task.proc.invoke(task.input, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/_internal/_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/_internal/_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 813, in _func
+    outputs = list(
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 621, in result_iterator
+    yield _result_or_cancel(fs.pop())
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 319, in _result_or_cancel
+    return fut.result(timeout)
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 458, in result
+    return self.__get_result()
+  File "/usr/lib/python3.10/concurrent/futures/_base.py", line 403, in __get_result
+    raise self._exception
+  File "/usr/lib/python3.10/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/runnables/config.py", line 579, in _wrapped_fn
+    return contexts.pop().run(fn, *args)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 1024, in _run_one
+    return self._execute_tool_sync(tool_request, input_type, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 973, in _execute_tool_sync
+    content = _handle_tool_error(e, flag=self._handle_tool_errors)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 430, in _handle_tool_error
+    content = flag(e)  # type: ignore [assignment, call-arg]
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 387, in _default_handle_tool_errors
+    raise e
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/prebuilt/tool_node.py", line 930, in _execute_tool_sync
+    response = tool.invoke(call_args, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 642, in invoke
+    return self.run(tool_input, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 1001, in run
+    raise error_to_raise
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/base.py", line 967, in run
+    response = context.run(self._run, *tool_args, **tool_kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/tools/structured.py", line 97, in _run
+    return self.func(*args, **kwargs)
+  File "/home/ai-forensics/aiagent-forensics/agent/main.py", line 237, in get_forensic_procedure
+    selected = select_skills(task, _skills_cache, max_skills=2, min_score=0.10)
+  File "/home/ai-forensics/aiagent-forensics/agent/skills.py", line 133, in select_skills
+    query_lower = _normalize(_translate_pt(query).lower())  # translated + accent-stripped
+NameError: name '_translate_pt' is not defined
+
+2026-05-20 23:57:35,408 [WARNING] run_ctf: [Q11] resposta final vazia (tool_calls=1, msgs=1).
