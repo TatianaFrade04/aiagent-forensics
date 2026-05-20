@@ -423,6 +423,14 @@ def avaliar_resposta(resposta_modelo: str, resposta_correta: str, tipo: str) -> 
     return extraida.strip().lower() == resposta_correta.strip().lower()
 
 
+def _resposta_valida(extraida: str, tipo: str) -> bool:
+    if tipo == "tf":
+        return extraida in {"true", "false"}
+    if tipo == "mc":
+        return extraida in set("abcdefg")
+    return True
+
+
 def _extrair_metricas_msgs(msgs: list) -> dict:
     """Extrai métricas directamente das mensagens do agente."""
     metricas = {"total_duration_ns": 0, "prompt_eval_count": 0, "eval_count": 0, "tool_calls": 0}
@@ -644,6 +652,24 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
         metricas = _extrair_metricas_msgs(new_messages)
         resposta_extraida = extrair_resposta_modelo(content, tipo)
         correto = avaliar_resposta(content, correta, tipo)
+
+        # Retry com prompt directo se o formato da resposta não for válido
+        if content and not _resposta_valida(resposta_extraida, tipo):
+            retry_msg = (
+                "Reply with ONLY 'true' or 'false'. No explanation, no punctuation."
+                if tipo == "tf" else
+                "Reply with ONLY the letter of your answer (a, b, c, d, e, f, or g). No explanation, no punctuation."
+            )
+            try:
+                retry_resp = llm.invoke(conversation + [HumanMessage(content=retry_msg)])
+                retry_content = _llm_content(retry_resp)
+                if retry_content.strip():
+                    content = retry_content
+                    resposta_extraida = extrair_resposta_modelo(content, tipo)
+                    correto = avaliar_resposta(content, correta, tipo)
+                    _logger.info("[%s] retry formatação — extraído: %r", id_q, resposta_extraida)
+            except Exception:
+                pass
 
         perguntas_feitas = idx + 1
         tempo_medio = sum(r["tempo_segundos"] for r in resultados) / max(len(resultados), 1)
