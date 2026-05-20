@@ -214,18 +214,22 @@ def get_forensic_procedure(task: str) -> str:
     """
     Get step-by-step forensic procedures and exact commands for a specific task.
 
-    Call this BEFORE running commands when you need guidance on HOW to perform
-    a forensic operation. Describe what you need to do, for example:
-      - "extract file from VHD partition and compute SHA1 hash"
-      - "get disk GUID and partition schema from physical disk"
-      - "read SAM registry hive for user account information and last login"
-      - "analyse prefetch files for application execution history"
-      - "search recycle bin for deleted files by user"
-      - "get cluster size and volume label from a partition"
-      - "read Windows event log for system uptime or shutdown times"
+    MANDATORY — call this BEFORE running commands for any of these operations:
+      - extracting a file from a VHD or VMDK partition (icat, fls, inode lookup)
+      - computing SHA1 or MD5 hash of a file inside a virtual disk image
+      - reading jump lists to find when an application was last run
+      - finding the last-run timestamp of Windows Mail or any application via jump lists
+      - getting disk GUID, partition GUID, or partition schema from a physical disk
+      - reading the SAM hive for user accounts, last login times, or password hints
+      - getting cluster size or volume label from a partition
+      - reading Windows event logs for boot time, shutdown, or system uptime
+      - analysing prefetch files or recycle bin contents
 
-    Returns exact commands and procedures to follow. Only call this when you
-    genuinely need procedural guidance — do not call it for every question.
+    Also call this whenever you are unsure which tool or command to use.
+
+    Returns exact commands and procedures. Pass a short description of the task,
+    for example: "extract Card Printers.htm from VHD and compute SHA1",
+    "find last run time of Windows Mail from jump lists", "get disk partition GUID".
     """
     global _skills_cache, _evidence_path
     if not _skills_cache:
