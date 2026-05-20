@@ -1,16 +1,7 @@
 SKILL: sam_users
 DESCRIPTION: Extract Windows local user information from the SAM registry hive — user list, RIDs, last login times, password hints, and account status. Replaces chntpw for all SAM-related forensic questions. Primary tool: regripper samparse. Fallback: python-registry.
-KEYWORDS: SAM, sam hive, users, local users, how many users, list users, user count, last login, login, logon, login date, login time, last logon time, last login time, RID, relative identifier, password hint, account disabled, account enabled, logon password, has password, password enabled, password set, user list, chntpw, samparse, regripper sam, windows users, user account, administrator, guest, last logon, logon time, account flags, account status
+KEYWORDS: SAM, sam hive, users, local users, how many users, list users, user count, last login, login, logon, login date, login time, last logon time, last login time, RID, relative identifier, password hint, account disabled, account enabled, logon password, has password, password enabled, password set, user list, chntpw, samparse, regripper sam, windows users, user account, administrator, guest, last logon, logon time, account flags, account status, none of these, none of these times, no correct answer, times are correct
 ---
-
-## CRITICAL RULE — timestamp questions with multiple-choice answers
-
-When asked "when was the last login" and given options to choose from:
-1. Run the command below and get the EXACT timestamp from the output.
-2. Write out the exact timestamp you found (e.g. "samparse shows: 2014-03-07 09:14:22 UTC").
-3. Compare it EXACTLY, second by second, to each option.
-4. If the exact timestamp does not appear in any option → the answer is "None of these".
-NEVER choose an option based on memory or approximation. The timestamp must match exactly.
 
 ## MANDATORY COMMAND — use this first for any SAM/user question
 
