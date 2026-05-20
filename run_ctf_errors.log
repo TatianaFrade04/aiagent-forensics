@@ -25173,3 +25173,6 @@ httpx.RemoteProtocolError: Server disconnected without sending a response.
 2026-05-20 18:48:40,337 [WARNING] run_ctf: [Q18] timeout após 600s — pergunta sem resposta.
 2026-05-20 18:48:40,340 [WARNING] run_ctf: [Q18] resposta final vazia (tool_calls=4, msgs=8).
 2026-05-20 21:03:02,306 [WARNING] run_ctf: [Q4] resposta final vazia (tool_calls=1, msgs=3).
+2026-05-20 22:17:43,829 [WARNING] run_ctf: [Q24] timeout após 600s — pergunta sem resposta.
+2026-05-20 22:17:43,829 [WARNING] run_ctf: [Q24] resposta final vazia (tool_calls=6, msgs=12).
+2026-05-20 22:29:40,120 [WARNING] run_ctf: [Q4] resposta final vazia (tool_calls=1, msgs=3).
