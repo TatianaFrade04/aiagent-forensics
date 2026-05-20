@@ -1,0 +1,388 @@
+{
+  "modelo": "gemma4:26b",
+  "ctx": 32768,
+  "limpar_contexto": false,
+  "sessao": 1,
+  "timestamp_inicio": "2026-05-19T23:51:09.263729",
+  "timestamp_fim": "2026-05-20T02:04:04.646534",
+  "perguntas": [
+    {
+      "id": "Q1",
+      "pergunta": "What is the destination time zone offset in the first Received header of the email file 447018D5-00000006.eml? Choose from: a) +04:00  b) -07:00  c) -08:00  d) -05:00  e) -09:00. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "c",
+      "resposta_extraida": "c",
+      "correto": true,
+      "tempo_segundos": 128.61,
+      "metricas_ollama": {
+        "total_duration_ns": 127938100163,
+        "prompt_eval_count": 31732,
+        "eval_count": 169,
+        "tool_calls": 2
+      }
+    },
+    {
+      "id": "Q2",
+      "pergunta": "True or False: The total capacity in bytes of the \"J. Wilson\" partition in System.vhd is 734,003,200. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "false",
+      "resposta_extraida": "false",
+      "correto": false,
+      "tempo_segundos": 586.66,
+      "metricas_ollama": {
+        "total_duration_ns": 582362836683,
+        "prompt_eval_count": 210277,
+        "eval_count": 1762,
+        "tool_calls": 16
+      }
+    },
+    {
+      "id": "Q3",
+      "pergunta": "What was the date and time the email \"447018D5-00000006.eml\" received by Jimmy Wilson was originally sent? Choose from: a) Sun, 16 February 2014 10:55:09 -05:00  b) Sun, 16 February 2014 07:55:09 -05:00  c) Sun, 16 February 2014 12:55:09 -05:00  d) Sun, 16 February 2014 11:55:09 -05:00  e) Sun, 16 February 2014 13:55:09 -05:00. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "c",
+      "resposta_extraida": "c",
+      "correto": true,
+      "tempo_segundos": 98.49,
+      "metricas_ollama": {
+        "total_duration_ns": 98453283470,
+        "prompt_eval_count": 13891,
+        "eval_count": 6,
+        "tool_calls": 0
+      }
+    },
+    {
+      "id": "Q4",
+      "pergunta": "The disk GUID (in hex) of the physical disk is: 6FAE8D386C441743AE3298C4BDE04830. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "",
+      "resposta_extraida": "",
+      "correto": false,
+      "tempo_segundos": 600.0,
+      "metricas_ollama": {
+        "total_duration_ns": 129352547052,
+        "prompt_eval_count": 13782,
+        "eval_count": 122,
+        "tool_calls": 1
+      }
+    },
+    {
+      "id": "Q5",
+      "pergunta": "True or False: The cluster size in bytes within the second partition of the physical disk is 512. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "false",
+      "tipo": "tf",
+      "resposta_modelo_raw": "false",
+      "resposta_extraida": "false",
+      "correto": true,
+      "tempo_segundos": 285.45,
+      "metricas_ollama": {
+        "total_duration_ns": 284473016516,
+        "prompt_eval_count": 46792,
+        "eval_count": 618,
+        "tool_calls": 2
+      }
+    },
+    {
+      "id": "Q6",
+      "pergunta": "True or False: On February 20, 2014 at 17:02:35 UTC, the system uptime in seconds was 9,634. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 226.44,
+      "metricas_ollama": {
+        "total_duration_ns": 199410269172,
+        "prompt_eval_count": 46329,
+        "eval_count": 334,
+        "tool_calls": 2
+      }
+    },
+    {
+      "id": "Q7",
+      "pergunta": "True or False: The MD5 hash value of the pdf.pdf file is C1F95108A34228535A9262085E784D7C3E27FC68. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "false",
+      "tipo": "tf",
+      "resposta_modelo_raw": "false",
+      "resposta_extraida": "false",
+      "correto": true,
+      "tempo_segundos": 364.74,
+      "metricas_ollama": {
+        "total_duration_ns": 361555386442,
+        "prompt_eval_count": 77564,
+        "eval_count": 816,
+        "tool_calls": 4
+      }
+    },
+    {
+      "id": "Q8",
+      "pergunta": "True or False: The user account Jimmy Wilson has his logon password enabled and the password hint is \"safeone\". Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 161.78,
+      "metricas_ollama": {
+        "total_duration_ns": 161316110170,
+        "prompt_eval_count": 35323,
+        "eval_count": 124,
+        "tool_calls": 1
+      }
+    },
+    {
+      "id": "Q9",
+      "pergunta": "What is the partitioning format (Schema) of the physical disk? Choose from: a) None of the other answers are correct  b) GPT  c) The Physical disk is not partitioned  d) MBE. Reply with only the letter. ",
+      "resposta_correta": "b",
+      "tipo": "mc",
+      "resposta_modelo_raw": "b",
+      "resposta_extraida": "b",
+      "correto": true,
+      "tempo_segundos": 190.95,
+      "metricas_ollama": {
+        "total_duration_ns": 190558824936,
+        "prompt_eval_count": 33356,
+        "eval_count": 171,
+        "tool_calls": 1
+      }
+    },
+    {
+      "id": "Q10",
+      "pergunta": "True or False: The final destination IP address for the email \"447018D5-00000006.eml\" received by Jimmy Wilson is 10.221.48.196. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 160.81,
+      "metricas_ollama": {
+        "total_duration_ns": 160458008085,
+        "prompt_eval_count": 31321,
+        "eval_count": 115,
+        "tool_calls": 1
+      }
+    },
+    {
+      "id": "Q11",
+      "pergunta": "The 2nd partitions unique GUID (in hex) of the physical disk is: 423FDC8AA701EE46AF5A70C06738E819. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "false",
+      "tipo": "tf",
+      "resposta_modelo_raw": "",
+      "resposta_extraida": "",
+      "correto": false,
+      "tempo_segundos": 600.0,
+      "metricas_ollama": {
+        "total_duration_ns": 568660973847,
+        "prompt_eval_count": 70579,
+        "eval_count": 1367,
+        "tool_calls": 4
+      }
+    },
+    {
+      "id": "Q12",
+      "pergunta": "What is the logical size in bytes (decimal) of the pdf.pdf file? Choose from: a) 444,332  b) 433,994  c) 395,232  d) 253,283. Reply with only the letter.",
+      "resposta_correta": "b",
+      "tipo": "mc",
+      "resposta_modelo_raw": "b",
+      "resposta_extraida": "b",
+      "correto": true,
+      "tempo_segundos": 173.62,
+      "metricas_ollama": {
+        "total_duration_ns": 173329768469,
+        "prompt_eval_count": 38927,
+        "eval_count": 106,
+        "tool_calls": 1
+      }
+    },
+    {
+      "id": "Q13",
+      "pergunta": "True or False: The user account BillyBob sent the following files to the $recyclebin: \"New Price List.txt\" and \"New Price List Encoded\". Reply with only \"true\" or \"false\".",
+      "resposta_correta": "false",
+      "tipo": "tf",
+      "resposta_modelo_raw": "false",
+      "resposta_extraida": "false",
+      "correto": true,
+      "tempo_segundos": 260.58,
+      "metricas_ollama": {
+        "total_duration_ns": 260324265919,
+        "prompt_eval_count": 39660,
+        "eval_count": 370,
+        "tool_calls": 1
+      }
+    },
+    {
+      "id": "Q14",
+      "pergunta": "What is the logical file size in bytes (decimal) of the PLEAS.txt file? Choose from: a) 110,592  b) 122,336  c) 122,880  d) 108,227. Reply with only the letter.",
+      "resposta_correta": "b",
+      "tipo": "mc",
+      "resposta_modelo_raw": "The file `PLEAS.txt` was not found in the forensic image or the provided VHD. Therefore, it is impossible to determine its logical size from the available evidence.",
+      "resposta_extraida": "the file `",
+      "correto": false,
+      "tempo_segundos": 500.16,
+      "metricas_ollama": {
+        "total_duration_ns": 479508743534,
+        "prompt_eval_count": 279479,
+        "eval_count": 925,
+        "tool_calls": 12
+      }
+    },
+    {
+      "id": "Q15",
+      "pergunta": "What is the full name of the user that has the RID number 0x3EB? Choose from: a) Administrator  b) Betty Boop  c) Joe T. Nameless  d) BillyBob  e) Guest. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "d",
+      "resposta_extraida": "d",
+      "correto": false,
+      "tempo_segundos": 392.08,
+      "metricas_ollama": {
+        "total_duration_ns": 390500011948,
+        "prompt_eval_count": 94473,
+        "eval_count": 533,
+        "tool_calls": 3
+      }
+    },
+    {
+      "id": "Q16",
+      "pergunta": "When was the last login date and time for the user \"Jimmy Wilson\"? Choose from: a) February 18, 2014 12:38:16 UTC  b) January 19, 2014 06:22:12 UTC  c) March 03, 2014 11:11:11 UTC  d) None of these times are correct  e) February 19, 2014 13:30:58 UTC  f) April 01, 2014 00:00:01 UTC  g) February 17, 2014 17:38:22 UTC. Reply with only the letter.",
+      "resposta_correta": "d",
+      "tipo": "mc",
+      "resposta_modelo_raw": "e",
+      "resposta_extraida": "e",
+      "correto": false,
+      "tempo_segundos": 200.35,
+      "metricas_ollama": {
+        "total_duration_ns": 200302600629,
+        "prompt_eval_count": 26287,
+        "eval_count": 6,
+        "tool_calls": 0
+      }
+    },
+    {
+      "id": "Q17",
+      "pergunta": "True or False: jose.Badguy@hushmail.com and robert.ripoff@gmx.com sent emails to the user Jimmy Wilson. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 256.42,
+      "metricas_ollama": {
+        "total_duration_ns": 255970431727,
+        "prompt_eval_count": 54022,
+        "eval_count": 112,
+        "tool_calls": 1
+      }
+    },
+    {
+      "id": "Q18",
+      "pergunta": "What program did the user Jimmy Wilson have set to run when he logged on to the computer? Choose from: a) None of the other answers are correct  b) Notepad.exe  c) StinkyNot.exe  d) MSAccess.exe  e) MSWord.exe. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "c",
+      "resposta_extraida": "c",
+      "correto": true,
+      "tempo_segundos": 212.58,
+      "metricas_ollama": {
+        "total_duration_ns": 212373676186,
+        "prompt_eval_count": 53904,
+        "eval_count": 62,
+        "tool_calls": 1
+      }
+    },
+    {
+      "id": "Q19",
+      "pergunta": "True or False: The SHA1 hash value for the AISB08.pdf file is BDEBF09E8B2D404D1C483C3EBFB8AD37C780D909. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 549.28,
+      "metricas_ollama": {
+        "total_duration_ns": 547657238684,
+        "prompt_eval_count": 84782,
+        "eval_count": 705,
+        "tool_calls": 2
+      }
+    },
+    {
+      "id": "Q20",
+      "pergunta": "What encryption programs were used on this computer? Choose from: a) Veracrypt/BitLocker  b) BitLocker/Veracrypt  c) File Vault/Truecrypt  d) BCTextEncoder/Veracrypt  e) No encryption programs were used  f) Truecrypt/BCTextEncoder. Reply with only the letter, read all options before reply.",
+      "resposta_correta": "f",
+      "tipo": "mc",
+      "resposta_modelo_raw": "d",
+      "resposta_extraida": "d",
+      "correto": false,
+      "tempo_segundos": 358.53,
+      "metricas_ollama": {
+        "total_duration_ns": 357982224229,
+        "prompt_eval_count": 57538,
+        "eval_count": 315,
+        "tool_calls": 1
+      }
+    },
+    {
+      "id": "Q22",
+      "pergunta": "True or False: The SHA1 hash value for the Card Printers.htm file is F6CF04DB3D1BA828E375BBFE988876CE06164126. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 430.83,
+      "metricas_ollama": {
+        "total_duration_ns": 429025027937,
+        "prompt_eval_count": 90426,
+        "eval_count": 521,
+        "tool_calls": 2
+      }
+    },
+    {
+      "id": "Q23",
+      "pergunta": "What search engine did the user \"Jimmy Wilson\" use to search for \"how to steal identities\"? Choose from: a) Yahoo  b) Bing  c) DuckDuckGo  d) Dogpile  e) Google. Reply with only the letter.",
+      "resposta_correta": "b",
+      "tipo": "mc",
+      "resposta_modelo_raw": "",
+      "resposta_extraida": "",
+      "correto": false,
+      "tempo_segundos": 600.0,
+      "metricas_ollama": {
+        "total_duration_ns": 346264241659,
+        "prompt_eval_count": 61833,
+        "eval_count": 253,
+        "tool_calls": 2
+      }
+    },
+    {
+      "id": "Q24",
+      "pergunta": "What is the last date and time the user \"Jimmy Wilson\" ran the Windows Mail Application? Choose from: a) Sat, 25 January 2014 15:27:51 UTC  b) Sat, 25 January 2014 19:27:51 UTC  c) Sat, 25 January 2014 18:27:51 UTC  d) Sat, 25 January 2014 17:27:51 UTC  e) Sat, 25 January 2014 16:27:51 UTC. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "",
+      "resposta_extraida": "",
+      "correto": false,
+      "tempo_segundos": 600.0,
+      "metricas_ollama": {
+        "total_duration_ns": 475718954035,
+        "prompt_eval_count": 32301,
+        "eval_count": 472,
+        "tool_calls": 1
+      }
+    }
+  ],
+  "resumo": {
+    "total_perguntas": 23,
+    "corretas": 14,
+    "incorretas": 9,
+    "score_percentagem": 60.9,
+    "tempo_total_segundos": 7938.36,
+    "tempo_medio_segundos": 345.15,
+    "total_tool_calls": 61
+  },
+  "duracao_wall_segundos": 7975.4
+}

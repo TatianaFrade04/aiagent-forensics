@@ -1,6 +1,6 @@
 SKILL: event_log
 DESCRIPTION: Parse Windows Event Log files (.evtx) to find system boot/shutdown times, user logins, application execution, and calculate system uptime using evtxdump or evtxexport.
-KEYWORDS: event log, event logs, evtx, windows event, uptime, system uptime, boot time, last boot, startup, shutdown, system logon event, login event, last login event, last logon event, last run, last used, last executed, application last run, windows mail last run, quando foi iniciado, tempo de actividade, tempo ligado, system started, system booted, event id, eventid, 6005, 6006, 4648, winevt, System.evtx, Security.evtx, Application.evtx, seconds uptime, uptime in seconds
+KEYWORDS: event log, event logs, evtx, windows event, uptime, system uptime, boot time, last boot, startup, shutdown, system logon event, last run, last used, last executed, application last run, windows mail last run, system started, system booted, event id, eventid, 6005, 6006, 4648, winevt, System.evtx, Security.evtx, Application.evtx, seconds uptime, uptime in seconds
 ---
 
 ## What are Windows Event Logs?
@@ -25,9 +25,9 @@ Windows starts. Its `TimeCreated SystemTime` has **sub-second precision** and is
 start time. Event ID 6005 is the EventLog service starting, which happens ~15 seconds later —
 using it will produce an answer that is ~15 seconds too low.
 
-Example (IACIS-HDD-2014 image):
-- Event ID 12:   `2014-02-20 14:22:00.733999+00:00`  → uptime at 17:02:35 = **9634 s** ✓
-- Event ID 6005: `2014-02-20 14:22:15+00:00`          → uptime at 17:02:35 = 9620 s  ✗
+Example:
+- Event ID 12:   `YYYY-MM-DD HH:MM:SS.ffffff+00:00`  → subtract from target time = actual uptime ✓
+- Event ID 6005: `YYYY-MM-DD HH:MM:SS+00:00`          → ~15 s later than ID 12 = too low ✗
 
 ## Step-by-step workflow
 
@@ -45,7 +45,7 @@ from datetime import datetime, timezone
 import Evtx.Evtx as evtx, re
 path = '{evidence}/Windows/System32/winevt/Logs/System.evtx'
 last_boot = None
-target_dt = datetime(YYYY, MM, DD, HH, MM2, SS, tzinfo=timezone.utc)  # replace with actual target
+target_dt = datetime(YEAR, MONTH, DAY, HOUR, MIN, SEC, tzinfo=timezone.utc)  # ← replace each placeholder with the actual integer value
 with evtx.Evtx(path) as log:
     for r in log.records():
         xml = r.xml()
@@ -100,7 +100,7 @@ from datetime import datetime, timezone
 import Evtx.Evtx as evtx, re
 path = '{evidence}/Windows/System32/winevt/Logs/System.evtx'
 last_boot = None
-target_dt = datetime(2014, 2, 20, 17, 2, 35, tzinfo=timezone.utc)
+target_dt = datetime(YEAR, MONTH, DAY, HOUR, MIN, SEC, tzinfo=timezone.utc)  # ← replace with the target date/time
 with evtx.Evtx(path) as log:
     for r in log.records():
         xml = r.xml()
@@ -115,10 +115,10 @@ with evtx.Evtx(path) as log:
 if last_boot:
     print(int((target_dt - last_boot).total_seconds()))
 "
-# → 9634
+# → <uptime in seconds>
 ```
 
-Example: boot `2014-02-20 14:22:00.733999+00:00`, target `2014-02-20T17:02:35Z` → 9634 s
+# uptime_seconds = int((target_dt - last_boot).total_seconds())
 
 ## Tips
 - **Event ID 12** (Kernel-General) = actual OS start — sub-second precision — use for uptime

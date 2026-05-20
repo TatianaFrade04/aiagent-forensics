@@ -10,6 +10,15 @@ FINAL_MOUNT="/forensics"
 INFO_FILE="/forensics_info.txt"
 SECTOR_SIZE=512
 
+# ─── Cleanup helper ──────────────────────────────────────────────────────────
+
+cleanup_partition() {
+    local loop_dev="$1"
+    local mount_point="$2"
+    [ -n "$loop_dev" ]    && losetup -d "$loop_dev"  2>/dev/null
+    [ -d "$mount_point" ] && rmdir    "$mount_point" 2>/dev/null
+}
+
 echo ""
 echo "╔══════════════════════════════════════════╗"
 echo "║        AIAgent@forensics v1.0            ║"
@@ -90,11 +99,22 @@ fi
 
 echo ""
 echo "=== Tabela de partições ==="
+
 MMLS_OUTPUT=$(mmls "$RAW_DEVICE" 2>/dev/null)
-if [ -z "$MMLS_OUTPUT" ]; then
-    echo "[!] mmls não conseguiu ler a tabela de partições."
-else
+FDISK_OUTPUT=""
+
+if [ -n "$MMLS_OUTPUT" ]; then
+    echo "[+] Tabela lida via mmls:"
     echo "$MMLS_OUTPUT"
+else
+    echo "[!] mmls falhou — a tentar fdisk -l como fallback..."
+    FDISK_OUTPUT=$(fdisk -l "$RAW_DEVICE" 2>/dev/null)
+    if [ -n "$FDISK_OUTPUT" ]; then
+        echo "[+] Tabela lida via fdisk -l:"
+        echo "$FDISK_OUTPUT"
+    else
+        echo "[!] Nem mmls nem fdisk -l conseguiram ler a tabela de partições."
+    fi
 fi
 
 # Guarda info base
@@ -102,7 +122,7 @@ fi
     echo "RAW_DEVICE=$RAW_DEVICE"
     echo ""
     echo "=== TABELA DE PARTICOES ==="
-    echo "$MMLS_OUTPUT"
+    [ -n "$MMLS_OUTPUT" ] && echo "$MMLS_OUTPUT" || echo "$FDISK_OUTPUT"
 } > "$INFO_FILE"
 
 # ─── Garante loop devices disponíveis ────────────────────────────────────────
@@ -153,7 +173,7 @@ while IFS= read -r line; do
     MOUNT_POINT="$FINAL_MOUNT/part${SLOT}"
     mkdir -p "$MOUNT_POINT"
 
-    echo "[*] Partição $SLOT — offset=${OFFSET_BYTES}B, size=${SIZE_BYTES}B"
+    echo "[*] Partição $SLOT — start_sector=${START} → offset=${OFFSET_BYTES}B (${START}×${SECTOR_SIZE}), size=${SIZE_BYTES}B"
     echo "PART_${SLOT}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
 
     # Obtém loop device automaticamente
@@ -164,16 +184,34 @@ while IFS= read -r line; do
 
     if [ -z "$LOOP_DEV" ]; then
         echo "[!] Partição $SLOT: não foi possível criar loop device"
-        rmdir "$MOUNT_POINT" 2>/dev/null
+        cleanup_partition "" "$MOUNT_POINT"
         continue
     fi
 
     echo "[*] Loop device: $LOOP_DEV"
 
-    # 1 Tenta montar por ordem de preferência de filesystem
+    # Detecta o filesystem com file -s e ordena as tentativas pelo tipo detectado
+    FS_HINT=$(file -s "$LOOP_DEV" 2>/dev/null)
+    echo "[*] Tipo detectado: $FS_HINT"
+    if echo "$FS_HINT" | grep -qi "ntfs"; then
+        FS_ORDER="ntfs-3g ntfs3 ntfs ext4 ext3 ext2 vfat auto"
+    elif echo "$FS_HINT" | grep -qi "ext4"; then
+        FS_ORDER="ext4 ext3 ext2 ntfs-3g ntfs3 ntfs vfat auto"
+    elif echo "$FS_HINT" | grep -qi "ext3"; then
+        FS_ORDER="ext3 ext4 ext2 ntfs-3g ntfs3 ntfs vfat auto"
+    elif echo "$FS_HINT" | grep -qi "ext2"; then
+        FS_ORDER="ext2 ext3 ext4 ntfs-3g ntfs3 ntfs vfat auto"
+    elif echo "$FS_HINT" | grep -qiE "fat|mkdosfs"; then
+        FS_ORDER="vfat ntfs-3g ntfs3 ntfs ext4 ext3 ext2 auto"
+    else
+        FS_ORDER="ntfs-3g ntfs3 ntfs ext4 ext3 ext2 vfat auto"
+    fi
+
     MOUNT_OK=0
-    for FS in ntfs-3g ntfs ext4 ext3 ext2 vfat auto; do
-        if [ "$FS" = "auto" ]; then
+    for FS in $FS_ORDER; do
+        if [ "$FS" = "ntfs-3g" ]; then
+            MOUNT_OUT=$(mount -t ntfs-3g -o ro,norecovery "$LOOP_DEV" "$MOUNT_POINT" 2>&1)
+        elif [ "$FS" = "auto" ]; then
             MOUNT_OUT=$(mount -o ro "$LOOP_DEV" "$MOUNT_POINT" 2>&1)
         else
             MOUNT_OUT=$(mount -t "$FS" -o ro "$LOOP_DEV" "$MOUNT_POINT" 2>&1)
@@ -193,11 +231,160 @@ while IFS= read -r line; do
     if [ "$MOUNT_OK" -eq 0 ]; then
         echo "[!] Partição $SLOT: mount falhou em todos os filesystems ($MOUNT_OUT)"
         echo "[!] Offset disponível para uso directo com fls/icat: $OFFSET_BYTES"
-        losetup -d "$LOOP_DEV" 2>/dev/null
-        rmdir "$MOUNT_POINT" 2>/dev/null
+        cleanup_partition "$LOOP_DEV" "$MOUNT_POINT"
     fi
 
 done < <(echo "$MMLS_OUTPUT" | grep -E "^\s*[0-9]")
+
+# ─── Fallback: monta via fdisk -l se mmls não produziu partições ─────────────
+
+if [ "$MOUNTED" -eq 0 ] && [ -n "$FDISK_OUTPUT" ]; then
+    echo ""
+    echo "[*] A tentar montar partições via offsets fdisk..."
+    SLOT=1
+
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        echo "$line" | grep -qE "^(Disk |Device|Disklabel|Units|Sector|I/O)" && continue
+        echo "$line" | grep -qE "^\S" || continue
+
+        # fdisk: Device [Boot] Start End Sectors Size [Id Type]
+        # Se $2 == "*" (bootável): Start=$3, Sectors=$5; senão: Start=$2, Sectors=$4
+        BOOT=$(echo "$line" | awk '{print $2}')
+        if [ "$BOOT" = "*" ]; then
+            START=$(echo "$line"  | awk '{print $3}' | sed 's/^0*//')
+            LENGTH=$(echo "$line" | awk '{print $5}' | sed 's/^0*//')
+        else
+            START=$(echo "$line"  | awk '{print $2}' | sed 's/^0*//')
+            LENGTH=$(echo "$line" | awk '{print $4}' | sed 's/^0*//')
+        fi
+
+        [[ "$START"  =~ ^[0-9]+$ ]] || continue
+        [[ "$LENGTH" =~ ^[0-9]+$ ]] || continue
+        [ "$START"  -eq 0 ] 2>/dev/null && continue
+        [ "$LENGTH" -eq 0 ] 2>/dev/null && continue
+
+        OFFSET_BYTES=$(( START  * SECTOR_SIZE ))
+        SIZE_BYTES=$(( LENGTH * SECTOR_SIZE ))
+        MOUNT_POINT="$FINAL_MOUNT/part${SLOT}"
+        mkdir -p "$MOUNT_POINT"
+
+        echo "[*] Partição $SLOT (fdisk) — start_sector=${START} → offset=${OFFSET_BYTES}B (${START}×${SECTOR_SIZE}), size=${SIZE_BYTES}B"
+        echo "PART_${SLOT}_OFFSET=$OFFSET_BYTES" >> "$INFO_FILE"
+
+        LOOP_DEV=$(losetup --find --show \
+            -o "$OFFSET_BYTES" \
+            --sizelimit "$SIZE_BYTES" \
+            --read-only "$RAW_DEVICE" 2>/dev/null)
+
+        if [ -z "$LOOP_DEV" ]; then
+            echo "[!] Partição $SLOT: não foi possível criar loop device"
+            cleanup_partition "" "$MOUNT_POINT"
+            SLOT=$(( SLOT + 1 ))
+            continue
+        fi
+
+        echo "[*] Loop device: $LOOP_DEV"
+
+        # Detecta o filesystem com file -s e ordena as tentativas pelo tipo detectado
+        FS_HINT=$(file -s "$LOOP_DEV" 2>/dev/null)
+        echo "[*] Tipo detectado: $FS_HINT"
+        if echo "$FS_HINT" | grep -qi "ntfs"; then
+            FS_ORDER="ntfs-3g ntfs ext4 ext3 ext2 vfat auto"
+        elif echo "$FS_HINT" | grep -qi "ext4"; then
+            FS_ORDER="ext4 ext3 ext2 ntfs-3g ntfs vfat auto"
+        elif echo "$FS_HINT" | grep -qi "ext3"; then
+            FS_ORDER="ext3 ext4 ext2 ntfs-3g ntfs vfat auto"
+        elif echo "$FS_HINT" | grep -qi "ext2"; then
+            FS_ORDER="ext2 ext3 ext4 ntfs-3g ntfs vfat auto"
+        elif echo "$FS_HINT" | grep -qiE "fat|mkdosfs"; then
+            FS_ORDER="vfat ntfs-3g ntfs ext4 ext3 ext2 auto"
+        else
+            FS_ORDER="ntfs-3g ntfs ext4 ext3 ext2 vfat auto"
+        fi
+
+        MOUNT_OK=0
+        for FS in $FS_ORDER; do
+            if [ "$FS" = "auto" ]; then
+                MOUNT_OUT=$(mount -o ro "$LOOP_DEV" "$MOUNT_POINT" 2>&1)
+            else
+                MOUNT_OUT=$(mount -t "$FS" -o ro "$LOOP_DEV" "$MOUNT_POINT" 2>&1)
+            fi
+            if [ $? -eq 0 ]; then
+                echo "[+] Partição $SLOT montada em $MOUNT_POINT (fs=$FS)"
+                {
+                    echo "PART_${SLOT}_MOUNT=$MOUNT_POINT"
+                    echo "PART_${SLOT}_FS=$FS"
+                } >> "$INFO_FILE"
+                MOUNT_OK=1
+                MOUNTED=$(( MOUNTED + 1 ))
+                break
+            fi
+        done
+
+        if [ "$MOUNT_OK" -eq 0 ]; then
+            echo "[!] Partição $SLOT: mount falhou em todos os filesystems ($MOUNT_OUT)"
+            echo "[!] Offset disponível para uso directo com fls/icat: $OFFSET_BYTES"
+            cleanup_partition "$LOOP_DEV" "$MOUNT_POINT"
+        fi
+
+        SLOT=$(( SLOT + 1 ))
+    done < <(echo "$FDISK_OUTPUT")
+fi
+
+# ─── Fallback: sem tabela de partições — monta RAW_DEVICE directamente ────────
+# Nota: losetup falha em ficheiros FUSE (ewf1). Usamos "mount -o loop" que
+# usa um caminho kernel diferente (sem O_DIRECT explícito).
+
+if [ "$MOUNTED" -eq 0 ] && [ -n "$RAW_DEVICE" ]; then
+    echo ""
+    echo "[*] No partition table detected — trying direct filesystem mount..."
+    MOUNT_POINT="$FINAL_MOUNT/part0"
+    mkdir -p "$MOUNT_POINT"
+
+    FS_HINT=$(file -s "$RAW_DEVICE" 2>/dev/null)
+    echo "[*] Detected type: $FS_HINT"
+
+    if echo "$FS_HINT" | grep -qi "ext4"; then
+        FS_ORDER="ext4 ext3 ext2"
+    elif echo "$FS_HINT" | grep -qi "ext3"; then
+        FS_ORDER="ext3 ext4 ext2"
+    elif echo "$FS_HINT" | grep -qi "ext2"; then
+        FS_ORDER="ext2 ext3 ext4"
+    elif echo "$FS_HINT" | grep -qi "ntfs"; then
+        FS_ORDER="ntfs-3g"
+    else
+        FS_ORDER="ext4 ext3 ext2 ntfs-3g vfat"
+    fi
+
+    MOUNT_OK=0
+    for FS in $FS_ORDER; do
+        if [ "$FS" = "ntfs-3g" ]; then
+            MOUNT_OUT=$(mount -t ntfs-3g -o ro,norecovery,loop "$RAW_DEVICE" "$MOUNT_POINT" 2>&1)
+        elif [ "$FS" = "ext3" ]; then
+            MOUNT_OUT=$(mount -t ext3 -o ro,noload,loop "$RAW_DEVICE" "$MOUNT_POINT" 2>&1)
+        elif [ "$FS" = "ext4" ]; then
+            MOUNT_OUT=$(mount -t ext4 -o ro,norecovery,loop "$RAW_DEVICE" "$MOUNT_POINT" 2>&1)
+        else
+            MOUNT_OUT=$(mount -t "$FS" -o ro,loop "$RAW_DEVICE" "$MOUNT_POINT" 2>&1)
+        fi
+        if [ $? -eq 0 ]; then
+            echo "[+] Direct mount at $MOUNT_POINT (fs=$FS)"
+            echo "PART_0_MOUNT=$MOUNT_POINT" >> "$INFO_FILE"
+            echo "PART_0_FS=$FS" >> "$INFO_FILE"
+            MOUNT_OK=1
+            MOUNTED=1
+            break
+        else
+            echo "[!] mount -t $FS failed: $MOUNT_OUT"
+        fi
+    done
+
+    if [ "$MOUNT_OK" -eq 0 ]; then
+        echo "[!] All filesystems failed. Check errors above."
+        rmdir "$MOUNT_POINT" 2>/dev/null
+    fi
+fi
 
 # ─── Resumo ───────────────────────────────────────────────────────────────────
 

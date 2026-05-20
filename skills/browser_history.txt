@@ -1,6 +1,6 @@
 SKILL: browser_history
 DESCRIPTION: Extract browser history, visited URLs, downloads, and searches from Chrome, Firefox, and Edge SQLite databases. SQLite files must be copied to /exports/ before querying (evidence is READ-ONLY).
-KEYWORDS: browser, history, historico, chrome, firefox, edge, internet explorer, ie, sqlite, url, visited, visitado, downloads, search, pesquisa, web, navegacao, navegador, bookmark, marcadores, favoritos, cookies, cache, historico de navegacao, sites visitados, browsing history, web history, internet history, pasco, index.dat, places.sqlite, History, timeline, web activity, atividade web, credentials, login, passwords, saved passwords, form data, dados formulario, credenciais, logins guardados, signons, keyword search, search terms, termos pesquisa
+KEYWORDS: browser, history, chrome, firefox, edge, internet explorer, ie, sqlite, url, visited, downloads, search, web, bookmark, cookies, cache, browsing history, web history, internet history, pasco, index.dat, places.sqlite, History, timeline, web activity, credentials, login, passwords, saved passwords, form data, signons, keyword search, search terms
 ---
 
 ## What is browser history analysis?
@@ -21,6 +21,11 @@ Browsers store visited URLs, search queries, downloads, and cookies in SQLite da
 | Edge (Chromium) | History | `USERS/<user>/AppData/Local/Microsoft/Edge/User Data/Default/History` |
 | Firefox | places.sqlite | `USERS/<user>/AppData/Roaming/Mozilla/Firefox/Profiles/*.default*/places.sqlite` |
 | IE | index.dat | `USERS/<user>/AppData/Local/Microsoft/Windows/History/` |
+
+## CRITICAL: NEVER grep browser database files
+`places.sqlite`, `History`, and other browser files are binary SQLite databases.
+`grep` and `strings` on these files return partial binary garbage — NOT reliable results.
+ALWAYS copy to /exports/ and use sqlite3 to query.
 
 ## CRITICAL: copy pattern — NEVER use wildcards in cp paths
 WRONG: cp '{evidence}/USERS/*/AppData/.../places.sqlite' /exports/
@@ -45,6 +50,11 @@ sqlite3 /exports/firefox_places.db "SELECT p.url, a.content, datetime(a.lastModi
 # Firefox: saved credentials — MUST find and copy first; table is moz_logins (NOT logins, NOT users)
 # WARNING: sqlite3 creates an empty file if given a non-existent path — always copy before querying
 SIGNONS=$(find '{evidence}/USERS' -iname 'signons.sqlite' 2>/dev/null | head -1); cp "$SIGNONS" /exports/signons.db && sqlite3 /exports/signons.db "SELECT hostname, encryptedUsername, encryptedPassword FROM moz_logins;"
+
+# Firefox: find which search engine was used for a specific term (e.g. "how to steal identities")
+# The URL contains the search term — the domain reveals the search engine (bing.com = Bing, google.com = Google, etc.)
+FIREFOX_DB=$(find '{evidence}/USERS' -iname 'places.sqlite' 2>/dev/null | head -1); cp "$FIREFOX_DB" /exports/firefox_places.db
+sqlite3 /exports/firefox_places.db "SELECT url FROM moz_places WHERE url LIKE '%steal%' OR url LIKE '%identit%' OR title LIKE '%steal%' LIMIT 20;"
 
 # Firefox: extract search queries from URL history (keyword_search_terms does NOT exist in Firefox — Chrome only)
 sqlite3 /exports/firefox_places.db "SELECT url, title, datetime(last_visit_date/1000000,'unixepoch') as searched_at FROM moz_places WHERE (url LIKE '%google%search%' OR url LIKE '%bing%search%' OR url LIKE '%q=%') AND visit_count > 0 ORDER BY last_visit_date DESC LIMIT 30;"

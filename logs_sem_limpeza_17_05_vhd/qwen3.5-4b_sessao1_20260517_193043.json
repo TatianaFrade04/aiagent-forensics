@@ -1,0 +1,68 @@
+{
+  "modelo": "qwen3.5:4b",
+  "ctx": 65536,
+  "limpar_contexto": false,
+  "sessao": 1,
+  "timestamp_inicio": "2026-05-17T19:30:43.964613",
+  "timestamp_fim": "2026-05-17T19:45:59.852409",
+  "perguntas": [
+    {
+      "id": "Q22",
+      "pergunta": "True or False: The SHA1 hash value for the Card Printers.htm file is F6CF04DB3D1BA828E375BBFE988876CE06164126. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 43.58,
+      "metricas_ollama": {
+        "total_duration_ns": 39987696820,
+        "prompt_eval_count": 49934,
+        "eval_count": 808,
+        "tool_calls": 4
+      }
+    },
+    {
+      "id": "Q23",
+      "pergunta": "What search engine did the user \"Jimmy Wilson\" use to search for \"how to steal identities\"? Choose from: a) Yahoo  b) Bing  c) DuckDuckGo  d) Dogpile  e) Google. Reply with only the letter.",
+      "resposta_correta": "b",
+      "tipo": "mc",
+      "resposta_modelo_raw": "Based on the search results, the main topic is **handguns**.\n\nThe search results show a variety of handgun images from different sources, including:\n- Semi-automatic pistols (like the SR9 Model 3301)\n- Revolvers (including Italian-style Remington single-action revolvers)\n- Historical handguns from WWII\n- Modern concealed carry handguns\n- Gaming-related handgun images\n- Various handgun models from manufacturers like Springfield, Kahr, Taurus, and others\n\nThe results span multiple contexts including gun sales, historical collections, gaming art, and general handgun photography.",
+      "resposta_extraida": "a",
+      "correto": false,
+      "tempo_segundos": 235.42,
+      "metricas_ollama": {
+        "total_duration_ns": 230594225970,
+        "prompt_eval_count": 86954,
+        "eval_count": 586,
+        "tool_calls": 2
+      }
+    },
+    {
+      "id": "Q24",
+      "pergunta": "What is the last date and time the user \"Jimmy Wilson\" ran the Windows Mail Application? Choose from: a) Sat, 25 January 2014 15:27:51 UTC  b) Sat, 25 January 2014 19:27:51 UTC  c) Sat, 25 January 2014 18:27:51 UTC  d) Sat, 25 January 2014 17:27:51 UTC  e) Sat, 25 January 2014 16:27:51 UTC. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "",
+      "resposta_extraida": "",
+      "correto": false,
+      "tempo_segundos": 600.0,
+      "metricas_ollama": {
+        "total_duration_ns": 255861557811,
+        "prompt_eval_count": 144800,
+        "eval_count": 2820,
+        "tool_calls": 8
+      }
+    }
+  ],
+  "resumo": {
+    "total_perguntas": 3,
+    "corretas": 1,
+    "incorretas": 2,
+    "score_percentagem": 33.3,
+    "tempo_total_segundos": 879.0,
+    "tempo_medio_segundos": 293.0,
+    "total_tool_calls": 14
+  },
+  "duracao_wall_segundos": 915.9
+}

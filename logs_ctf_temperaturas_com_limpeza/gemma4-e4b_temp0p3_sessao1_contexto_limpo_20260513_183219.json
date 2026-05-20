@@ -1,0 +1,325 @@
+{
+  "modelo": "gemma4:e4b",
+  "temperatura": 0.3,
+  "ctx": 131072,
+  "limpar_contexto": true,
+  "sessao": 1,
+  "timestamp_inicio": "2026-05-14T07:10:17.251581",
+  "timestamp_fim": "2026-05-14T08:50:37.471822",
+  "perguntas": [
+    {
+      "id": "Q1",
+      "pergunta": "What is the destination time zone offset in the first Received header of the email file 447018D5-00000006.eml? Choose from: a) +04:00  b) -07:00  c) -08:00  d) -05:00  e) -09:00. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "c",
+      "resposta_extraida": "c",
+      "correto": true,
+      "tempo_segundos": 130.57,
+      "metricas_ollama": {
+        "total_duration_ns": 129985598861,
+        "prompt_eval_count": 27788,
+        "eval_count": 417,
+        "tool_calls": 2
+      }
+    },
+    {
+      "id": "Q2",
+      "pergunta": "True or False: The total capacity in bytes of the \"J. Wilson\" partition in System.vhd is 734,003,200. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 553.17,
+      "metricas_ollama": {
+        "total_duration_ns": 551528738459,
+        "prompt_eval_count": 70583,
+        "eval_count": 2770,
+        "tool_calls": 7
+      }
+    },
+    {
+      "id": "Q3",
+      "pergunta": "What was the date and time the email \"447018D5-00000006.eml\" received by Jimmy Wilson was originally sent? Choose from: a) Sun, 16 February 2014 10:55:09 -05:00  b) Sun, 16 February 2014 07:55:09 -05:00  c) Sun, 16 February 2014 12:55:09 -05:00  d) Sun, 16 February 2014 11:55:09 -05:00  e) Sun, 16 February 2014 13:55:09 -05:00. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "c",
+      "resposta_extraida": "c",
+      "correto": true,
+      "tempo_segundos": 320.67,
+      "metricas_ollama": {
+        "total_duration_ns": 319976508102,
+        "prompt_eval_count": 38761,
+        "eval_count": 1026,
+        "tool_calls": 3
+      }
+    },
+    {
+      "id": "Q6",
+      "pergunta": "True or False: On February 20, 2014 at 17:02:35 UTC, the system uptime in seconds was 9,634. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 161.68,
+      "metricas_ollama": {
+        "total_duration_ns": 131441079058,
+        "prompt_eval_count": 18569,
+        "eval_count": 508,
+        "tool_calls": 1
+      }
+    },
+    {
+      "id": "Q7",
+      "pergunta": "True or False: The MD5 hash value of the pdf.pdf file is C1F95108A34228535A9262085E784D7C3E27FC68. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "false",
+      "tipo": "tf",
+      "resposta_modelo_raw": "false",
+      "resposta_extraida": "false",
+      "correto": true,
+      "tempo_segundos": 217.54,
+      "metricas_ollama": {
+        "total_duration_ns": 215072347601,
+        "prompt_eval_count": 26883,
+        "eval_count": 1182,
+        "tool_calls": 2
+      }
+    },
+    {
+      "id": "Q8",
+      "pergunta": "True or False: The user account Jimmy Wilson has his logon password enabled and the password hint is \"safeone\". Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 100.58,
+      "metricas_ollama": {
+        "total_duration_ns": 99990371175,
+        "prompt_eval_count": 21579,
+        "eval_count": 294,
+        "tool_calls": 1
+      }
+    },
+    {
+      "id": "Q10",
+      "pergunta": "True or False: The final destination IP address for the email \"447018D5-00000006.eml\" received by Jimmy Wilson is 10.221.48.196. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 161.44,
+      "metricas_ollama": {
+        "total_duration_ns": 161016585805,
+        "prompt_eval_count": 23432,
+        "eval_count": 531,
+        "tool_calls": 2
+      }
+    },
+    {
+      "id": "Q12",
+      "pergunta": "What is the logical size in bytes (decimal) of the pdf.pdf file? Choose from: a) 444,332  b) 433,994  c) 395,232  d) 253,283. Reply with only the letter.",
+      "resposta_correta": "b",
+      "tipo": "mc",
+      "resposta_modelo_raw": "b",
+      "resposta_extraida": "b",
+      "correto": true,
+      "tempo_segundos": 170.24,
+      "metricas_ollama": {
+        "total_duration_ns": 167934850329,
+        "prompt_eval_count": 27957,
+        "eval_count": 673,
+        "tool_calls": 2
+      }
+    },
+    {
+      "id": "Q13",
+      "pergunta": "True or False: The user account BillyBob sent the following files to the $recyclebin: \"New Price List.txt\" and \"New Price List Encoded\". Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "false",
+      "resposta_extraida": "false",
+      "correto": false,
+      "tempo_segundos": 320.83,
+      "metricas_ollama": {
+        "total_duration_ns": 305863619393,
+        "prompt_eval_count": 38849,
+        "eval_count": 2213,
+        "tool_calls": 3
+      }
+    },
+    {
+      "id": "Q14",
+      "pergunta": "What is the logical file size in bytes (decimal) of the PLEAS.txt file? Choose from: a) 110,592  b) 122,336  c) 122,880  d) 108,227. Reply with only the letter.",
+      "resposta_correta": "b",
+      "tipo": "mc",
+      "resposta_modelo_raw": "b",
+      "resposta_extraida": "b",
+      "correto": true,
+      "tempo_segundos": 303.15,
+      "metricas_ollama": {
+        "total_duration_ns": 300608071743,
+        "prompt_eval_count": 46798,
+        "eval_count": 1002,
+        "tool_calls": 4
+      }
+    },
+    {
+      "id": "Q15",
+      "pergunta": "What is the full name of the user that has the RID number 0x3EB? Choose from: a) Administrator  b) Betty Boop  c) Joe T. Nameless  d) BillyBob  e) Guest. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "c",
+      "resposta_extraida": "c",
+      "correto": true,
+      "tempo_segundos": 340.95,
+      "metricas_ollama": {
+        "total_duration_ns": 339657180589,
+        "prompt_eval_count": 32231,
+        "eval_count": 2806,
+        "tool_calls": 3
+      }
+    },
+    {
+      "id": "Q16",
+      "pergunta": "When was the last login date and time for the user \"Jimmy Wilson\"? Choose from: a) February 18, 2014 12:38:16 UTC  b) January 19, 2014 06:22:12 UTC  c) March 03, 2014 11:11:11 UTC  d) None of these times are correct  e) February 19, 2014 13:30:58 UTC  f) April 01, 2014 00:00:01 UTC  g) February 17, 2014 17:38:22 UTC. Reply with only the letter.",
+      "resposta_correta": "d",
+      "tipo": "mc",
+      "resposta_modelo_raw": "e",
+      "resposta_extraida": "e",
+      "correto": false,
+      "tempo_segundos": 118.79,
+      "metricas_ollama": {
+        "total_duration_ns": 118377450735,
+        "prompt_eval_count": 19174,
+        "eval_count": 292,
+        "tool_calls": 1
+      }
+    },
+    {
+      "id": "Q17",
+      "pergunta": "True or False: jose.Badguy@hushmail.com and robert.ripoff@gmx.com sent emails to the user Jimmy Wilson. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 897.25,
+      "metricas_ollama": {
+        "total_duration_ns": 895699496340,
+        "prompt_eval_count": 85312,
+        "eval_count": 5089,
+        "tool_calls": 9
+      }
+    },
+    {
+      "id": "Q18",
+      "pergunta": "What program did the user Jimmy Wilson have set to run when he logged on to the computer? Choose from: a) None of the other answers are correct  b) Notepad.exe  c) StinkyNot.exe  d) MSAccess.exe  e) MSWord.exe. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "a",
+      "resposta_extraida": "a",
+      "correto": false,
+      "tempo_segundos": 175.97,
+      "metricas_ollama": {
+        "total_duration_ns": 175806641272,
+        "prompt_eval_count": 14778,
+        "eval_count": 273,
+        "tool_calls": 1
+      }
+    },
+    {
+      "id": "Q19",
+      "pergunta": "True or False: The SHA1 hash value for the AISB08.pdf file is BDEBF09E8B2D404D1C483C3EBFB8AD37C780D909. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 277.81,
+      "metricas_ollama": {
+        "total_duration_ns": 275274237134,
+        "prompt_eval_count": 36040,
+        "eval_count": 1027,
+        "tool_calls": 3
+      }
+    },
+    {
+      "id": "Q20",
+      "pergunta": "What encryption programs were used on this computer? Choose from: a) Veracrypt/BitLocker  b) BitLocker/Veracrypt  c) File Vault/Truecrypt  d) BCTextEncoder/Veracrypt  e) No encryption programs were used  f) Truecrypt/BCTextEncoder. Reply with only the letter, read all options before reply.",
+      "resposta_correta": "f",
+      "tipo": "mc",
+      "resposta_modelo_raw": "f",
+      "resposta_extraida": "f",
+      "correto": true,
+      "tempo_segundos": 298.53,
+      "metricas_ollama": {
+        "total_duration_ns": 297458147388,
+        "prompt_eval_count": 34516,
+        "eval_count": 1284,
+        "tool_calls": 3
+      }
+    },
+    {
+      "id": "Q22",
+      "pergunta": "True or False: The SHA1 hash value for the Card Printers.htm file is F6CF04DB3D1BA828E375BBFE988876CE06164126. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 161.57,
+      "metricas_ollama": {
+        "total_duration_ns": 159278454306,
+        "prompt_eval_count": 26893,
+        "eval_count": 1010,
+        "tool_calls": 2
+      }
+    },
+    {
+      "id": "Q23",
+      "pergunta": "What search engine did the user \"Jimmy Wilson\" use to search for \"how to steal identities\"? Choose from: a) Yahoo  b) Bing  c) DuckDuckGo  d) Dogpile  e) Google. Reply with only the letter.",
+      "resposta_correta": "b",
+      "tipo": "mc",
+      "resposta_modelo_raw": "b",
+      "resposta_extraida": "b",
+      "correto": true,
+      "tempo_segundos": 933.79,
+      "metricas_ollama": {
+        "total_duration_ns": 931704251461,
+        "prompt_eval_count": 95155,
+        "eval_count": 3480,
+        "tool_calls": 9
+      }
+    },
+    {
+      "id": "Q24",
+      "pergunta": "What is the last date and time the user \"Jimmy Wilson\" ran the Windows Mail Application? Choose from: a) Sat, 25 January 2014 15:27:51 UTC  b) Sat, 25 January 2014 19:27:51 UTC  c) Sat, 25 January 2014 18:27:51 UTC  d) Sat, 25 January 2014 17:27:51 UTC  e) Sat, 25 January 2014 16:27:51 UTC. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "c",
+      "resposta_extraida": "c",
+      "correto": true,
+      "tempo_segundos": 338.91,
+      "metricas_ollama": {
+        "total_duration_ns": 338265959027,
+        "prompt_eval_count": 50606,
+        "eval_count": 2325,
+        "tool_calls": 4
+      }
+    }
+  ],
+  "resumo": {
+    "total_perguntas": 19,
+    "corretas": 16,
+    "incorretas": 3,
+    "score_percentagem": 84.2,
+    "tempo_total_segundos": 5983.44,
+    "tempo_medio_segundos": 314.92,
+    "total_tool_calls": 62
+  },
+  "duracao_wall_segundos": 6020.2
+}

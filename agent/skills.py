@@ -1,6 +1,6 @@
 """
-skills.py — Sistema de skills forenses modulares
-Carrega, seleciona e injeta skills relevantes no contexto do agente.
+skills.py — Modular forensic skills system
+Loads, selects, and injects relevant skills into the agent context.
 """
 
 import os
@@ -9,31 +9,31 @@ import unicodedata
 from dataclasses import dataclass, field
 
 
-# ─── Modelo de uma skill ──────────────────────────────────────────────────────
+# ─── Skill model ─────────────────────────────────────────────────────────────
 
 @dataclass
 class Skill:
     name: str
     description: str
     keywords: list[str]
-    content: str          # Corpo completo após o separador ---
+    content: str          # Full body after the --- separator
     filepath: str
 
     def __repr__(self):
         return f"Skill({self.name!r}, keywords={len(self.keywords)})"
 
 
-# ─── Parser de ficheiros .txt ─────────────────────────────────────────────────
+# ─── Skill file parser ───────────────────────────────────────────────────────
 
 def _parse_skill_file(filepath: str) -> Skill | None:
-    """Lê um ficheiro de skill e extrai metadata + conteúdo."""
+    """Read a skill .txt file and extract metadata + body content."""
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             text = f.read()
     except OSError:
         return None
 
-    # Separa header (metadata) do body (conteúdo)
+    # Split header (metadata) from body (content)
     parts = text.split("\n---\n", maxsplit=1)
     header = parts[0]
     body = parts[1].strip() if len(parts) > 1 else ""
@@ -64,10 +64,10 @@ def _parse_skill_file(filepath: str) -> Skill | None:
     )
 
 
-# ─── Carregamento de todas as skills ──────────────────────────────────────────
+# ─── Load all skills ─────────────────────────────────────────────────────────
 
 def load_skills(skills_dir: str | None = None) -> list[Skill]:
-    """Carrega todos os ficheiros .txt da directoria de skills."""
+    """Load all .txt skill files from the skills directory."""
     if skills_dir is None:
         skills_dir = os.path.join(os.path.dirname(__file__), "..", "skills")
     skills_dir = os.path.abspath(skills_dir)
@@ -87,7 +87,7 @@ def load_skills(skills_dir: str | None = None) -> list[Skill]:
     return skills
 
 
-# ─── Seleção de skills relevantes ─────────────────────────────────────────────
+# ─── Relevant skill selection ────────────────────────────────────────────────
 
 _STOP_WORDS = frozenset({
     "a", "an", "the", "is", "are", "was", "were", "be", "been",
@@ -109,14 +109,83 @@ _STOP_WORDS = frozenset({
     "e", "ou", "mas", "nao", "sim", "mais", "muito",
 })
 
+_PT_TO_EN: dict[str, str] = {
+    # filesystem / files
+    "imagem": "disk",           # "imagem forense" → disk (never photo)
+    "ficheiro": "file",
+    "ficheiros": "files",
+    "pasta": "folder",
+    "directoria": "directory",
+    "directorio": "directory",
+    "extensao": "extension",
+    "apagado": "deleted",
+    "apagados": "deleted",
+    "lixo": "recycle",
+    # users / accounts
+    "utilizador": "user",
+    "utilizadores": "users",
+    "conta": "account",
+    "contas": "accounts",
+    "senha": "password",
+    "palavra-passe": "password",
+    "login": "login",
+    "sessao": "session",
+    # registry
+    "registo": "registry",
+    "registro": "registry",
+    "chave": "key",
+    "hive": "hive",
+    # time / events
+    "arranque": "boot",
+    "inicializacao": "boot",
+    "desligamento": "shutdown",
+    "historico": "history",
+    "timestamp": "timestamp",
+    # actions
+    "encontrar": "find",
+    "procurar": "search",
+    "listar": "list",
+    "mostrar": "show",
+    "ver": "view",
+    "analisar": "analyze",
+    "instalar": "install",
+    "instalado": "installed",
+    # misc
+    "rede": "network",
+    "programa": "program",
+    "programas": "programs",
+    "software": "software",
+    "partilha": "share",
+    "ligacao": "connection",
+    "prefetch": "prefetch",
+    "browser": "browser",
+    "email": "email",
+    "correio": "email",
+}
+
+
 def _normalize(text: str) -> str:
-    """Remove acentos para comparação independente de diacríticos."""
+    """Strip accents for diacritic-independent comparison."""
     return unicodedata.normalize("NFD", text).encode("ascii", "ignore").decode("ascii")
 
 
+def _translate_pt(text: str) -> str:
+    """Replace Portuguese words with English equivalents before keyword matching."""
+    words = text.split()
+    translated = []
+    for w in words:
+        bare = re.sub(r"[^a-zA-ZÀ-ÿ0-9\-]", "", w)  # strip punctuation
+        key = _normalize(bare.lower())
+        key_deplural = key.rstrip("s")
+        mapped = _PT_TO_EN.get(key) or _PT_TO_EN.get(key_deplural)
+        translated.append(mapped if mapped else w)
+    return " ".join(translated)
+
+
 def _tokenize(text: str) -> set[str]:
-    """Tokeniza texto em palavras normalizadas, removendo stop words e acentos."""
-    normalized = _normalize(text.lower())
+    """Tokenize text into normalised words, removing stop words and accents."""
+    translated = _translate_pt(text)
+    normalized = _normalize(translated.lower())
     words = re.findall(r"[a-zA-Z0-9_./\-]+", normalized)
     return {w for w in words if w not in _STOP_WORDS and len(w) > 1}
 
@@ -128,16 +197,16 @@ def select_skills(
     min_score: float = 0.10,
 ) -> list[Skill]:
     """
-    Seleciona as skills mais relevantes para uma query do utilizador.
+    Select the most relevant skills for a user query.
 
-    Usa keyword matching com scoring baseado em:
-    1. Match exato de tokens da query com keywords da skill
-    2. Match de substring (keyword contida no query ou vice-versa)
+    Uses keyword matching with multi-tier scoring:
+    1. Exact token match between query tokens and skill keywords
+    2. Substring match (keyword contained in query or vice-versa)
 
-    Retorna no máximo `max_skills` skills, ordenadas por relevância.
+    Returns at most `max_skills` skills, sorted by relevance score.
     """
     query_tokens = _tokenize(query)
-    query_lower = query.lower()
+    query_lower = _normalize(_translate_pt(query).lower())  # translated + accent-stripped
 
     if not query_tokens:
         return []
@@ -147,17 +216,17 @@ def select_skills(
     for skill in skills:
         score = 0.0
 
-        # 1. Match exato de tokens com keywords
+        # 1. Exact token match with keywords
         for kw in skill.keywords:
             kw_tokens = set(kw.split())
-            # Keyword multi-palavra: todas as palavras presentes na query
+            # Multi-word keyword: all words must be present in the query
             if kw_tokens and kw_tokens.issubset(query_tokens):
                 score += 2.0
-            # Keyword como substring da query
+            # Keyword as substring of the (translated) query
             elif kw in query_lower:
                 score += 1.5
 
-        # 2. Match de tokens individuais
+        # 2. Individual token match
         for token in query_tokens:
             for kw in skill.keywords:
                 if token == kw:
@@ -165,7 +234,7 @@ def select_skills(
                 elif token in kw or kw in token:
                     score += 0.5
 
-        # 3. Match no nome e descrição da skill
+        # 3. Match against skill name and description tokens
         skill_name_tokens = _tokenize(skill.name)
         skill_desc_tokens = _tokenize(skill.description)
         name_overlap = len(query_tokens & skill_name_tokens)
@@ -173,23 +242,23 @@ def select_skills(
         score += name_overlap * 1.5
         score += desc_overlap * 0.5
 
-        # Normalizar pelo número de keywords para não favorecer skills com muitas keywords
+        # Normalise by keyword count to avoid bias toward high-keyword skills
         normalizer = max(len(skill.keywords), 1)
         normalized_score = score / normalizer
 
         if normalized_score >= min_score:
             scored.append((normalized_score, skill))
 
-    # Ordenar por score decrescente
+    # Sort by score descending
     scored.sort(key=lambda x: x[0], reverse=True)
 
     return [skill for _, skill in scored[:max_skills]]
 
 
-# ─── Formatação para injeção no prompt ─────────────────────────────────────────
+# ─── Formatting for prompt injection ─────────────────────────────────────────
 
 def _extract_examples(content: str, max_commands: int = 2) -> str:
-    """Extrai apenas linhas de comando dos blocos de código (sem comentários)."""
+    """Extract only command lines from code blocks (skip comments and blank lines)."""
     lines = content.splitlines()
     commands: list[str] = []
     in_block = False
@@ -199,7 +268,7 @@ def _extract_examples(content: str, max_commands: int = 2) -> str:
             continue
         if in_block:
             stripped = line.strip()
-            # Ignorar comentários e linhas vazias
+            # Skip comments and blank lines
             if stripped and not stripped.startswith("#"):
                 commands.append(stripped)
                 if len(commands) >= max_commands:
@@ -208,11 +277,11 @@ def _extract_examples(content: str, max_commands: int = 2) -> str:
 
 
 def format_skills_context(skills: list[Skill], evidence: str = "{evidence}") -> str:
-    """Formata as skills para serem injetadas no system prompt.
+    """Format selected skills for injection into the system prompt.
 
-    Injeta o conteúdo completo de cada skill selecionada (tabelas, avisos, exemplos).
-    Os caminhos hardcoded {evidence} nos ficheiros de skill são substituídos
-    pelo caminho de evidência real antes da injeção no prompt.
+    Injects the full content of each selected skill (tables, warnings, examples).
+    Hardcoded {evidence} placeholders in skill files are replaced with the
+    actual evidence path before injection.
     """
     if not skills:
         return ""

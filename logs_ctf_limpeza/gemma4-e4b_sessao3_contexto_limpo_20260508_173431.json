@@ -1,0 +1,83 @@
+{
+  "modelo": "gemma4:e4b",
+  "ctx": 131072,
+  "limpar_contexto": true,
+  "sessao": 3,
+  "timestamp_inicio": "2026-05-08T18:55:33.912135",
+  "timestamp_fim": "2026-05-08T19:03:08.806439",
+  "perguntas": [
+    {
+      "id": "Q1",
+      "pergunta": "What is the destination time zone offset in the first Received header of the email file 447018D5-00000006.eml? Choose from: a) +04:00  b) -07:00  c) -08:00  d) -05:00  e) -09:00. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "c",
+      "resposta_extraida": "c",
+      "correto": true,
+      "tempo_segundos": 32.11,
+      "metricas_ollama": {
+        "total_duration_ns": 31734810658,
+        "prompt_eval_count": 21097,
+        "eval_count": 266,
+        "tool_calls": 1
+      }
+    },
+    {
+      "id": "Q2",
+      "pergunta": "True or False: The total capacity in bytes of the \"J. Wilson\" partition in System.vhd is 734,003,200. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 185.52,
+      "metricas_ollama": {
+        "total_duration_ns": 184197063217,
+        "prompt_eval_count": 54942,
+        "eval_count": 2346,
+        "tool_calls": 5
+      }
+    },
+    {
+      "id": "Q3",
+      "pergunta": "What was the date and time the email \"447018D5-00000006.eml\" received by Jimmy Wilson was originally sent? Choose from: a) Sun, 16 February 2014 10:55:09 -05:00  b) Sun, 16 February 2014 07:55:09 -05:00  c) Sun, 16 February 2014 12:55:09 -05:00  d) Sun, 16 February 2014 11:55:09 -05:00  e) Sun, 16 February 2014 13:55:09 -05:00. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "c",
+      "resposta_extraida": "c",
+      "correto": true,
+      "tempo_segundos": 149.32,
+      "metricas_ollama": {
+        "total_duration_ns": 148382203380,
+        "prompt_eval_count": 61957,
+        "eval_count": 1861,
+        "tool_calls": 5
+      }
+    },
+    {
+      "id": "Q6",
+      "pergunta": "True or False: On February 20, 2014 at 17:02:35 UTC, the system uptime in seconds was 9,634. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 72.05,
+      "metricas_ollama": {
+        "total_duration_ns": 44117478852,
+        "prompt_eval_count": 20106,
+        "eval_count": 454,
+        "tool_calls": 1
+      }
+    }
+  ],
+  "resumo": {
+    "total_perguntas": 4,
+    "corretas": 4,
+    "incorretas": 0,
+    "score_percentagem": 100.0,
+    "tempo_total_segundos": 439.0,
+    "tempo_medio_segundos": 109.75,
+    "total_tool_calls": 12
+  }
+}
