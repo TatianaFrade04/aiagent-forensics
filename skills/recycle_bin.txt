@@ -104,7 +104,7 @@ PYEOF
 python3 << 'PYEOF'
 import os, struct
 base = '{evidence}/$RECYCLE.BIN'
-keyword = 'New Price List'
+keyword = '<filename_fragment>'
 for sid in os.listdir(base):
     sp = os.path.join(base, sid)
     if not os.path.isdir(sp): continue
@@ -134,10 +134,10 @@ PYEOF
 NOT the individual files inside it. The files live inside the `$R` directory — Step 1a will miss them.
 ```bash
 find '{evidence}/$RECYCLE.BIN' -mindepth 2 -maxdepth 2 -name '$R*' -type d 2>/dev/null | while read rdir; do
-  result=$(find "$rdir" -iname '*New Price List*' 2>/dev/null)
+  result=$(find "$rdir" -iname '*<filename_fragment>*' 2>/dev/null)
   [ -n "$result" ] && echo "SID=$(basename $(dirname "$rdir")): $result"
 done
-# Replace 'New Price List' with the actual filename fragment.
+# Replace '<filename_fragment>' with the actual filename fragment.
 ```
 
 **Step 2 — Map SID to username via SOFTWARE registry:**

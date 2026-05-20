@@ -51,10 +51,10 @@ sqlite3 /exports/firefox_places.db "SELECT p.url, a.content, datetime(a.lastModi
 # WARNING: sqlite3 creates an empty file if given a non-existent path — always copy before querying
 SIGNONS=$(find '{evidence}/USERS' -iname 'signons.sqlite' 2>/dev/null | head -1); cp "$SIGNONS" /exports/signons.db && sqlite3 /exports/signons.db "SELECT hostname, encryptedUsername, encryptedPassword FROM moz_logins;"
 
-# Firefox: find which search engine was used for a specific term (e.g. "how to steal identities")
+# Firefox: find which search engine was used for a specific term (e.g. "how to <keyword>")
 # The URL contains the search term — the domain reveals the search engine (bing.com = Bing, google.com = Google, etc.)
 FIREFOX_DB=$(find '{evidence}/USERS' -iname 'places.sqlite' 2>/dev/null | head -1); cp "$FIREFOX_DB" /exports/firefox_places.db
-sqlite3 /exports/firefox_places.db "SELECT url FROM moz_places WHERE url LIKE '%steal%' OR url LIKE '%identit%' OR title LIKE '%steal%' LIMIT 20;"
+sqlite3 /exports/firefox_places.db "SELECT url FROM moz_places WHERE url LIKE '%<keyword>%' OR title LIKE '%<keyword>%' LIMIT 20;"
 
 # Firefox: extract search queries from URL history (keyword_search_terms does NOT exist in Firefox — Chrome only)
 sqlite3 /exports/firefox_places.db "SELECT url, title, datetime(last_visit_date/1000000,'unixepoch') as searched_at FROM moz_places WHERE (url LIKE '%google%search%' OR url LIKE '%bing%search%' OR url LIKE '%q=%') AND visit_count > 0 ORDER BY last_visit_date DESC LIMIT 30;"

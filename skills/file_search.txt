@@ -31,8 +31,8 @@ This prints either:
 
 **CRITICAL — fls `*` prefix means DELETED:**
 ```
-r/r * 61:   Card Printers.htm   ← * = DELETED — content may be empty or overwritten — DO NOT USE
-r/r 64:     Card Printers.htm   ← no * = ACTIVE file — USE THIS INODE
+r/r * 61:   <filename>   ← * = DELETED — content may be empty or overwritten — DO NOT USE
+r/r 64:     <filename>   ← no * = ACTIVE file — USE THIS INODE
 ```
 When fls returns multiple entries for the same filename, ALWAYS use the entry WITHOUT `*`.
 A `*` entry is a deleted/unallocated inode — extracting it gives empty or garbage content.

@@ -1,7 +1,5 @@
 """
-rag/retriever.py — Recuperação de chunks relevantes do ChromaDB.
-
-Busca semantica
+rag/retriever.py — Semantic retrieval of relevant chunks from ChromaDB.
 """
 
 import logging
@@ -20,7 +18,7 @@ from .config import (
 
 logger = logging.getLogger(__name__)
 
-# ─── Singleton de embeddings ──────────────────────────────────────────────────────────────────
+# ─── Embeddings singleton ─────────────────────────────────────────────────────
 
 _embeddings_instance = None
 
@@ -32,7 +30,7 @@ def _embeddings():
         _embeddings_instance = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
     return _embeddings_instance
 
-# ─── Helper privado ──────────────────────────────────────────────────────────────────
+# ─── Private helpers ──────────────────────────────────────────────────────────
 
 
 def _vectorstore() -> Chroma:
@@ -47,16 +45,15 @@ def _vectorstore() -> Chroma:
 
 def retrieve(query: str, top_k: int = 5, filename: str | None = None) -> list[Document]:
     """
-    Recupera os top_k chunks mais relevantes para a query.
+    Retrieve the top_k most relevant chunks for a query.
 
     Args:
-        query:    Pergunta ou termos de pesquisa.
-        top_k:    Número máximo de chunks a devolver.
-        filename: [NOVO] Nome do ficheiro para filtrar os resultados.
-                 Se None, busca em todos os documentos indexados.
+        query:    Search query or terms.
+        top_k:    Maximum number of chunks to return.
+        filename: If specified, filter results to this file only.
 
     Returns:
-        Lista de Document (page_content + metadata com doc_id, page, filename).
+        List of Document (page_content + metadata with doc_id, page, filename).
     """
     if filename:
         logger.info("Retrieving top-%d chunks for query: %r (filtered by file: %s)", top_k, query, filename)
@@ -86,16 +83,13 @@ def retrieve(query: str, top_k: int = 5, filename: str | None = None) -> list[Do
 
 def get_retriever(top_k: int = 5, filename: str | None = None) -> VectorStoreRetriever:
     """
-    Devolve um VectorStoreRetriever configurado — para integração em chains
-    LangChain (create_retrieval_chain, etc.).
-    
+    Return a configured VectorStoreRetriever for use in LangChain chains.
+
     Args:
-        top_k:    Número de documentos a recuperar.
-        filename: [NOVO] Se especificado, filtra apenas por este ficheiro.
+        top_k:    Number of documents to retrieve.
+        filename: If specified, filter results to this file only.
     """
     search_kwargs = {"k": top_k}
-    
-    # Adicionar filtro se filename foi especificado
     if filename:
         search_kwargs["filter"] = {"filename": {"$eq": filename}}
     

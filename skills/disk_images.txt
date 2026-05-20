@@ -110,16 +110,16 @@ file "$VHD"
 #    Filter: $2~/[0-9]/ keeps only data partitions
 mmls "$VHD" 2>/dev/null | awk 'NR>5 && $2~/[0-9]/{print $1, "start="$3, "len="$5}'
 #    Example output:
-#      004: start=0000000034 len=0000065536
-#      006: start=0000065664 len=0001331200
+#      004: start=<start_sector> len=<len_sectors>
+#      006: start=<start_sector> len=<len_sectors>
 #    If fsstat returns "Cannot determine file system type" for a row, skip it —
 #    it's a reserved area. Count only rows where fsstat SUCCEEDS as numbered partitions.
 
 # 4. Get volume name, cluster size, and capacity for a partition
 #    $(( 10#$start )) strips leading zeros — MANDATORY (leading zeros = octal in bash)
 #    NEVER compute capacity from fsstat totals — use mmls len × 512 only.
-start=0000065664
-len=0001331200
+start=<start_from_mmls>
+len=<len_from_mmls>
 offset=$(( 10#$start ))
 capacity=$(( 10#$len * 512 )); echo "Capacity: $capacity bytes"
 fsstat -i vhd -o "$offset" "$VHD" | grep -i 'volume name\|cluster size'
@@ -144,8 +144,8 @@ Units are in 512-byte sectors
 01:  -----   …            …            …             Unallocated
 02:  Meta    …            …            …             GPT Header
 03:  Meta    …            …            …             Partition Table
-04:  000     0000000034   0000065569   0000065536    Microsoft reserved partition  ← 1st data partition
-06:  001     0000065664   0001736831   0001671168    Basic data partition           ← 2nd data partition
+04:  000     0000000034   <end_sector>   <len_sectors>  Microsoft reserved partition  ← 1st data partition
+06:  001     <start_sect>  <end_sector>   <len_sectors>  Basic data partition           ← 2nd data partition
 ```
 - First line = partition schema ("GUID Partition Table" = GPT, "DOS Partition Table" = MBR)
 - **Length** × 512 = partition capacity in bytes
@@ -161,7 +161,7 @@ The filename must NOT appear in the `icat` command line. Passing a filename afte
 # Step 1 — find the inode number with fls (filter by filename)
 offset=$(( 10#$start ))
 INODE=$(fls -i vhd -r -o "$offset" "$VHD" 2>/dev/null \
-        | grep -i 'Card Printers.htm' \
+        | grep -i '<target_filename>' \
         | awk '{print $2}' | tr -d ':')
 echo "Inode: $INODE"   # must be a plain number, e.g. 12345
 
@@ -177,10 +177,10 @@ md5sum  /exports/target_file | awk '{print toupper($1)}'
 WRONG commands that produce `Invalid inode address`:
 ```bash
 # WRONG — filename after inode number
-icat -i vhd -o "$offset" "$VHD" 12345 Card Printers.htm
+icat -i vhd -o "$offset" "$VHD" 12345 <target_filename>
 
 # WRONG — filename instead of inode
-icat -i vhd -o "$offset" "$VHD" 'Card Printers.htm'
+icat -i vhd -o "$offset" "$VHD" '<target_filename>'
 ```
 
 ## Tips
