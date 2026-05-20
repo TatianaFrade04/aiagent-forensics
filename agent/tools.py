@@ -1,6 +1,6 @@
 """
-tools.py — Ferramentas do agente forense
-Executa comandos bash arbitrários dentro do container Docker.
+tools.py — Forensic agent tools
+Executes arbitrary bash commands inside the Docker container.
 """
 
 import hashlib
@@ -10,11 +10,11 @@ import subprocess
 import os
 import time
 
-# ─── Configuração ─────────────────────────────────────────────────────────────
+# ─── Configuration ────────────────────────────────────────────────────────────
 
 CONTAINER_NAME = "forensics"
 
-# Carrega o .env manualmente para evitar problemas com backslashes
+# Load .env manually to avoid issues with backslashes
 def _load_env_path():
     env_file = os.path.join(os.path.dirname(__file__), ".env")
     if os.path.exists(env_file):
@@ -34,9 +34,9 @@ EXPORTS_PATH = os.getenv(
 )
 os.makedirs(EXPORTS_PATH, exist_ok=True)
 
-# ─── Gestão do container ──────────────────────────────────────────────────────
+# ─── Container management ─────────────────────────────────────────────────────
 
-# Calcula um hash dos ficheiros Docker (Dockerfile + entrypoint.sh)
+# Hash of Docker files (Dockerfile + entrypoint.sh) to detect image changes
 def _compute_dockerfile_hash() -> str:
     docker_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "docker"))
     h = hashlib.sha256()
@@ -45,26 +45,23 @@ def _compute_dockerfile_hash() -> str:
         if os.path.exists(fpath):
             with open(fpath, "rb") as f:
                 h.update(f.read())
-    return h.hexdigest()[:16] #16 chars
+    return h.hexdigest()[:16]
 
 _HASH_FILE = os.path.join(os.path.dirname(__file__), ".docker_image_hash")
-# Localização: agent/.docker_image_hash
 
-# Lê o hash guardado do ficheiro
 def _get_stored_hash() -> str:
     if os.path.exists(_HASH_FILE):
         with open(_HASH_FILE) as f:
             return f.read().strip()
     return ""
 
-# Guarda o novo hash em ficheiro
 def _store_hash(value: str):
     with open(_HASH_FILE, "w") as f:
         f.write(value)
 
 
 def start_container(no_mount: bool = False, allow_network: bool = False) -> bool:
-    """Destrói qualquer container existente e cria um novo de raiz."""
+    """Destroy any existing container and create a fresh one."""
     rm_result = subprocess.run(["docker", "rm", "-f", CONTAINER_NAME], capture_output=True, text=True)
     if rm_result.returncode != 0 and rm_result.stderr.strip():
         print(f"[!] Warning rm: {rm_result.stderr.strip()}")
@@ -174,7 +171,7 @@ def start_container(no_mount: bool = False, allow_network: bool = False) -> bool
 
 
 def ensure_container_running() -> bool:
-    """Verifica se o container está activo. Se não, inicia-o."""
+    """Check if the container is running. If not, start it."""
     try:
         result = subprocess.run(
             ["docker", "inspect", "-f", "{{.State.Running}}", CONTAINER_NAME],
@@ -188,7 +185,7 @@ def ensure_container_running() -> bool:
 
 
 def stop_container():
-    """Para e remove o container (chamado no fecho do programa)."""
+    """Stop and remove the container."""
     print("\n[*] Stopping container...")
     subprocess.run(
         ["docker", "exec", CONTAINER_NAME, "bash", "-c",
@@ -200,20 +197,20 @@ def stop_container():
     print("[+] Container removed.")
 
 
-# ─── Execução de comandos ─────────────────────────────────────────────────────
+# ─── Command execution ────────────────────────────────────────────────────────
 
-MAX_LINES = 100   # Linhas acima deste limite → guarda em ficheiro no container
-MAX_CHARS = 20_000  # Caracteres — linhas longas (SQLite, cache) ultrapassam MAX_LINES
+MAX_LINES = 100   # Lines above this limit → save to file inside container
+MAX_CHARS = 20_000  # Characters — long lines (SQLite, cache) can exceed MAX_LINES
 
-# Apanha: cat [flags] 'path'  /  cat [flags] "path"  /  cat [flags] path
-# Apenas um ficheiro, path começa com / ou .
+# Matches: cat [flags] 'path' / cat [flags] "path" / cat [flags] path
+# Single file only, path starts with / or .
 _CAT_PATTERN = re.compile(
     r"""^\s*cat\s+(?:-[A-Za-z]+\s+)*(?:'([^']+)'|"([^"]+)"|(/\S+|\./\S+))\s*$"""
 )
 
 
 def _get_file_meta(path: str) -> tuple[int, str]:
-    """Devolve (size_bytes, mime_type) do ficheiro dentro do container."""
+    """Return (size_bytes, mime_type) for a file inside the container."""
     meta_cmd = (
         f"stat -c '%s' {shlex.quote(path)} 2>/dev/null; "
         f"file -b --mime-type {shlex.quote(path)} 2>/dev/null"
@@ -233,12 +230,12 @@ def _get_file_meta(path: str) -> tuple[int, str]:
 
 def _intercept_cat(command: str) -> "tuple[str, str] | str | None":
     """
-    Interceta comandos `cat path`.
+    Intercept `cat path` commands.
 
-    Retorna:
-      (novo_comando, metadata_prefix)  — transforma e continua
-      str                              — bloqueia e devolve mensagem directamente
-      None                             — não é cat, passa em frente
+    Returns:
+      (new_command, metadata_prefix)  — transform and continue
+      str                             — block and return message directly
+      None                            — not a cat command, pass through
     """
     m = _CAT_PATTERN.match(command)
     if not m:
@@ -248,60 +245,60 @@ def _intercept_cat(command: str) -> "tuple[str, str] | str | None":
     size, mime = _get_file_meta(path)
 
     fmt_size = (
-        f"{size:,} bytes ({size / 1024:.0f} KB)" if size >= 0 else "tamanho desconhecido"
+        f"{size:,} bytes ({size / 1024:.0f} KB)" if size >= 0 else "unknown size"
     )
     meta_note = f"[AUTO-METADATA] path={path} | size={fmt_size} | type={mime}\n"
 
-    # Ficheiro binário — cat bloqueado e redireciona para strings
+    # Binary file — block cat and redirect to strings
     if not mime.startswith("text/"):
         return (
             f"{meta_note}"
-            f"cat bloqueado — ficheiro binário ({mime}).\n"
-            f"Para inspecionar usa:\n"
+            f"cat blocked — binary file ({mime}).\n"
+            f"To inspect use:\n"
             f"  xxd {shlex.quote(path)} | head -n 32\n"
             f"  strings -n 8 {shlex.quote(path)} | head -n 100"
         )
 
-    # Texto pequeno (< 10 KB ou tamanho desconhecido) — permite cat
+    # Small text (< 10 KB or unknown size) — allow cat
     if size < 0 or size < 10_240:
         return (command, meta_note)
 
-    # Texto médio (10 KB – 500 KB) — transforma em head
+    # Medium text (10 KB – 500 KB) — transform to head
     if size < 512_000:
         new_cmd = f"head -n 100 {shlex.quote(path)}"
-        note = meta_note + f"[cat → head -n 100: ficheiro tem {size / 1024:.0f} KB]\n"
+        note = meta_note + f"[cat → head -n 100: file is {size / 1024:.0f} KB]\n"
         return (new_cmd, note)
 
-    # Texto grande (≥ 500 KB) — bloqueia, guia para wc -l / grep
+    # Large text (≥ 500 KB) — block, guide to wc -l / grep
     return (
         f"{meta_note}"
-        f"cat bloqueado — ficheiro demasiado grande ({size / 1024 / 1024:.1f} MB).\n"
-        f"Verifica primeiro com:\n"
+        f"cat blocked — file too large ({size / 1024 / 1024:.1f} MB).\n"
+        f"Check first with:\n"
         f"  wc -l {shlex.quote(path)}\n"
         f"  grep -n 'keyword' {shlex.quote(path)} | head -n 100"
     )
 
 
 def run_in_sandbox(command: str) -> str:
-    """Executa um comando bash arbitrário dentro do container Docker."""
+    """Execute an arbitrary bash command inside the Docker container."""
     command = command.strip()
 
-    # Remove blocos markdown se o LLM os incluir
+    # Strip markdown code blocks if the LLM includes them
     if command.startswith("```"):
         lines = command.split("\n")
         command = "\n".join(l for l in lines if not l.startswith("```")).strip()
 
     if not command:
-        return "Erro: comando vazio."
+        return "Error: empty command."
 
     if not ensure_container_running():
-        return "Erro: nao foi possivel iniciar o container."
+        return "Error: could not start container."
 
-    # ── Intercepção de cat ────────────────────────────────────────────────────
+    # ── cat interception ──────────────────────────────────────────────────────
     intercept = _intercept_cat(command)
     if intercept is not None:
         if isinstance(intercept, str):
-            return intercept                      # bloqueado — devolve guia directamente
+            return intercept
         command, _meta_prefix = intercept
     else:
         _meta_prefix = ""
@@ -321,24 +318,24 @@ def run_in_sandbox(command: str) -> str:
             stdout = result.stdout
             stderr = result.stderr
 
-            # Detecta erro setns (Docker perde exec após mounts FUSE+loop)
+            # Detect setns error (Docker loses exec after FUSE+loop mounts)
             if "setns" in (stdout + stderr) and attempt == 0:
-                print("[!] Erro setns detectado — a reiniciar container...")
+                print("[!] setns error detected — restarting container...")
                 stop_container()
                 time.sleep(2)
                 if not ensure_container_running():
-                    return "Erro: nao foi possivel reiniciar o container."
+                    return "Error: could not restart container."
                 continue
 
-            # Constrói output combinado
+            # Build combined output
             output = stdout
             if stderr.strip():
                 output += f"\n[stderr]\n{stderr}" if stdout.strip() else stderr
 
             if not output.strip():
-                return _meta_prefix + "(comando executado sem output)"
+                return _meta_prefix + "(command executed with no output)"
 
-            # Output grande: guarda em ficheiro dentro do container
+            # Large output: save to file inside container
             lines = output.splitlines()
             if len(lines) > MAX_LINES or len(output) > MAX_CHARS:
                 ts = int(time.time())
@@ -349,32 +346,32 @@ def run_in_sandbox(command: str) -> str:
                     capture_output=True, text=True, encoding='utf-8',
                     errors='replace', timeout=15
                 )
-                # Preview: primeiras MAX_LINES linhas, truncadas a MAX_CHARS total
+                # Preview: first MAX_LINES lines, capped at MAX_CHARS total
                 preview_lines = lines[:MAX_LINES]
                 preview = "\n".join(preview_lines)
                 if len(preview) > MAX_CHARS:
-                    preview = preview[:MAX_CHARS] + "\n[... truncado — usa o ficheiro acima]"
-                size_info = f"{len(lines)} linhas / {len(output):,} chars"
+                    preview = preview[:MAX_CHARS] + "\n[... truncated — use the file above]"
+                size_info = f"{len(lines)} lines / {len(output):,} chars"
                 if save_result.returncode != 0:
                     return (
                         _meta_prefix
-                        + f"[Output grande: {size_info} — truncado]\n"
+                        + f"[Large output: {size_info} — truncated]\n"
                         + preview
                     )
                 return (
                     _meta_prefix
-                    + f"[Output grande: {size_info} — guardado em {out_file}]\n"
-                    f"Usa grep, head ou tail para analisar:\n"
+                    + f"[Large output: {size_info} — saved to {out_file}]\n"
+                    f"Use grep, head or tail to analyse:\n"
                     f"  grep 'keyword' {out_file}\n"
                     f"  head -50 {out_file}\n\n"
-                    f"Primeiras linhas:\n" + preview
+                    f"First lines:\n" + preview
                 )
 
             return _meta_prefix + output
 
         except subprocess.TimeoutExpired:
-            return "Erro: timeout — o comando demorou mais de 60 segundos."
+            return "Error: timeout — command took more than 60 seconds."
         except Exception as e:
-            return f"Erro inesperado: {str(e)}"
+            return f"Unexpected error: {str(e)}"
 
-    return "Erro: nao foi possivel executar o comando apos reiniciar o container."
+    return "Error: could not execute command after restarting container."
