@@ -680,30 +680,30 @@ _default_evidence_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="AIAgent@forensics — Agente LLM para investigação forense")
+    parser = argparse.ArgumentParser(description="AIAgent@forensics — LLM agent for forensic investigation")
     parser.add_argument("--model",    default=os.getenv("OLLAMA_MODEL", "gemma4:26b"),
-                        help="Modelo Ollama (default: llama3.2:9b)")
+                        help="Ollama model (default: llama3.2:9b)")
     parser.add_argument("--url",      default=os.getenv("OLLAMA_URL", "http://localhost:11434"),
-                        help="URL do servidor Ollama (default: http://localhost:11434)")
+                        help="Ollama server URL (default: http://localhost:11434)")
     parser.add_argument("--ctx",      type=int,   default=32768,
-                        help="Tamanho do contexto em tokens (default: 32768)")
+                        help="Context size in tokens (default: 32768)")
     parser.add_argument("--temp",     type=float, default=0.3,
-                        help="Temperatura do modelo (default: 0.3)")
+                        help="Model temperature (default: 0.3)")
     parser.add_argument("--evidence", default=None,
-                        help="Directoria da particao forense (default: auto-detectada)")
+                        help="Forensic partition directory (default: auto-detected)")
     parser.add_argument("--dir", default=_default_evidence_dir,
-                        help=f"Directoria host com a imagem forense (default: {_default_evidence_dir})")
+                        help=f"Host directory containing the forensic image (default: {_default_evidence_dir})")
     parser.add_argument("--think", action="store_true", default=True,
-                        help="Activa modo de raciocínio do modelo (reasoning=True)")
+                        help="Enable model reasoning mode (reasoning=True)")
     parser.add_argument("--debug", action="store_true", default=False,
-                        help="Mostra campos raw do AIMessage para inspecção")
+                        help="Show raw AIMessage fields for inspection")
     parser.add_argument("--no-clear-rag", dest="clear_rag", action="store_false",
-                        help="Mantém documentos RAG indexados de sessões anteriores")
+                        help="Keep RAG documents indexed from previous sessions")
     parser.set_defaults(clear_rag=True)
     parser.add_argument("--no-mount", dest="no_mount", action="store_true", default=False,
-                        help="Monta a directoria de evidência directamente em /forensics (sem imagem E01/DD)")
+                        help="Mount the evidence directory directly at /forensics (no E01/DD image)")
     parser.add_argument("--allow-network", dest="allow_network", action="store_true", default=False,
-                        help="Activa acesso à internet no container (para sudo apt-get install)")
+                        help="Enable internet access in the container (for sudo apt-get install)")
     parser.add_argument("--clear-after-question", dest="limpar_apos_pergunta", action="store_true", default=False,
                         help="Clear context automatically after each question (test mode with clean context)")
     return parser.parse_args()

@@ -67,7 +67,7 @@ from datetime import datetime, timezone
 import Evtx.Evtx as evtx, re
 path = '{evidence}/Windows/System32/winevt/Logs/System.evtx'
 last_boot = None
-target_dt = datetime(YYYY, MM, DD, HH, MM2, SS, tzinfo=timezone.utc)  # replace with target
+target_dt = datetime(YEAR, MONTH, DAY, HOUR, MIN, SEC, tzinfo=timezone.utc)  # ← replace each placeholder with the actual integer value
 with evtx.Evtx(path) as log:
     for r in log.records():
         xml = r.xml()
@@ -83,7 +83,7 @@ if last_boot:
     print('Last boot (Event ID 12):', last_boot)
     print('Uptime (s):', int((target_dt - last_boot).total_seconds()))
 "
-# Example: boot YYYY-MM-DD HH:MM:SS.ffffff+00:00, target YYYY-MM-DD HH:MM:SS UTC → int((target - boot).total_seconds())
+# uptime_seconds = int((target_dt - last_boot).total_seconds())
 ```
 
 ### Alternative: last shutdown time from registry

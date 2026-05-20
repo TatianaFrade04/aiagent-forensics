@@ -45,7 +45,7 @@ from datetime import datetime, timezone
 import Evtx.Evtx as evtx, re
 path = '{evidence}/Windows/System32/winevt/Logs/System.evtx'
 last_boot = None
-target_dt = datetime(YYYY, MM, DD, HH, MM2, SS, tzinfo=timezone.utc)  # replace with actual target
+target_dt = datetime(YEAR, MONTH, DAY, HOUR, MIN, SEC, tzinfo=timezone.utc)  # ← replace each placeholder with the actual integer value
 with evtx.Evtx(path) as log:
     for r in log.records():
         xml = r.xml()
@@ -100,7 +100,7 @@ from datetime import datetime, timezone
 import Evtx.Evtx as evtx, re
 path = '{evidence}/Windows/System32/winevt/Logs/System.evtx'
 last_boot = None
-target_dt = datetime(2014, 2, 20, 17, 2, 35, tzinfo=timezone.utc)
+target_dt = datetime(YEAR, MONTH, DAY, HOUR, MIN, SEC, tzinfo=timezone.utc)  # ← replace with the target date/time
 with evtx.Evtx(path) as log:
     for r in log.records():
         xml = r.xml()
@@ -118,7 +118,7 @@ if last_boot:
 # → <uptime in seconds>
 ```
 
-Example: boot `YYYY-MM-DD HH:MM:SS.ffffff+00:00`, target `YYYY-MM-DDTHH:MM:SSZ` → int((target - boot).total_seconds())
+# uptime_seconds = int((target_dt - last_boot).total_seconds())
 
 ## Tips
 - **Event ID 12** (Kernel-General) = actual OS start — sub-second precision — use for uptime

@@ -19,7 +19,7 @@ The `-A 15` shows 15 lines after the match — enough to capture Last Login, Pas
 
 ⚠️ If the output says "[Output grande: N linhas]", the result is TRUNCATED.
    The user's entry may be AFTER the cutoff. ALWAYS grep the saved file before answering:
-   `grep -i -A 15 '<username>' /tmp/cmd_output_<timestamp>.txt`
+   `grep -i -A 15 '<username>' /tmp/samparse_out.txt`
 
 This single command answers ALL of these questions:
 - Who are the local user accounts?
