@@ -1,0 +1,115 @@
+{
+  "modelo": "qwen3.5:4b",
+  "ctx": 65536,
+  "limpar_contexto": false,
+  "sessao": 2,
+  "timestamp_inicio": "2026-05-23T21:36:04.291002",
+  "timestamp_fim": "2026-05-23T22:09:56.383385",
+  "perguntas": [
+    {
+      "id": "Q1",
+      "pergunta": "What is the destination time zone offset in the first Received header of the email file 447018D5-00000006.eml? Choose from: a) +04:00  b) -07:00  c) -08:00  d) -05:00  e) -09:00. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "The first Received header shows:\n- Received: by 10.221.48.196 with SMTP id ux4csp77384vcb; Sun, 16 Feb 2014 09:55:13 -0800 (PST)\n\nThe destination timezone offset is -0800, which corresponds to option c) -08:00.\n\nc",
+      "resposta_extraida": "c",
+      "correto": true,
+      "tempo_segundos": 222.44,
+      "metricas_ollama": {
+        "total_duration_ns": 221848372686,
+        "prompt_eval_count": 31385,
+        "eval_count": 402,
+        "tool_calls": 2
+      }
+    },
+    {
+      "id": "Q2",
+      "pergunta": "True or False: The total capacity in bytes of the \"J. Wilson\" partition in System.vhd is 734,003,200. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "I need to find the partition with volume label \"J. Wilson\" and calculate its capacity.\n\nFrom the mmls output, I can see the data partitions:\n- 000: length 0000065536 sectors\n- 001: length 0001331200 sectors\n- 002: length 0001433600 sectors\n- 003: length 0000450560 sectors\n- 004: length 0000409600 sectors\n- 005: length 0000495616 sectors\n\nI need to check each partition's volume name to find \"J. Wilson\".\n\nLet me calculate the capacity for each partition (Length × 512):\n- 000: 0000065536 × 512 = 33,554,432 bytes\n- 001: 0001331200 × 512 = 681,574,400 bytes\n- 002: 0001433600 × 512 = 734,003,200 bytes\n- 003: 0000450560 × 512 = 230,684,800 bytes\n- 004: 0000409600 × 512 = 209,715,200 bytes\n- 005: 0000495616 × 512 = 253,753,440 bytes\n\nThe question asks about 734,003,200 bytes, which matches partition 002's capacity.\n\nNow I need to check if partition 002 has the volume label \"J. Wilson\".\n\nLet me check the volume name for partition 002.",
+      "resposta_extraida": "i need to find the p",
+      "correto": false,
+      "tempo_segundos": 600.0,
+      "metricas_ollama": {
+        "total_duration_ns": 537091261056,
+        "prompt_eval_count": 104867,
+        "eval_count": 960,
+        "tool_calls": 7
+      }
+    },
+    {
+      "id": "Q3",
+      "pergunta": "What was the date and time the email \"447018D5-00000006.eml\" received by Jimmy Wilson was originally sent? Choose from: a) Sun, 16 February 2014 10:55:09 -05:00  b) Sun, 16 February 2014 07:55:09 -05:00  c) Sun, 16 February 2014 12:55:09 -05:00  d) Sun, 16 February 2014 11:55:09 -05:00  e) Sun, 16 February 2014 13:55:09 -05:00. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "c",
+      "resposta_extraida": "c",
+      "correto": true,
+      "tempo_segundos": 165.31,
+      "metricas_ollama": {
+        "total_duration_ns": 164999662330,
+        "prompt_eval_count": 36158,
+        "eval_count": 371,
+        "tool_calls": 1
+      }
+    },
+    {
+      "id": "Q4",
+      "pergunta": "The disk GUID (in hex) of the physical disk is: 6FAE8D386C441743AE3298C4BDE04830. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "The actual disk GUID from the evidence is 6FAE8D386C441743AE3298C4BDE04830, which matches exactly what the question states. Therefore the answer is true.\n\ntrue",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 249.09,
+      "metricas_ollama": {
+        "total_duration_ns": 248404012990,
+        "prompt_eval_count": 54939,
+        "eval_count": 389,
+        "tool_calls": 2
+      }
+    },
+    {
+      "id": "Q5",
+      "pergunta": "True or False: The cluster size in bytes within the second partition of the physical disk is 512. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "false",
+      "tipo": "tf",
+      "resposta_modelo_raw": "The cluster size of the second partition (slot 001) in the SYSTEM.vhd is 4096 bytes, not 512 bytes. Therefore, the statement is false.\n\nfalse",
+      "resposta_extraida": "false",
+      "correto": true,
+      "tempo_segundos": 415.22,
+      "metricas_ollama": {
+        "total_duration_ns": 414033512814,
+        "prompt_eval_count": 93649,
+        "eval_count": 569,
+        "tool_calls": 4
+      }
+    },
+    {
+      "id": "Q6",
+      "pergunta": "True or False: On February 20, 2014 at 17:02:35 UTC, the system uptime in seconds was 9,634. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 266.68,
+      "metricas_ollama": {
+        "total_duration_ns": 236796111535,
+        "prompt_eval_count": 58751,
+        "eval_count": 685,
+        "tool_calls": 2
+      }
+    }
+  ],
+  "resumo": {
+    "total_perguntas": 6,
+    "corretas": 5,
+    "incorretas": 1,
+    "score_percentagem": 83.3,
+    "tempo_total_segundos": 1918.74,
+    "tempo_medio_segundos": 319.79,
+    "total_tool_calls": 18
+  }
+}

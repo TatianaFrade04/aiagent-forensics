@@ -140,12 +140,30 @@ done
 # Replace '<filename_fragment>' with the actual filename fragment.
 ```
 
-**Step 2 — Map SID to username via SOFTWARE registry:**
+**Step 2 — Map SID to username (TWO methods, use both):**
+
+Method A — SOFTWARE ProfileList (most reliable):
 ```bash
 HIVE=$(find '{evidence}' -path '*/System32/config/SOFTWARE' -not -path '*/RegBack/*' 2>/dev/null | head -1)
 reglookup "$HIVE" 2>/dev/null | grep -i 'ProfileList' | grep -i 'ProfileImagePath'
 # → /Microsoft/.../ProfileList/S-1-5-21-...-XXXX/ProfileImagePath|SZ|C:\Users\<username>
 # NOTE: RegisteredOwner is NOT the same as a user's SID — never use it for SID mapping.
+```
+
+Method B — Extract RID from SID and match against SAM hive:
+```
+SID format: S-1-5-21-<subauth1>-<subauth2>-<subauth3>-<RID>
+                                                         ^^^
+The LAST number after the final dash is the RID in DECIMAL.
+Convert to hex: printf '0x%X\n' <RID_decimal>
+
+Example: S-1-7-22-111111111-222222222-333333333-1009
+         Last segment = 1009 decimal → printf '0x%X\n' 1009 → 0x3ED
+         Compare 0x3ED against reglookup SAM output to find which username has RID 3ED.
+         RID 1001 = 0x3E9, RID 1002 = 0x3EA, RID 1003 = 0x3EB, etc. — never assume.
+
+NEVER assume or guess which user owns a SID — always compute the decimal→hex conversion
+and compare the result to the RID values returned by the SAM hive query.
 ```
 
 Both files must appear under the same SID, and that SID must map to the named user.
@@ -155,3 +173,4 @@ Both files must appear under the same SID, and that SID must map to the named us
 - `$R` entries can be files OR directories (when a folder was deleted)
 - Shift+Delete bypasses the Recycle Bin — those files are NOT here, require carving tools
 - To list SIDs: `find '{evidence}/$RECYCLE.BIN' -mindepth 1 -maxdepth 1 -type d 2>/dev/null`
+- CRITICAL: `printf '0x%X\n' <decimal_rid>` converts decimal to hex for SAM comparison

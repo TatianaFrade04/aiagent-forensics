@@ -130,7 +130,7 @@ def select_skills(
     Returns at most `max_skills` skills, sorted by relevance score.
     """
     query_tokens = _tokenize(query)
-    query_lower = _normalize(_translate_pt(query).lower())  # translated + accent-stripped
+    query_lower = _normalize(query.lower())
 
     if not query_tokens:
         return []

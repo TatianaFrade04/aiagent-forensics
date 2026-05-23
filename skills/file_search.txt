@@ -1,6 +1,6 @@
 SKILL: file_search
 DESCRIPTION: Search for files by name, extension, type, or size across the evidence image using find, file, and ls. Use this for generic file discovery — finding all PDFs, executables, images, specific filenames, or large files.
-KEYWORDS: search file, find file, locate, list files, extension, file type, size, name, pdf, docx, xlsx, doc, xls, jpg, jpeg, png, mp3, mp4, zip, rar, exe, dll, bat, ps1, csv, txt, all files, files with, what files, show files
+KEYWORDS: search file, find file, locate, list files, extension, file type, size, name, pdf, docx, xlsx, doc, xls, jpg, jpeg, png, mp3, mp4, zip, rar, exe, dll, bat, ps1, csv, txt, all files, files with, what files, show files, md5, sha1, sha256, hash, checksum, md5sum, file hash, compute hash, verify hash, file integrity, hash value
 ---
 
 ## Golden rule: one combined search command
@@ -8,7 +8,7 @@ KEYWORDS: search file, find file, locate, list files, extension, file type, size
 **NEVER assume a file's full path.** Run this single command — it searches mounted partitions first, then falls through to the VHD automatically if not found:
 
 ```bash
-TARGET='pdf.pdf'
+TARGET='<target_file>.ext'
 FILE=$(find '/forensics' -iname "$TARGET" -type f 2>/dev/null | head -1)
 if [ -n "$FILE" ]; then
   echo "FOUND: $FILE"
@@ -27,7 +27,7 @@ fi
 
 This prints either:
 - `FOUND: /forensics/part006/...` + size → done, use the path directly
-- `FOUND in VHD offset=<N>: r/r <INODE>:   pdf.pdf` → extract with icat:
+- `FOUND in VHD offset=<N>: r/r <INODE>:   <target_file>.ext` → extract with icat:
 
 **CRITICAL — fls `*` prefix means DELETED:**
 ```
@@ -40,12 +40,36 @@ A `*` entry is a deleted/unallocated inode — extracting it gives empty or garb
 ```bash
 # Replace <ACTUAL_OFFSET> and <ACTUAL_INODE> with the values printed above — NEVER use example values
 # Use ONLY the inode WITHOUT * (the active file)
-icat -i vhd -o <ACTUAL_OFFSET> "$VHD" <ACTUAL_INODE> > /exports/pdf.pdf
-stat -c "%s" /exports/pdf.pdf
-md5sum /exports/pdf.pdf    # 32-char hash
-sha1sum /exports/pdf.pdf   # 40-char hash
-sha256sum /exports/pdf.pdf # 64-char hash
+icat -i vhd -o <ACTUAL_OFFSET> "$VHD" <ACTUAL_INODE> > /exports/<target_file>.ext
+stat -c "%s" /exports/<target_file>.ext
+md5sum /exports/<target_file>.ext    # 32-char hash
+sha1sum /exports/<target_file>.ext   # 40-char hash
+sha256sum /exports/<target_file>.ext # 64-char hash
 ```
+
+## Hash verification — CRITICAL rules
+
+**Step 1: identify the algorithm from the stated hash length BEFORE computing:**
+| Length | Algorithm | Command |
+|--------|-----------|---------|
+| 32 hex | MD5       | `md5sum <file>` |
+| 40 hex | SHA1      | `sha1sum <file>` |
+| 64 hex | SHA256    | `sha256sum <file>` |
+
+**Step 2: if the stated hash length does NOT match the claimed algorithm → answer is immediately `false`.**
+Example: question says "MD5 hash is C1F95108A34228535A9262085E784D7C3E27FC68"
+→ count chars: 40 → that is SHA1 length, NOT MD5 → answer = false (no computation needed)
+
+**Step 3: if the length is correct, compute the right hash and compare:**
+```bash
+# When question says "MD5" — ALWAYS use md5sum, NEVER sha1sum
+md5sum /exports/<file> | awk '{print toupper($1)}'
+
+# When question says "SHA1" — use sha1sum
+sha1sum /exports/<file> | awk '{print toupper($1)}'
+```
+
+**NEVER use sha1sum when asked for MD5, and never use md5sum when asked for SHA1.**
 
 ## What is generic file search?
 `find` locates files by name, extension, path pattern, size, or type anywhere in the evidence image. `file` identifies the true file type from magic bytes (ignores the extension). Use these when you need to discover what files exist before doing deeper analysis.

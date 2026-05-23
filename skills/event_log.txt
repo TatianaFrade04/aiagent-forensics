@@ -1,6 +1,6 @@
 SKILL: event_log
 DESCRIPTION: Parse Windows Event Log files (.evtx) to find system boot/shutdown times, user logins, application execution, and calculate system uptime using evtxdump or evtxexport.
-KEYWORDS: event log, event logs, evtx, windows event, uptime, system uptime, boot time, last boot, startup, shutdown, system logon event, last run, last used, last executed, application last run, windows mail last run, system started, system booted, event id, eventid, 6005, 6006, 4648, winevt, System.evtx, Security.evtx, Application.evtx, seconds uptime, uptime in seconds
+KEYWORDS: event log, event logs, evtx, windows event, uptime, system uptime, boot time, last boot, startup, shutdown, system logon event, last run, last used, last executed, application last run, windows mail last run, system started, system booted, event id, eventid, 6005, 6006, 4648, winevt, System.evtx, Security.evtx, Application.evtx, seconds uptime, uptime in seconds, how long, uptime was, seconds since boot
 ---
 
 ## What are Windows Event Logs?
@@ -35,34 +35,42 @@ Example:
 # 1. Find all event log files
 find '{evidence}' -iname '*.evtx' -type f 2>/dev/null
 
-# 2. Parse System.evtx using python-evtx (Evtx.Evtx) — evtxdump.py is NOT installed
-#    DO NOT print all events — output will be thousands of lines and get truncated.
-#    Instead, extract only what you need and print a single result.
+# 2. Parse System.evtx using python-evtx (Evtx.Evtx) — the ONLY working library
+#    CRITICAL: DO NOT use 'import evtx' (omerbenamram) — it fails with 'Failed to parse chunk header'
+#    CRITICAL: DO NOT use 'with evtx.PyEvtxParser(path) as p' — context manager not supported
+#    ALWAYS use: import Evtx.Evtx as evtx
 
 # 3. Calculate uptime — use Event ID 12 (Kernel-General), NOT 6005
-python3 -c "
+#    CRITICAL: find the MOST RECENT boot BEFORE the target time (not the overall most recent)
+#    Copy-paste this script EXACTLY — replace only YEAR, MONTH, DAY, HOUR, MIN, SEC with integers
+EVTX=$(find '{evidence}' -iname 'System.evtx' 2>/dev/null | head -1)
+python3 << EOF
+from Evtx.Evtx import Evtx
 from datetime import datetime, timezone
-import Evtx.Evtx as evtx, re
-path = '{evidence}/Windows/System32/winevt/Logs/System.evtx'
-last_boot = None
-target_dt = datetime(YEAR, MONTH, DAY, HOUR, MIN, SEC, tzinfo=timezone.utc)  # ← replace each placeholder with the actual integer value
-with evtx.Evtx(path) as log:
+import xml.etree.ElementTree as ET
+evtx_path = '$EVTX'
+target_dt = datetime(YEAR, MONTH, DAY, HOUR, MIN, SEC, tzinfo=timezone.utc)
+boots = []
+ns = {'e': 'http://schemas.microsoft.com/win/2004/08/events/event'}
+with Evtx(evtx_path) as log:
     for r in log.records():
-        xml = r.xml()
-        if '>12<' in xml and 'Kernel-General' in xml:
-            m = re.search(r'SystemTime=\"([^\"]+)\"', xml)
-            if m:
-                try:
-                    dt = datetime.fromisoformat(m.group(1))
-                    if last_boot is None or dt > last_boot:
-                        last_boot = dt
-                except: pass
-if last_boot:
-    print('Last boot (Event ID 12):', last_boot)
+        try:
+            root = ET.fromstring(r.xml())
+            eid = root.find('.//e:EventID', ns)
+            if eid is not None and eid.text == '12':
+                ts_node = root.find('.//e:TimeCreated', ns)
+                if ts_node is not None:
+                    boots.append(datetime.fromisoformat(ts_node.get('SystemTime', '')))
+        except: pass
+print('All Event ID 12 boots:', [str(t) for t in sorted(boots)])
+boots_before = [t for t in boots if t < target_dt]
+if boots_before:
+    last_boot = max(boots_before)
+    print('Last boot before target:', last_boot)
     print('Uptime (s):', int((target_dt - last_boot).total_seconds()))
 else:
-    print('Event ID 12 not found')
-"
+    print('No boot found before target. All boots:', [str(t) for t in sorted(boots)])
+EOF
 
 # 4. Shutdown events (Event ID 6006)
 python3 -c "
@@ -94,36 +102,43 @@ with evtx.Evtx(path) as log:
 ## Calculating system uptime
 
 ```bash
-# Complete one-shot uptime calculation (replace target date/time as needed)
-python3 -c "
+# One-shot uptime calculation — replace YEAR, MONTH, DAY, HOUR, MIN, SEC with actual integers
+# MUST use << EOF (no quotes) so $EVTX expands. ET.fromstring avoids all quoting issues.
+EVTX=$(find '{evidence}' -iname 'System.evtx' 2>/dev/null | head -1)
+python3 << EOF
+from Evtx.Evtx import Evtx
 from datetime import datetime, timezone
-import Evtx.Evtx as evtx, re
-path = '{evidence}/Windows/System32/winevt/Logs/System.evtx'
-last_boot = None
-target_dt = datetime(YEAR, MONTH, DAY, HOUR, MIN, SEC, tzinfo=timezone.utc)  # ← replace with the target date/time
-with evtx.Evtx(path) as log:
+import xml.etree.ElementTree as ET
+evtx_path = '$EVTX'
+target_dt = datetime(YEAR, MONTH, DAY, HOUR, MIN, SEC, tzinfo=timezone.utc)
+boots = []; ns = {'e': 'http://schemas.microsoft.com/win/2004/08/events/event'}
+with Evtx(evtx_path) as log:
     for r in log.records():
-        xml = r.xml()
-        if '>12<' in xml and 'Kernel-General' in xml:
-            m = re.search(r'SystemTime=\"([^\"]+)\"', xml)
-            if m:
-                try:
-                    dt = datetime.fromisoformat(m.group(1))
-                    if last_boot is None or dt > last_boot:
-                        last_boot = dt
-                except: pass
-if last_boot:
-    print(int((target_dt - last_boot).total_seconds()))
-"
-# → <uptime in seconds>
+        try:
+            root = ET.fromstring(r.xml())
+            eid = root.find('.//e:EventID', ns)
+            if eid is not None and eid.text == '12':
+                ts = root.find('.//e:TimeCreated', ns)
+                if ts is not None:
+                    boots.append(datetime.fromisoformat(ts.get('SystemTime','')))
+        except: pass
+boots_before = [t for t in boots if t < target_dt]
+if boots_before:
+    last_boot = max(boots_before)
+    print('Uptime (s):', int((target_dt - last_boot).total_seconds()))
+    print('Last boot:', last_boot)
+else:
+    print('No boot before target. All boots:', [str(t) for t in sorted(boots)])
+EOF
+# → Uptime (s): <seconds>
 ```
-
-# uptime_seconds = int((target_dt - last_boot).total_seconds())
 
 ## Tips
 - **Event ID 12** (Kernel-General) = actual OS start — sub-second precision — use for uptime
 - **Event ID 6005** = EventLog service started (~15 s after boot) — do NOT use for uptime
 - `evtxdump.py` is NOT installed (python-evtx v0.8.1 doesn't include it) — use `import Evtx.Evtx`
+- NEVER use `import evtx` (omerbenamram package) — it fails with 'Failed to parse chunk header' on this evidence
+- NEVER use `with evtx.PyEvtxParser(path) as p` — PyEvtxParser does not support context managers
 - NEVER print all events to stdout — the output gets truncated; always extract and print only the final value
 - Event logs are at `Windows/System32/winevt/Logs/` — always `find` first since the path varies
 - Use `int(total_seconds())` (not `//`) for uptime in seconds — truncates fractions correctly

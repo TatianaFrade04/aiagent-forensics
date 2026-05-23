@@ -177,6 +177,7 @@ TIMEOUT_PER_QUESTION = 600  # seconds — override with --timeout
 # jump list parsing) get extra time on top of the base timeout.
 TIMEOUT_EXTRA: dict[str, int] = {
     "Q4":  300,  # disk GUID — binary GPT header read
+    "Q6":  600,  # uptime — evtx parsing with multiple boot events
     "Q11": 300,  # partition GUID — binary GPT entry array read
     "Q22": 600,  # SHA1 of Card Printers.htm — icat extraction + hash
     "Q24": 600,  # Windows Mail last run — jump list parsing
@@ -374,6 +375,28 @@ PERGUNTAS_CTF = [
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+# Prefixes that indicate the model described its plan instead of answering
+_PLANNING_PREFIXES = (
+    "the user is asking",
+    "i need to",
+    "let me run",
+    "let me check",
+    "i should",
+    "i will run",
+    "i'll run",
+    "i am going to",
+    "to answer this",
+    "to find this",
+    "to verify this",
+)
+
+
+def _is_planning_text(content: str) -> bool:
+    """Returns True if content is reasoning/planning text, not a real answer."""
+    c = content.lower().strip()
+    return any(c.startswith(p) for p in _PLANNING_PREFIXES)
+
+
 def modelo_safe(modelo: str) -> str:
     return modelo.replace(":", "-").replace("/", "-")
 
@@ -401,8 +424,8 @@ def extrair_resposta_modelo(texto: str, tipo: str) -> str:
         m = re.search(r"\b(?:answer(?:\s+is)?|therefore)[:\s]+(true|false)\b", texto_lower)
         if m:
             return m.group(1)
-        # last word-boundary occurrence anywhere in text
-        m = re.search(r"\b(false|true)\b(?!.*\b(?:false|true)\b)", texto_lower)
+        # last word-boundary occurrence anywhere in text (DOTALL so .* crosses newlines)
+        m = re.search(r"\b(false|true)\b(?![\s\S]*\b(?:false|true)\b)", texto_lower)
         if m:
             return m.group(1)
         return texto_lower[:20]
@@ -415,11 +438,20 @@ def extrair_resposta_modelo(texto: str, tipo: str) -> str:
         m = re.search(r"(?:answer(?:\s+is)?|correct(?:\s+answer)?)[:\s*]+\**([a-g])\b", texto_lower)
         if m:
             return m.group(1)
+        # Last non-empty line that is just a standalone answer letter (models often end with lone letter)
+        for line in reversed(texto_lower.splitlines()):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            m = re.match(r"^([a-g])[).\s]*$", stripped)
+            if m:
+                return m.group(1)
+            break
         m = re.search(r"\b([a-g])\b", texto_lower[:100])
         if m:
             return m.group(1)
-        # last standalone letter anywhere in text (catches "... the answer is **b**" at end)
-        m = re.search(r"\b([a-g])\b(?!.*\b[a-g]\b)", texto_lower)
+        # Last standalone letter in full text — use DOTALL so .* crosses newlines
+        m = re.search(r"\b([a-g])\b(?![\s\S]*\b[a-g]\b)", texto_lower)
         if m:
             return m.group(1)
         return texto_lower[:10]
@@ -467,10 +499,12 @@ def guardar_log(dados: dict, pasta: str = "logs_ctf_sem_limpeza_1505_limpeza", r
 # ─── Core ─────────────────────────────────────────────────────────────────────
 
 def _llm_content(msg) -> str:
-    """Extrai o conteúdo textual de uma mensagem AI."""
+    """Extrai o conteúdo textual visível de uma mensagem AI (sem tags de raciocínio)."""
     c = msg.content if isinstance(msg.content, str) else str(msg.content)
     if not c.strip():
         c = (getattr(msg, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
+    # Strip <think>...</think> reasoning blocks — only keep the visible answer
+    c = re.sub(r"<think>.*?</think>", "", c, flags=re.DOTALL).strip()
     return c
 
 
@@ -663,8 +697,57 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
         resposta_extraida = extrair_resposta_modelo(content, tipo)
         correto = avaliar_resposta(content, correta, tipo)
 
-        # Retry com prompt directo se o formato da resposta não for válido
-        if content and not _resposta_valida(resposta_extraida, tipo):
+        # Retry nível 1 — planning text: re-invocar o agente (tem acesso a ferramentas)
+        if _is_planning_text(content):
+            _logger.warning("[%s] planning text detected — re-invoking agent with force instruction.", id_q)
+            # Use different message depending on whether evidence commands were already run
+            _evidence_calls = sum(
+                1
+                for _m in new_messages
+                if isinstance(_m, AIMessage)
+                for _tc in (getattr(_m, "tool_calls", None) or [])
+                if _tc.get("name") == "run_forensics_command"
+            )
+            if _evidence_calls > 0:
+                _force_text = (
+                    "You already ran the forensic command and have the result in front of you.\n"
+                    "Stop reasoning. Give your FINAL answer RIGHT NOW.\n"
+                    "Reply with ONLY "
+                    + ("'true' or 'false'." if tipo == "tf" else "one letter (a/b/c/d/e/f/g). No explanation.")
+                )
+            else:
+                _force_text = (
+                    "Stop. You described your plan but did NOT run any forensic command yet.\n"
+                    "Call run_forensics_command RIGHT NOW with the appropriate bash command.\n"
+                    "After seeing the result, reply with ONLY the answer "
+                    + ("('true' or 'false')." if tipo == "tf" else "(single letter: a/b/c/d/e/f/g).")
+                )
+            force_msg = HumanMessage(content=_force_text)
+            try:
+                retry_timeout = max(60, q_timeout // 2)
+                new_msgs2 = _invocar_agente(
+                    agent, conversation + [force_msg],
+                    debug=debug, id_q=id_q + "(force)", timeout_s=retry_timeout,
+                )
+                if new_msgs2:
+                    conversation.extend(new_msgs2)
+                    answer2 = next(
+                        (m for m in reversed(new_msgs2)
+                         if isinstance(m, AIMessage) and not (getattr(m, "tool_calls", None) or [])),
+                        None,
+                    )
+                    content2 = _llm_content(answer2) if answer2 else ""
+                    if content2.strip() and not _is_planning_text(content2):
+                        content = content2
+                        metricas["tool_calls"] += _extrair_metricas_msgs(new_msgs2)["tool_calls"]
+                        _logger.info("[%s] force retry result: %r", id_q, content[:120])
+            except Exception:
+                pass
+            resposta_extraida = extrair_resposta_modelo(content, tipo)
+            correto = avaliar_resposta(content, correta, tipo)
+
+        # Retry nível 2 — resposta vazia ou formato inválido: prompt directo ao LLM
+        if not content.strip() or not _resposta_valida(resposta_extraida, tipo):
             retry_msg = (
                 "Reply with ONLY 'true' or 'false'. No explanation, no punctuation."
                 if tipo == "tf" else
@@ -677,7 +760,8 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
                     content = retry_content
                     resposta_extraida = extrair_resposta_modelo(content, tipo)
                     correto = avaliar_resposta(content, correta, tipo)
-                    _logger.info("[%s] format retry — extracted: %r", id_q, resposta_extraida)
+                    _logger.info("[%s] format retry (was empty=%s) — extracted: %r",
+                                 id_q, not content.strip(), resposta_extraida)
             except Exception:
                 pass
 

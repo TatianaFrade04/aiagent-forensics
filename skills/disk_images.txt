@@ -3,6 +3,21 @@ DESCRIPTION: Analyse the physical evidence disk and virtual disk images (VHD, VM
 KEYWORDS: vhd, vmdk, qcow2, disk image, virtual disk, partition, partition label, volume label, capacity, total size, partition size, sector, sectors, mmls, fsstat, nested disk, System.vhd, virtual hard disk, guid, disk guid, partition guid, gpt guid, unique id, physical disk, ewf, schema, partitioning format, cluster size, second partition
 ---
 
+## QUICK LOOKUP — find your question type here first
+
+| Question asks… | Command | Where the answer is |
+|---|---|---|
+| Partition schema (GPT / MBR / other)? | `mmls "$DISK" \| head -2` | **FIRST LINE** of output: "GUID Partition Table" = GPT, "DOS Partition Table" = MBR |
+| Number of data partitions? | `mmls "$DISK"` | Count rows where Slot = number (000, 001…). Skip Meta and `------` rows. |
+| Cluster size of partition N (physical disk)? | `start=<from_mmls>; fsstat -o $(( 10#$start )) "$DISK" \| grep -i 'cluster size'` | "Cluster Size: N bytes" line |
+| Capacity of a partition? | `mmls "$DISK"` | **Length column × 512 = bytes**. NEVER use fsstat totals. |
+| Volume label / partition name? | `fsstat -o $offset "$DISK" \| grep -i 'volume name'` | "Volume Name: X" line |
+| Which partition has label "X"? | Run `fsstat -o $offset` on **every** data partition | Check Volume Name — never stop at first miss |
+| Disk GUID (hex)? | Python script → Section A | Raw hex from GPT header LBA 1, offset 56 |
+| Partition GUID (hex)? | Python script → Section A | UUID bytes_le from GPT entry table at LBA 2 |
+
+---
+
 ## TWO types of disk — discover both before starting
 
 | Question refers to… | What to use | How to find it |
@@ -40,18 +55,27 @@ Once you have `$DISK`, use it for all physical-disk operations below.
 Questions about "the physical disk": partition schema, disk GUID, partition GUIDs, cluster size.
 
 ```bash
-# Partition schema and list
-# The FIRST LINE of mmls output names the schema: "GUID Partition Table (EFI)" = GPT, "DOS Partition Table" = MBR.
-# Data partitions have a numeric slot (000, 001 …); skip Meta and Unallocated rows.
-# 1st data partition = lowest numeric slot, 2nd = next, etc.
-mmls "$DISK"
+# ── STEP 1: partition schema (answer is on the FIRST LINE of mmls output) ──────
+DISK=$(find / -maxdepth 6 -name 'ewf1' -type f 2>/dev/null | head -1)
+mmls "$DISK" | head -3
+# Output first line examples:
+#   "GUID Partition Table (EFI)"  → schema = GPT
+#   "DOS Partition Table"          → schema = MBR
+# Data partitions: rows with a numeric Slot (000, 001…). Skip Meta and -------.
+# 1st data partition = lowest numeric Slot, 2nd = next numeric Slot, etc.
 
-# Cluster size and volume name for a physical partition
-# Copy start= exactly from mmls output for the target partition, let bash do the arithmetic.
-start=<value_from_mmls>
-offset=$(( 10#$start ))        # strips leading zeros — MANDATORY (bare octal trap)
-fsstat -o "$offset" "$DISK" | grep -i 'volume name\|cluster size'
-# No -i flag needed: ewfmount/loopback exposes the raw image transparently to TSK
+# ── STEP 2: cluster size for a specific partition ───────────────────────────────
+# Read the Start value for the target partition from mmls output, then:
+start=<start_value_from_mmls>          # e.g. the value in the Start column
+offset=$(( 10#$start ))                # MANDATORY: strips leading zeros (octal trap)
+fsstat -o "$offset" "$DISK" | grep -iE 'cluster size|volume name|sector size'
+# "Cluster Size: N bytes" → cluster size in bytes for that partition
+
+# ── STEP 3: capacity of a partition ─────────────────────────────────────────────
+# Get the Length value from mmls for the partition:
+len=<len_value_from_mmls>
+echo "Capacity: $(( 10#$len * 512 )) bytes"
+# Length is in 512-byte sectors. Multiply by 512 for bytes. NEVER use fsstat totals.
 ```
 
 ### Disk GUID and partition GUIDs (GPT format)
@@ -61,11 +85,12 @@ fsstat -o "$offset" "$DISK" | grep -i 'volume name\|cluster size'
 - **Partition GUIDs** → standard Windows UUID notation (bytes_le reordering of the first three fields).
 
 ```bash
-python3 << 'EOF'
+# CRITICAL: $DISK must be set before running this block (from Step 0 above).
+# Use << EOF (no quotes) so $DISK expands inside the heredoc.
+python3 << EOF
 import uuid
 
-# Replace $DISK with the actual path found in Step 0
-disk = "<path_found_in_step0>"
+disk = "$DISK"   # bash variable expands here — DO NOT quote EOF on the opening line
 
 with open(disk, 'rb') as f:
 
@@ -115,19 +140,34 @@ mmls "$VHD" 2>/dev/null | awk 'NR>5 && $2~/[0-9]/{print $1, "start="$3, "len="$5
 #    If fsstat returns "Cannot determine file system type" for a row, skip it —
 #    it's a reserved area. Count only rows where fsstat SUCCEEDS as numbered partitions.
 
-# 4. Get volume name, cluster size, and capacity for a partition
-#    $(( 10#$start )) strips leading zeros — MANDATORY (leading zeros = octal in bash)
-#    NEVER compute capacity from fsstat totals — use mmls len × 512 only.
+# 4. Find partition by volume label AND calculate its capacity — complete workflow
+#    Run this loop to check EVERY data partition until the right Volume Name is found.
+mmls "$VHD" 2>/dev/null | awk 'NR>5 && $2~/[0-9]/{print $2, $3, $5}' | while read slot start len; do
+    offset=$(( 10#$start ))
+    label=$(fsstat -i vhd -o "$offset" "$VHD" 2>/dev/null | grep -i 'volume name' | head -1)
+    capacity=$(( 10#$len * 512 ))
+    echo "slot=$slot  offset=$offset  capacity=$capacity bytes  $label"
+done
+# Find the row whose Volume Name matches the partition you are looking for.
+# Capacity = Length × 512 bytes — use the len from THIS row, not any other.
+# NEVER compute capacity from fsstat totals — mmls len × 512 is the only correct method.
+#
+# CRITICAL: ALWAYS run the FULL loop above to see ALL partitions + their labels.
+# NEVER pick the first partition blindly — look for the Volume Name that matches the question.
+# Partial match is OK: "J. Wilson" in output matches question asking about "J. Wilson" partition.
+#
+# WRONG capacity formulas (NEVER use):
+#   stat -c "%s" "$VHD"           ← total VHD file size, NOT a partition
+#   fsstat output "Total Block Count × Block Size"  ← NOT the same as mmls Length × 512
+# RIGHT:  capacity=$(( 10#$len * 512 ))  where $len is the Length column from mmls
+
+# 5. Get cluster size for a specific partition (after finding its start from step 4)
 start=<start_from_mmls>
 len=<len_from_mmls>
 offset=$(( 10#$start ))
 capacity=$(( 10#$len * 512 )); echo "Capacity: $capacity bytes"
 fsstat -i vhd -o "$offset" "$VHD" | grep -i 'volume name\|cluster size'
 # For .vmdk files: fsstat -i vmdk -o "$offset" "$VHD"
-
-# CRITICAL — searching for a partition by name (e.g. "J. Wilson"):
-# Run fsstat on EVERY data partition. Never stop after the first mismatch.
-# Pattern: check 004 → no match → check 006 → no match → check 007 → … → found!
 ```
 
 ---
