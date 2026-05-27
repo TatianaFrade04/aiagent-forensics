@@ -31220,3 +31220,386 @@ NameError: name '_translate_pt' is not defined
 2026-05-23 20:59:17,143 [WARNING] run_ctf: [Q20] resposta final vazia (tool_calls=4, msgs=8).
 2026-05-23 21:50:02,699 [WARNING] run_ctf: [Q2] timeout after 600s — question unanswered.
 2026-05-23 21:50:02,700 [WARNING] run_ctf: [Q2] resposta final vazia (tool_calls=7, msgs=14).
+2026-05-24 11:15:47,344 [WARNING] run_ctf: [Q1] timeout after 600s — question unanswered.
+2026-05-24 11:15:47,344 [WARNING] run_ctf: [Q1] resposta final vazia (tool_calls=3, msgs=6).
+2026-05-24 11:29:24,249 [WARNING] run_ctf: [Q2] timeout after 600s — question unanswered.
+2026-05-24 11:29:24,250 [WARNING] run_ctf: [Q2] resposta final vazia (tool_calls=3, msgs=6).
+2026-05-24 11:42:42,468 [WARNING] run_ctf: [Q3] timeout after 600s — question unanswered.
+2026-05-24 11:42:42,469 [WARNING] run_ctf: [Q3] resposta final vazia (tool_calls=2, msgs=4).
+2026-05-24 12:03:39,638 [WARNING] run_ctf: [Q4] timeout after 900s — question unanswered.
+2026-05-24 12:03:39,639 [WARNING] run_ctf: [Q4] resposta final vazia (tool_calls=2, msgs=4).
+2026-05-24 12:29:15,710 [WARNING] run_ctf: [Q7] timeout after 600s — question unanswered.
+2026-05-24 12:29:15,710 [WARNING] run_ctf: [Q7] resposta final vazia (tool_calls=2, msgs=4).
+2026-05-24 12:43:11,461 [WARNING] run_ctf: [Q8] timeout after 600s — question unanswered.
+2026-05-24 12:43:11,462 [WARNING] run_ctf: [Q8] resposta final vazia (tool_calls=3, msgs=6).
+2026-05-24 13:12:46,474 [WARNING] run_ctf: [Q12] timeout after 600s — question unanswered.
+2026-05-24 13:12:46,474 [WARNING] run_ctf: [Q12] resposta final vazia (tool_calls=3, msgs=6).
+2026-05-24 13:25:13,938 [WARNING] run_ctf: [Q13] timeout after 600s — question unanswered.
+2026-05-24 13:25:13,939 [WARNING] run_ctf: [Q13] resposta final vazia (tool_calls=2, msgs=4).
+2026-05-24 13:39:24,548 [WARNING] run_ctf: [Q14] timeout after 600s — question unanswered.
+2026-05-24 13:39:24,548 [WARNING] run_ctf: [Q14] resposta final vazia (tool_calls=1, msgs=2).
+2026-05-24 13:51:19,430 [WARNING] run_ctf: [Q15] timeout after 600s — question unanswered.
+2026-05-24 13:51:19,431 [WARNING] run_ctf: [Q15] resposta final vazia (tool_calls=2, msgs=4).
+2026-05-24 14:03:28,578 [WARNING] run_ctf: [Q16] timeout after 600s — question unanswered.
+2026-05-24 14:03:28,580 [WARNING] run_ctf: [Q16] resposta final vazia (tool_calls=9, msgs=18).
+2026-05-24 14:16:57,328 [WARNING] run_ctf: [Q18] timeout after 600s — question unanswered.
+2026-05-24 14:16:57,330 [WARNING] run_ctf: [Q18] resposta final vazia (tool_calls=3, msgs=6).
+2026-05-24 14:59:32,193 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 6):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2725, in stream
+    for _ in runner.tick(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/_runner.py", line 167, in tick
+    run_with_retry(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/_retry.py", line 96, in run_with_retry
+    return task.proc.invoke(task.input, config)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/_internal/_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/_internal/_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain/agents/factory.py", line 1301, in model_node
+    model_response = _execute_model_sync(request)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain/agents/factory.py", line 1273, in _execute_model_sync
+    output = model_.invoke(messages)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/runnables/base.py", line 5695, in invoke
+    return self.bound.invoke(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/language_models/chat_models.py", line 454, in invoke
+    self.generate_prompt(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/language_models/chat_models.py", line 1185, in generate_prompt
+    return self.generate(prompt_messages, stop=stop, callbacks=callbacks, **kwargs)
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/language_models/chat_models.py", line 995, in generate
+    self._generate_with_cache(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_core/language_models/chat_models.py", line 1297, in _generate_with_cache
+    result = self._generate(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_ollama/chat_models.py", line 1030, in _generate
+    final_chunk = self._chat_stream_with_aggregation(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langchain_ollama/chat_models.py", line 978, in _chat_stream_with_aggregation
+    raise ValueError(msg)
+ValueError: No data received from Ollama stream.
+
+2026-05-24 14:59:32,193 [WARNING] run_ctf: [Q5] resposta final vazia (tool_calls=3, msgs=6).
+2026-05-24 15:10:27,872 [WARNING] run_ctf: [Q8] resposta final vazia (tool_calls=0, msgs=1).
+2026-05-24 15:34:51,824 [WARNING] run_ctf: [Q15] timeout after 600s — question unanswered.
+2026-05-24 15:34:51,824 [WARNING] run_ctf: [Q15] resposta final vazia (tool_calls=4, msgs=8).
+2026-05-24 15:48:40,107 [WARNING] run_ctf: [Q16] timeout after 600s — question unanswered.
+2026-05-24 15:48:40,108 [WARNING] run_ctf: [Q16] resposta final vazia (tool_calls=5, msgs=10).
+2026-05-24 16:11:47,289 [WARNING] run_ctf: [Q19] timeout after 600s — question unanswered.
+2026-05-24 16:11:47,290 [WARNING] run_ctf: [Q19] resposta final vazia (tool_calls=3, msgs=6).
+2026-05-24 16:25:09,114 [WARNING] run_ctf: [Q20] timeout after 600s — question unanswered.
+2026-05-24 16:25:09,115 [WARNING] run_ctf: [Q20] resposta final vazia (tool_calls=1, msgs=2).
+2026-05-24 21:56:45,917 [WARNING] run_ctf: [Q1] timeout after 600s — question unanswered.
+2026-05-24 21:56:45,919 [WARNING] run_ctf: [Q1] resposta final vazia (tool_calls=71, msgs=142).
+2026-05-25 16:11:47,306 [WARNING] run_ctf: [Q2] resposta final vazia (tool_calls=7, msgs=15).
+2026-05-25 16:39:04,913 [WARNING] run_ctf: [Q8] timeout after 600s — question unanswered.
+2026-05-25 16:39:04,914 [WARNING] run_ctf: [Q8] resposta final vazia (tool_calls=11, msgs=21).
+2026-05-25 17:07:26,084 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-25 17:07:26,084 [WARNING] run_ctf: [Q12] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-25 17:19:57,694 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 31):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-25 17:19:57,695 [WARNING] run_ctf: [Q14] resposta final vazia (tool_calls=16, msgs=31).
+2026-05-25 17:31:45,598 [WARNING] run_ctf: [Q15] resposta final vazia (tool_calls=3, msgs=7).
+2026-05-25 17:44:00,226 [WARNING] run_ctf: [Q16] timeout after 600s — question unanswered.
+2026-05-25 17:44:00,226 [WARNING] run_ctf: [Q16] resposta final vazia (tool_calls=1, msgs=2).
+2026-05-25 19:06:27,130 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-25 19:06:27,130 [WARNING] run_ctf: [Q12] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-25 19:08:58,456 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-25 19:08:58,457 [WARNING] run_ctf: [Q14] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-25 19:19:16,503 [WARNING] run_ctf: [Q15] timeout after 600s — question unanswered.
+2026-05-25 19:19:16,507 [WARNING] run_ctf: [Q15] resposta final vazia (tool_calls=5, msgs=10).
+2026-05-26 00:38:10,661 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 00:38:10,662 [WARNING] run_ctf: [Q16] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 00:42:31,190 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 00:42:31,191 [WARNING] run_ctf: [Q18] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 00:54:30,542 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 00:54:30,543 [WARNING] run_ctf: [Q2] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 00:59:46,517 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 00:59:46,518 [WARNING] run_ctf: [Q7] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 01:10:05,219 [WARNING] run_ctf: [Q8] timeout after 600s — question unanswered.
+2026-05-26 01:10:05,221 [WARNING] run_ctf: [Q8] resposta final vazia (tool_calls=6, msgs=12).
+2026-05-26 01:13:46,402 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 01:13:46,402 [WARNING] run_ctf: [Q10] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 01:16:52,081 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 01:16:52,082 [WARNING] run_ctf: [Q12] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 01:24:32,740 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 01:24:32,741 [WARNING] run_ctf: [Q16] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 01:27:46,063 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 01:27:46,064 [WARNING] run_ctf: [Q19] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 01:52:15,145 [WARNING] run_ctf: [Q24] timeout after 1200s — question unanswered.
+2026-05-26 01:52:15,146 [WARNING] run_ctf: [Q24] resposta final vazia (tool_calls=8, msgs=16).
+2026-05-26 02:04:30,873 [WARNING] run_ctf: [Q2] timeout after 600s — question unanswered.
+2026-05-26 02:04:30,877 [WARNING] run_ctf: [Q2] resposta final vazia (tool_calls=9, msgs=18).
+2026-05-26 02:14:15,753 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 02:14:15,754 [WARNING] run_ctf: [Q12] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 02:18:40,893 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 02:18:40,894 [WARNING] run_ctf: [Q14] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 02:26:06,260 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 02:26:06,261 [WARNING] run_ctf: [Q16] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 02:30:40,718 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 02:30:40,719 [WARNING] run_ctf: [Q19] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 02:33:49,208 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 02:33:49,209 [WARNING] run_ctf: [Q22] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 02:39:10,500 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 02:39:10,501 [WARNING] run_ctf: [Q24] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 03:14:02,992 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 03:14:02,993 [WARNING] run_ctf: [Q14] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 05:49:21,569 [WARNING] run_ctf: [Q8] timeout after 600s — question unanswered.
+2026-05-26 05:49:21,569 [WARNING] run_ctf: [Q8] resposta final vazia (tool_calls=7, msgs=14).
+2026-05-26 06:03:55,564 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 06:03:55,565 [WARNING] run_ctf: [Q12] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 06:15:37,601 [WARNING] run_ctf: [Q13] timeout after 600s — question unanswered.
+2026-05-26 06:15:37,602 [WARNING] run_ctf: [Q13] resposta final vazia (tool_calls=13, msgs=26).
+2026-05-26 06:21:14,189 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 06:21:14,190 [WARNING] run_ctf: [Q14] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 06:32:38,932 [WARNING] run_ctf: [Q16] timeout after 600s — question unanswered.
+2026-05-26 06:32:38,932 [WARNING] run_ctf: [Q16] resposta final vazia (tool_calls=8, msgs=16).
+2026-05-26 06:38:04,291 [WARNING] run_ctf: [Q18] resposta final vazia (tool_calls=0, msgs=1).
+2026-05-26 07:08:12,797 [WARNING] run_ctf: [Q24] timeout after 1200s — question unanswered.
+2026-05-26 07:08:12,798 [WARNING] run_ctf: [Q24] resposta final vazia (tool_calls=12, msgs=24).
+2026-05-26 07:19:56,196 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 07:19:56,197 [WARNING] run_ctf: [Q2] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 07:36:53,850 [WARNING] run_ctf: [Q8] resposta final vazia (tool_calls=4, msgs=9).
+2026-05-26 07:50:26,696 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 07:50:26,697 [WARNING] run_ctf: [Q12] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 07:58:21,378 [WARNING] run_ctf: [Q13] resposta final vazia (tool_calls=13, msgs=27).
+2026-05-26 08:04:22,577 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-26 08:04:22,578 [WARNING] run_ctf: [Q14] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-26 08:58:28,962 [WARNING] run_ctf: [Q24] timeout after 1200s — question unanswered.
+2026-05-26 08:58:28,962 [WARNING] run_ctf: [Q24] resposta final vazia (tool_calls=11, msgs=20).
+2026-05-27 14:43:08,424 [WARNING] run_ctf: [Q2] timeout after 600s — question unanswered.
+2026-05-27 14:43:08,425 [WARNING] run_ctf: [Q2] resposta final vazia (tool_calls=10, msgs=20).
+2026-05-27 15:06:01,853 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-27 15:06:01,854 [WARNING] run_ctf: [Q8] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-27 15:23:13,031 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-27 15:23:13,032 [WARNING] run_ctf: [Q12] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-27 15:30:54,590 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-27 15:30:54,590 [WARNING] run_ctf: [Q14] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-27 15:42:16,250 [WARNING] run_ctf: [Q16] timeout after 600s — question unanswered.
+2026-05-27 15:42:16,250 [WARNING] run_ctf: [Q16] resposta final vazia (tool_calls=13, msgs=26).
+2026-05-27 15:54:51,392 [ERROR] run_ctf: Exception in _invocar_agente (msgs collected: 30):
+Traceback (most recent call last):
+  File "/home/ai-forensics/aiagent-forensics/run_ctf.py", line 568, in _invocar_agente
+    for chunk in agent.stream(
+  File "/home/ai-forensics/.local/lib/python3.10/site-packages/langgraph/pregel/main.py", line 2767, in stream
+    raise GraphRecursionError(msg)
+langgraph.errors.GraphRecursionError: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+
+2026-05-27 15:54:51,393 [WARNING] run_ctf: [Q22] resposta final vazia (tool_calls=15, msgs=30).
+2026-05-27 16:22:57,822 [WARNING] run_ctf: [Q24] timeout after 1200s — question unanswered.
+2026-05-27 16:22:57,823 [WARNING] run_ctf: [Q24] resposta final vazia (tool_calls=12, msgs=23).

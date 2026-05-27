@@ -152,7 +152,7 @@ reglookup "$HIVE" 2>/dev/null | grep -i 'ProfileList' | grep -i 'ProfileImagePat
 
 Method B — Extract RID from SID and match against SAM hive:
 ```
-SID format: S-1-5-21-<subauth1>-<subauth2>-<subauth3>-<RID>
+SID format: S-1-3-21-<subauth1>-<subauth2>-<subauth3>-<RID>
                                                          ^^^
 The LAST number after the final dash is the RID in DECIMAL.
 Convert to hex: printf '0x%X\n' <RID_decimal>

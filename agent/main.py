@@ -314,11 +314,6 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "   EVEN IF a previous attempt failed, you MUST try at least one alternative method before reporting failure.\n"
     "2. NEVER invent or hallucinate results — only report what the tool returns.\n"
     "2b. EXACT VALUES — Forensic evidence must be compared exactly, character by character.\n"
-    "   For TRUE/FALSE questions: if the value you find differs from the reference, answer 'false'.\n"
-    "   For MULTIPLE CHOICE questions: compare the value you found against every listed option.\n"
-    "     If the value matches one option → select that letter.\n"
-    "     If the value matches NONE of the options AND there is a 'None of these' / 'None of the above'\n"
-    "     option → select THAT option. NEVER leave the answer blank because nothing matches.\n"
     "   A timestamp, hash, GUID, or file size that differs by even one character or digit is NOT a match.\n"
     "   Never round, approximate, or assume 'close enough'. If the value found does not match\n"
     "   a given reference exactly, report it as a non-match and state the exact value found.\n"
@@ -352,7 +347,6 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "   After calling get_forensic_procedure you MUST call run_forensics_command to read the evidence.\n"
     "   NEVER produce a text answer after get_forensic_procedure without first calling run_forensics_command.\n"
     "   NEVER output planning text ('The user is asking...', 'I need to...', 'Let me...') as a final answer.\n"
-    "   Planning/reasoning text is INTERNAL ONLY — your FINAL response must be the actual answer letter or true/false.\n"
     "8a. QUESTION INDEPENDENCE — each new question from the user is COMPLETELY INDEPENDENT.\n"
     "   NEVER carry over reasoning, assumptions, or conclusions from a previous question.\n"
     "   NEVER assume the current question is about the same topic as the previous one.\n"
@@ -367,19 +361,7 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "   ALWAYS run the evidence-reading command first, THEN produce your answer.\n"
     "8c. MANDATORY FINAL ANSWER — after running tools, you MUST always produce a FINAL TEXT ANSWER.\n"
     "   NEVER end your response with only a tool call and no text.\n"
-    "   For multiple-choice questions: your FINAL response MUST be EXACTLY one letter (a/b/c/d/e/f/g).\n"
-    "   For true/false questions: your FINAL response MUST be EXACTLY 'true' or 'false'.\n"
     "   Your response after calling tools must NEVER be empty.\n"
-    "8d. MULTIPLE CHOICE ANSWERING PROCEDURE — when the question says 'Choose from: a) ... b) ... Reply with only the letter':\n"
-    "   Step 1 — run the forensic command(s) to find the actual value from the evidence.\n"
-    "   Step 2 — read ALL options listed (a, b, c, d, e, f, g) before deciding.\n"
-    "   Step 3 — compare your finding to each option exactly, character by character.\n"
-    "   Step 4 — select the letter of the matching option.\n"
-    "             If NO option matches and 'None of these' / 'None of the above' exists → select that letter.\n"
-    "   Step 5 — output EXACTLY ONE LETTER and nothing else. No explanation, no punctuation, no prefix.\n"
-    "   WRONG final responses: 'The answer is b', 'b)', 'b.', 'Based on evidence: b', 'b - GPT'\n"
-    "   RIGHT final response:  b\n"
-    "   NEVER skip reading an option. NEVER answer before calling the tool. NEVER output more than one letter.\n"
     "9. If command output is truncated, use grep, head, or tail to extract the needed\n"
     "   information before answering. NEVER assume or invent content that was cut off.\n"
     "10. When the user provides an absolute path in a command, run it EXACTLY as given.\n"
@@ -800,8 +782,8 @@ _default_evidence_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="AIAgent@forensics — LLM agent for forensic investigation")
-    parser.add_argument("--model",    default=os.getenv("OLLAMA_MODEL", "gemma4:26b"),
-                        help="Ollama model (default: llama3.2:9b)")
+    parser.add_argument("--model",    default=os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
+                        help="Ollama model (default: qwen3.5:4b)")
     parser.add_argument("--url",      default=os.getenv("OLLAMA_URL", "http://localhost:11434"),
                         help="Ollama server URL (default: http://localhost:11434)")
     parser.add_argument("--ctx",      type=int,   default=32768,
