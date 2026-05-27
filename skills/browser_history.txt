@@ -1,6 +1,6 @@
 SKILL: browser_history
 DESCRIPTION: Extract browser history, visited URLs, downloads, and searches from Chrome, Firefox, and Edge SQLite databases. SQLite files must be copied to /exports/ before querying (evidence is READ-ONLY).
-KEYWORDS: browser, history, chrome, firefox, edge, internet explorer, ie, sqlite, url, visited, downloads, search, web, bookmark, cookies, cache, browsing history, web history, internet history, pasco, index.dat, places.sqlite, History, timeline, web activity, credentials, login, passwords, saved passwords, form data, signons, keyword search, search terms
+KEYWORDS: browser, history, chrome, firefox, edge, internet explorer, ie, sqlite, url, visited, downloads, search, web, bookmark, cookies, cache, browsing history, web history, internet history, pasco, index.dat, places.sqlite, History, timeline, web activity, credentials, login, passwords, saved passwords, form data, signons, keyword search, search terms, search engine, google, bing, yahoo, search query, internet search, what did user search, web searches, user searches
 ---
 
 ## What is browser history analysis?
@@ -51,10 +51,10 @@ sqlite3 /exports/firefox_places.db "SELECT p.url, a.content, datetime(a.lastModi
 # WARNING: sqlite3 creates an empty file if given a non-existent path — always copy before querying
 SIGNONS=$(find '{evidence}/USERS' -iname 'signons.sqlite' 2>/dev/null | head -1); cp "$SIGNONS" /exports/signons.db && sqlite3 /exports/signons.db "SELECT hostname, encryptedUsername, encryptedPassword FROM moz_logins;"
 
-# Firefox: find which search engine was used for a specific term (e.g. "how to steal identities")
+# Firefox: find which search engine was used for a specific term (e.g. "how to <keyword>")
 # The URL contains the search term — the domain reveals the search engine (bing.com = Bing, google.com = Google, etc.)
 FIREFOX_DB=$(find '{evidence}/USERS' -iname 'places.sqlite' 2>/dev/null | head -1); cp "$FIREFOX_DB" /exports/firefox_places.db
-sqlite3 /exports/firefox_places.db "SELECT url FROM moz_places WHERE url LIKE '%steal%' OR url LIKE '%identit%' OR title LIKE '%steal%' LIMIT 20;"
+sqlite3 /exports/firefox_places.db "SELECT url FROM moz_places WHERE url LIKE '%<keyword>%' OR title LIKE '%<keyword>%' LIMIT 20;"
 
 # Firefox: extract search queries from URL history (keyword_search_terms does NOT exist in Firefox — Chrome only)
 sqlite3 /exports/firefox_places.db "SELECT url, title, datetime(last_visit_date/1000000,'unixepoch') as searched_at FROM moz_places WHERE (url LIKE '%google%search%' OR url LIKE '%bing%search%' OR url LIKE '%q=%') AND visit_count > 0 ORDER BY last_visit_date DESC LIMIT 30;"
@@ -68,6 +68,49 @@ sqlite3 /exports/chrome_history.db "SELECT target_path, tab_url, datetime(start_
 # Chrome: search terms
 sqlite3 /exports/chrome_history.db "SELECT kst.term, datetime(u.last_visit_time/1000000-11644473600,'unixepoch') as searched_at FROM keyword_search_terms kst JOIN urls u ON kst.url_id = u.id ORDER BY u.last_visit_time DESC LIMIT 30;"
 ```
+
+## Finding a search term in browser history
+
+When the question mentions a specific search term (e.g. "searched for 'how to X'"):
+extract one or two keywords from that term and query BOTH Firefox AND Chrome databases.
+ALWAYS search both — you don't know which browser was used until you find the URL.
+
+```bash
+# STEP 1: Check which browsers exist
+find '{evidence}/USERS' -iname 'places.sqlite' 2>/dev/null   # Firefox
+find '{evidence}/USERS' -path '*/Chrome/User Data/Default/History' 2>/dev/null  # Chrome
+
+# STEP 2a: Firefox — search by keyword (run in ONE tool call — variables don't persist)
+FIREFOX_DB=$(find '{evidence}/USERS' -iname 'places.sqlite' 2>/dev/null | head -1)
+[ -n "$FIREFOX_DB" ] && cp "$FIREFOX_DB" /exports/firefox_places.db && \
+sqlite3 /exports/firefox_places.db "SELECT url FROM moz_places WHERE url LIKE '%keyword1%' OR url LIKE '%keyword2%' OR title LIKE '%keyword1%' ORDER BY last_visit_date DESC LIMIT 30;"
+
+# STEP 2b: Chrome — same approach (separate tool call)
+CHROME_DB=$(find '{evidence}/USERS' -path '*/Chrome/User Data/Default/History' 2>/dev/null | head -1)
+[ -n "$CHROME_DB" ] && cp "$CHROME_DB" /exports/chrome_history.db && \
+sqlite3 /exports/chrome_history.db "SELECT url FROM urls WHERE url LIKE '%keyword1%' OR url LIKE '%keyword2%' OR title LIKE '%keyword1%' ORDER BY last_visit_time DESC LIMIT 30;"
+
+# STEP 3: If no results with keywords, dump ALL search-engine URLs (broad search)
+sqlite3 /exports/firefox_places.db "SELECT url FROM moz_places WHERE url LIKE '%search%' OR url LIKE '%q=%' ORDER BY last_visit_date DESC LIMIT 50;" 2>/dev/null
+sqlite3 /exports/chrome_history.db "SELECT url FROM urls WHERE url LIKE '%search%' OR url LIKE '%q=%' ORDER BY last_visit_time DESC LIMIT 50;" 2>/dev/null
+```
+
+**Identify the search engine from the URL domain:**
+| Domain in URL | Search engine |
+|---|---|
+| `bing.com` | Bing |
+| `google.com` | Google |
+| `yahoo.com` | Yahoo |
+| `duckduckgo.com` | DuckDuckGo |
+| `dogpile.com` | Dogpile |
+| `ask.com` | Ask |
+
+Example: `https://www.bing.com/search?q=example+search+query` → domain = `bing.com` → search engine = **Bing**
+Example: `https://www.dogpile.com/results?q=example+query` → domain = `dogpile.com` → search engine = **Dogpile**
+
+**CRITICAL**: Look at the DOMAIN of the URL (the part between `://` and the first `/`), NOT the query string.
+The domain directly identifies the search engine regardless of the keywords in the query.
+ALWAYS check ALL results returned by the SQL query — the correct URL may not be the first row.
 
 ## Tips
 - ALWAYS copy the database to /exports/ before querying — sqlite3 cannot open read-only files

@@ -1,15 +1,13 @@
 """
-rag/config.py — Configuração centralizada do pipeline RAG.
+rag/config.py — Centralised RAG pipeline configuration.
 """
 
 import os
 
-# ─── Caminhos ─────────────────────────────────────────────────────────────────
+# ─── Paths ────────────────────────────────────────────────────────────────────
 
-# Directório raiz do projecto (um nível acima de rag/)
 _BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-# ChromaDB persiste aqui em disco (criado automaticamente)
 CHROMA_PERSIST_DIR: str = os.path.join(_BASE_DIR, "chroma_store")
 
 # ─── ChromaDB ─────────────────────────────────────────────────────────────────

@@ -36,7 +36,7 @@ Email headers contain critical forensic metadata.
 
 ```bash
 # Step 0: locate the .eml file (it is stored deep inside AppData, not in the current directory)
-EML=$(find '{evidence}' -iname '447018D5-00000006.eml' 2>/dev/null | head -1)
+EML=$(find '{evidence}' -iname '<email_filename>.eml' 2>/dev/null | head -1)
 echo "Found: $EML"
 
 # Step 1: extract ALL Received headers WITH continuation lines (RFC 2822 folded headers)
@@ -63,13 +63,13 @@ An email passes through multiple SMTP servers. Each server stamps a `Received:` 
 Example header chain (read top to bottom = last hop to first hop).
 NOTE: timezones often appear on the NEXT (indented) line — a "folded" RFC 2822 header:
 ```
-Received: by 10.221.48.196 with SMTP id ux4csp77384vcb;
-        Fri, 16 Feb 2014 09:55:09 -0800 (PST)              ← destination (continuation line)
+Received: by 192.0.2.1 with SMTP id abc123xyz;
+        Mon, 01 Jan 2000 10:00:00 +0200 (EET)              ← destination (continuation line)
 --
-Received: from relay.example.com ... ; Sun, 16 Feb 2014 12:54:50 -0500
-Date: Sun, 16 Feb 2014 12:55:09 -0500                     ← sender's timezone
+Received: from relay.example.com ... ; Mon, 01 Jan 2000 09:59:50 -0500
+Date: Mon, 01 Jan 2000 09:59:50 -0500                     ← sender's timezone
 ```
-Here the destination timezone is **-0800** and the sender's timezone is **-0500**.
+Here the destination timezone is **+0200** and the sender's timezone is **-0500**.
 
 ## Tips
 - `grep -r` is recursive (searches all files in a directory); `-i` is case-insensitive; `-l` shows only filenames
@@ -80,4 +80,4 @@ Here the destination timezone is **-0800** and the sender's timezone is **-0500*
 - `grep -E` uses extended regex (useful for email, URL, IP patterns)
 - Save results to exports: `grep -ri 'keyword' '{evidence}/USERS/' 2>/dev/null > /exports/grep_results.txt`
 - If a file has unusual encoding (UTF-16), add `strings -e l` for little-endian Unicode
-- **NEVER** grep or awk a filename like `'447018D5-00000006.eml'` without a full path — always `find` first; .eml files are buried in `AppData/Local/Microsoft/Windows Live Mail/...`
+- **NEVER** grep or awk a filename like `'<email_filename>.eml'` without a full path — always `find` first; .eml files are buried in `AppData/Local/Microsoft/Windows Live Mail/...`

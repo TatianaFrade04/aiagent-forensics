@@ -11,15 +11,22 @@ the saved file — do NOT rely on truncated output:
 ```bash
 SAM_HIVE=$(find {evidence} -iname 'SAM' -not -ipath '*/Logs/*' -not -iname '*.log*' 2>/dev/null | head -1)
 regripper -r "$SAM_HIVE" -p samparse > /tmp/samparse_out.txt 2>&1
-grep -A 15 "<username>" /tmp/samparse_out.txt
+grep -i -A 20 "<username>" /tmp/samparse_out.txt
 ```
 
 Replace `<username>` with the user's name or part of it (case-insensitive: use `grep -i`).
-The `-A 15` shows 15 lines after the match — enough to capture Last Login, Password Hint, and flags.
+The `-A 20` shows 20 lines after the match — enough to capture Last Login, Password Hint, and flags.
+
+**CRITICAL for password hint questions:**
+- samparse shows `Password Hint   : <text>` or `Password Hint   :` (blank if none set).
+- DO NOT search for the hint text (e.g. "safeone") — READ samparse output and report what it shows.
+- If the `Password Hint` line exists and has text → hint IS set.
+- If the `Password Hint` line is blank → hint is NOT set.
+- NEVER grep for hint text inside binary files — samparse decodes it automatically.
 
 ⚠️ If the output says "[Output grande: N linhas]", the result is TRUNCATED.
    The user's entry may be AFTER the cutoff. ALWAYS grep the saved file before answering:
-   `grep -i -A 15 '<username>' /tmp/samparse_out.txt`
+   `grep -i -A 20 '<username>' /tmp/samparse_out.txt`
 
 This single command answers ALL of these questions:
 - Who are the local user accounts?

@@ -177,6 +177,7 @@ TIMEOUT_PER_QUESTION = 600  # seconds — override with --timeout
 # jump list parsing) get extra time on top of the base timeout.
 TIMEOUT_EXTRA: dict[str, int] = {
     "Q4":  300,  # disk GUID — binary GPT header read
+    "Q6":  600,  # uptime — evtx parsing with multiple boot events
     "Q11": 300,  # partition GUID — binary GPT entry array read
     "Q22": 600,  # SHA1 of Card Printers.htm — icat extraction + hash
     "Q24": 600,  # Windows Mail last run — jump list parsing
@@ -193,12 +194,12 @@ def _sigalrm_handler(signum, frame):
 # ─── Modelos a testar ─────────────────────────────────────────────────────────
 
 MODELOS_DEFAULT = [
-    "qwen3.5:4b",
-    "gemma4:e4b",
+    #"qwen3.5:4b",
+    #"gemma4:e4b",
     "gemma4:26b"
 ]
 
-SESSOES_DEFAULT = 3
+SESSOES_DEFAULT = 1
 
 # Contexto máximo seguro por modelo para 12 GB VRAM (Q4 quantization)
 # Pesos do modelo + KV cache não devem exceder ~11.5 GB (margem de segurança)
@@ -374,6 +375,28 @@ PERGUNTAS_CTF = [
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+# Prefixes that indicate the model described its plan instead of answering
+_PLANNING_PREFIXES = (
+    "the user is asking",
+    "i need to",
+    "let me run",
+    "let me check",
+    "i should",
+    "i will run",
+    "i'll run",
+    "i am going to",
+    "to answer this",
+    "to find this",
+    "to verify this",
+)
+
+
+def _is_planning_text(content: str) -> bool:
+    """Returns True if content is reasoning/planning text, not a real answer."""
+    c = content.lower().strip()
+    return any(c.startswith(p) for p in _PLANNING_PREFIXES)
+
+
 def modelo_safe(modelo: str) -> str:
     return modelo.replace(":", "-").replace("/", "-")
 
@@ -401,8 +424,8 @@ def extrair_resposta_modelo(texto: str, tipo: str) -> str:
         m = re.search(r"\b(?:answer(?:\s+is)?|therefore)[:\s]+(true|false)\b", texto_lower)
         if m:
             return m.group(1)
-        # last word-boundary occurrence anywhere in text
-        m = re.search(r"\b(false|true)\b(?!.*\b(?:false|true)\b)", texto_lower)
+        # last word-boundary occurrence anywhere in text (DOTALL so .* crosses newlines)
+        m = re.search(r"\b(false|true)\b(?![\s\S]*\b(?:false|true)\b)", texto_lower)
         if m:
             return m.group(1)
         return texto_lower[:20]
@@ -415,11 +438,20 @@ def extrair_resposta_modelo(texto: str, tipo: str) -> str:
         m = re.search(r"(?:answer(?:\s+is)?|correct(?:\s+answer)?)[:\s*]+\**([a-g])\b", texto_lower)
         if m:
             return m.group(1)
+        # Last non-empty line that is just a standalone answer letter (models often end with lone letter)
+        for line in reversed(texto_lower.splitlines()):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            m = re.match(r"^([a-g])[).\s]*$", stripped)
+            if m:
+                return m.group(1)
+            break
         m = re.search(r"\b([a-g])\b", texto_lower[:100])
         if m:
             return m.group(1)
-        # last standalone letter anywhere in text (catches "... the answer is **b**" at end)
-        m = re.search(r"\b([a-g])\b(?!.*\b[a-g]\b)", texto_lower)
+        # Last standalone letter in full text — use DOTALL so .* crosses newlines
+        m = re.search(r"\b([a-g])\b(?![\s\S]*\b[a-g]\b)", texto_lower)
         if m:
             return m.group(1)
         return texto_lower[:10]
@@ -467,10 +499,12 @@ def guardar_log(dados: dict, pasta: str = "logs_ctf_sem_limpeza_1505_limpeza", r
 # ─── Core ─────────────────────────────────────────────────────────────────────
 
 def _llm_content(msg) -> str:
-    """Extrai o conteúdo textual de uma mensagem AI."""
+    """Extrai o conteúdo textual visível de uma mensagem AI (sem tags de raciocínio)."""
     c = msg.content if isinstance(msg.content, str) else str(msg.content)
     if not c.strip():
         c = (getattr(msg, "additional_kwargs", {}) or {}).get("reasoning_content", "") or ""
+    # Strip <think>...</think> reasoning blocks — only keep the visible answer
+    c = re.sub(r"<think>.*?</think>", "", c, flags=re.DOTALL).strip()
     return c
 
 
@@ -533,7 +567,7 @@ def _invocar_agente(agent, conversation: list, debug: bool = False, id_q: str = 
     try:
         for chunk in agent.stream(
             {"messages": conversation},
-            {"recursion_limit": 999, "callbacks": [callback]},
+            {"recursion_limit": 30, "callbacks": [callback]},
         ):
             for node_output in chunk.values():
                 for msg in node_output.get("messages", []):
@@ -606,7 +640,27 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
     evidence = auto_detect_evidence()
     print(f" {evidence}")
 
-    system_prompt = build_system_prompt(evidence)
+    system_prompt = build_system_prompt(evidence) + (
+        "\nCTF ANSWER FORMAT:\n"
+        "   For TRUE/FALSE questions: if the value you find differs from the reference, answer 'false'.\n"
+        "   For MULTIPLE CHOICE questions: compare the value you found against every listed option.\n"
+        "     If the value matches one option → select that letter.\n"
+        "     If the value matches NONE of the options AND there is a 'None of these' / 'None of the above'\n"
+        "     option → select THAT option. NEVER leave the answer blank because nothing matches.\n"
+        "   Planning/reasoning text is INTERNAL ONLY — your FINAL response must be the actual answer letter or true/false.\n"
+        "   For multiple-choice questions: your FINAL response MUST be EXACTLY one letter (a/b/c/d/e/f/g).\n"
+        "   For true/false questions: your FINAL response MUST be EXACTLY 'true' or 'false'.\n"
+        "MULTIPLE CHOICE ANSWERING PROCEDURE — when the question says 'Choose from: a) ... b) ... Reply with only the letter':\n"
+        "   Step 1 — run the forensic command(s) to find the actual value from the evidence.\n"
+        "   Step 2 — read ALL options listed (a, b, c, d, e, f, g) before deciding.\n"
+        "   Step 3 — compare your finding to each option exactly, character by character.\n"
+        "   Step 4 — select the letter of the matching option.\n"
+        "             If NO option matches and 'None of these' / 'None of the above' exists → select that letter.\n"
+        "   Step 5 — output EXACTLY ONE LETTER and nothing else. No explanation, no punctuation, no prefix.\n"
+        "   WRONG final responses: 'The answer is b', 'b)', 'b.', 'Based on evidence: b', 'b - GPT'\n"
+        "   RIGHT final response:  b\n"
+        "   NEVER skip reading an option. NEVER answer before calling the tool. NEVER output more than one letter.\n"
+    )
 
     import agent.main as _agent_main
     _agent_main._evidence_path = evidence
@@ -625,14 +679,40 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
     agent = create_agent(model=llm, tools=TOOLS)
 
     conversation = [SystemMessage(content=system_prompt)]
+    last_prompt_tokens = 0  # updated after each question
 
     for idx, (id_q, pergunta, correta, tipo) in enumerate(PERGUNTAS_CTF):
         print(f"\n  [{id_q}] {pergunta[:65]}...")
 
         if limpar_contexto:
             conversation = [SystemMessage(content=system_prompt)]
+            last_prompt_tokens = 0
 
         conversation[0] = SystemMessage(content=system_prompt)
+
+        # Compress BEFORE the question if context is already ≥ 85 % full
+        if not limpar_contexto and ctx > 0 and last_prompt_tokens > 0:
+            ctx_pct_before = last_prompt_tokens / ctx * 100
+            if ctx_pct_before >= 85:
+                print(f"\n  ⚠  Context {ctx_pct_before:.0f}% full before [{id_q}] — compressing...")
+                try:
+                    sum_resp = llm.invoke(conversation + [HumanMessage(content=(
+                        "Summarize ALL forensic findings from this investigation in 10-15 bullet points. "
+                        "Include: users found, key file paths and their content, registry findings, "
+                        "timestamps, suspicious items, and confirmed conclusions. "
+                        "Be specific — include exact values, paths, and dates. "
+                        "Do NOT call any tools. Do NOT include code blocks."
+                    ))])
+                    summary = _llm_content(sum_resp)
+                except Exception:
+                    summary = "(Auto-summary failed.)"
+                conversation[:] = [
+                    conversation[0],
+                    AIMessage(content=f"[Conversation compressed — summary of prior investigation:]\n\n{summary}"),
+                ]
+                last_prompt_tokens = 0
+                print(f"  Conversation compressed. Context freed.")
+
         conversation.append(HumanMessage(content=pergunta))
 
         q_timeout = timeout_s + TIMEOUT_EXTRA.get(id_q, 0)
@@ -663,8 +743,57 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
         resposta_extraida = extrair_resposta_modelo(content, tipo)
         correto = avaliar_resposta(content, correta, tipo)
 
-        # Retry com prompt directo se o formato da resposta não for válido
-        if content and not _resposta_valida(resposta_extraida, tipo):
+        # Retry nível 1 — planning text: re-invocar o agente (tem acesso a ferramentas)
+        if _is_planning_text(content):
+            _logger.warning("[%s] planning text detected — re-invoking agent with force instruction.", id_q)
+            # Use different message depending on whether evidence commands were already run
+            _evidence_calls = sum(
+                1
+                for _m in new_messages
+                if isinstance(_m, AIMessage)
+                for _tc in (getattr(_m, "tool_calls", None) or [])
+                if _tc.get("name") == "run_forensics_command"
+            )
+            if _evidence_calls > 0:
+                _force_text = (
+                    "You already ran the forensic command and have the result in front of you.\n"
+                    "Stop reasoning. Give your FINAL answer RIGHT NOW.\n"
+                    "Reply with ONLY "
+                    + ("'true' or 'false'." if tipo == "tf" else "one letter (a/b/c/d/e/f/g). No explanation.")
+                )
+            else:
+                _force_text = (
+                    "Stop. You described your plan but did NOT run any forensic command yet.\n"
+                    "Call run_forensics_command RIGHT NOW with the appropriate bash command.\n"
+                    "After seeing the result, reply with ONLY the answer "
+                    + ("('true' or 'false')." if tipo == "tf" else "(single letter: a/b/c/d/e/f/g).")
+                )
+            force_msg = HumanMessage(content=_force_text)
+            try:
+                retry_timeout = max(60, q_timeout // 2)
+                new_msgs2 = _invocar_agente(
+                    agent, conversation + [force_msg],
+                    debug=debug, id_q=id_q + "(force)", timeout_s=retry_timeout,
+                )
+                if new_msgs2:
+                    conversation.extend(new_msgs2)
+                    answer2 = next(
+                        (m for m in reversed(new_msgs2)
+                         if isinstance(m, AIMessage) and not (getattr(m, "tool_calls", None) or [])),
+                        None,
+                    )
+                    content2 = _llm_content(answer2) if answer2 else ""
+                    if content2.strip() and not _is_planning_text(content2):
+                        content = content2
+                        metricas["tool_calls"] += _extrair_metricas_msgs(new_msgs2)["tool_calls"]
+                        _logger.info("[%s] force retry result: %r", id_q, content[:120])
+            except Exception:
+                pass
+            resposta_extraida = extrair_resposta_modelo(content, tipo)
+            correto = avaliar_resposta(content, correta, tipo)
+
+        # Retry nível 2 — resposta vazia ou formato inválido: prompt directo ao LLM
+        if not content.strip() or not _resposta_valida(resposta_extraida, tipo):
             retry_msg = (
                 "Reply with ONLY 'true' or 'false'. No explanation, no punctuation."
                 if tipo == "tf" else
@@ -677,7 +806,8 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
                     content = retry_content
                     resposta_extraida = extrair_resposta_modelo(content, tipo)
                     correto = avaliar_resposta(content, correta, tipo)
-                    _logger.info("[%s] format retry — extracted: %r", id_q, resposta_extraida)
+                    _logger.info("[%s] format retry (was empty=%s) — extracted: %r",
+                                 id_q, not content.strip(), resposta_extraida)
             except Exception:
                 pass
 
@@ -703,35 +833,18 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
 
         guardar_log(_resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto), pasta=pasta, run_ts=run_ts)
 
-        # Proteção de contexto entre perguntas (só sem limpeza activa)
+        # Actualizar last_prompt_tokens para a próxima iteração
         if not limpar_contexto and ctx > 0:
-            last_prompt_tokens = max(
+            _q_prompt_tokens = max(
                 (msg.response_metadata.get("prompt_eval_count", 0)
                  for msg in new_messages
                  if isinstance(msg, AIMessage) and hasattr(msg, "response_metadata")),
                 default=0,
             )
-            if last_prompt_tokens > 0:
+            if _q_prompt_tokens > 0:
+                last_prompt_tokens = _q_prompt_tokens
                 ctx_pct = last_prompt_tokens / ctx * 100
-                if ctx_pct >= 95:
-                    print(f"\n  ⚠  Context {ctx_pct:.0f}% full ({last_prompt_tokens:,}/{ctx:,} tokens) — compressing...")
-                    try:
-                        sum_resp = llm.invoke(conversation + [HumanMessage(content=(
-                            "Summarize ALL forensic findings from this investigation in 10-15 bullet points. "
-                            "Include: users found, key file paths and their content, registry findings, "
-                            "timestamps, suspicious items, and confirmed conclusions. "
-                            "Be specific — include exact values, paths, and dates. "
-                            "Do NOT call any tools. Do NOT include code blocks."
-                        ))])
-                        summary = _llm_content(sum_resp)
-                    except Exception:
-                        summary = "(Auto-summary failed.)"
-                    conversation[:] = [
-                        conversation[0],
-                        AIMessage(content=f"[Conversation compressed — summary of prior investigation:]\n\n{summary}"),
-                    ]
-                    print(f"  Conversation compressed. Context freed.")
-                elif ctx_pct >= 75:
+                if ctx_pct >= 75:
                     print(f"\n  ⚠  Context {ctx_pct:.0f}% full ({last_prompt_tokens:,}/{ctx:,} tokens).")
 
     _cleanup_container()

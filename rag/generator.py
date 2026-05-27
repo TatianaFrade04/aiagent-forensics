@@ -1,9 +1,9 @@
 """
-rag/generator.py — Geração de respostas com RAG via modelo Ollama local.
+rag/generator.py — RAG answer generation via local Ollama model.
 
 Pipeline (LCEL — LangChain v1.x):
-  query → Retriever → top-k chunks → ChatOllama (modelo local)
-        → resposta com citação de fontes
+  query → Retriever → top-k chunks → ChatOllama (local model)
+        → answer with source citations
 """
 
 import logging
@@ -48,7 +48,6 @@ _PROMPT = ChatPromptTemplate.from_messages(
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-#formatacao dos chunks para contexto
 def _format_docs(docs) -> str:
     parts = []
     for doc in docs:
@@ -61,16 +60,16 @@ def _format_docs(docs) -> str:
 
 def answer_with_rag(query: str, top_k: int = 5, filename: str | None = None) -> dict:
     """
-    Responde a uma query usando o pipeline RAG completo (LCEL).
+    Answer a query using the full RAG pipeline (LCEL).
 
     Args:
-        query:    Pergunta do utilizador.
-        top_k:    Número de chunks a recuperar.
-        filename: [NOVO] Se especificado, filtra apenas por este documento.
+        query:    User question.
+        top_k:    Number of chunks to retrieve.
+        filename: If specified, filter results to this document only.
 
     Returns:
-        Dict com:
-          - "answer"  : str — resposta gerada pelo modelo
+        Dict with:
+          - "answer"  : str — model-generated answer
           - "sources" : list[dict] — [{doc_id, filename, page}, …]
     """
     if filename:
@@ -81,11 +80,9 @@ def answer_with_rag(query: str, top_k: int = 5, filename: str | None = None) -> 
     retriever = get_retriever(top_k=top_k, filename=filename)
     llm = ChatOllama(model=OLLAMA_MODEL, base_url=OLLAMA_URL, temperature=0)
 
-    # Recuperar os docs separadamente para extrair fontes
     docs = retriever.invoke(query)
-    
-    # Se não encontrou documentos e um filename específico foi pedido,
-    # retornar mensagem informativa
+
+    # Return early if no documents found
     if not docs and filename:
         return {
             "answer": f"No information found for '{filename}'. The document may not be indexed or does not contain relevant content for this query.",
@@ -97,7 +94,6 @@ def answer_with_rag(query: str, top_k: int = 5, filename: str | None = None) -> 
             "sources": []
         }
 
-    # Montar chain LCEL: contexto já formatado + pergunta → LLM → string
     rag_chain = (
         {
             "context": lambda _: _format_docs(docs),
@@ -113,7 +109,7 @@ def answer_with_rag(query: str, top_k: int = 5, filename: str | None = None) -> 
     except Exception as e:
         return {"answer": f"Error: RAG LLM invocation failed: {e}", "sources": []}
 
-    # Extrair fontes únicas -> se dois chunls vieram da mesma pagina, cita essa pagina apenas uma vez
+    # Deduplicate sources — cite each page only once
     sources: list[dict] = []
     seen_sources: set[tuple] = set()
     for doc in docs:

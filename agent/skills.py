@@ -100,92 +100,16 @@ _STOP_WORDS = frozenset({
     "and", "or", "but", "not", "no", "if", "then", "so",
     "all", "any", "some", "how", "when", "where", "why",
     "there", "here", "about", "up", "out", "very",
-    # Portuguese stop words (common in user queries)
-    "o", "os", "as", "um", "uma", "uns", "umas",
-    "de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas",
-    "por", "para", "com", "sem", "que", "se", "eu", "tu", "ele", "ela",
-    "nos", "vos", "eles", "elas", "este", "esta", "esse", "essa",
-    "quero", "preciso", "como", "qual", "quais", "onde",
-    "e", "ou", "mas", "nao", "sim", "mais", "muito",
 })
-
-_PT_TO_EN: dict[str, str] = {
-    # filesystem / files
-    "imagem": "disk",           # "imagem forense" → disk (never photo)
-    "ficheiro": "file",
-    "ficheiros": "files",
-    "pasta": "folder",
-    "directoria": "directory",
-    "directorio": "directory",
-    "extensao": "extension",
-    "apagado": "deleted",
-    "apagados": "deleted",
-    "lixo": "recycle",
-    # users / accounts
-    "utilizador": "user",
-    "utilizadores": "users",
-    "conta": "account",
-    "contas": "accounts",
-    "senha": "password",
-    "palavra-passe": "password",
-    "login": "login",
-    "sessao": "session",
-    # registry
-    "registo": "registry",
-    "registro": "registry",
-    "chave": "key",
-    "hive": "hive",
-    # time / events
-    "arranque": "boot",
-    "inicializacao": "boot",
-    "desligamento": "shutdown",
-    "historico": "history",
-    "timestamp": "timestamp",
-    # actions
-    "encontrar": "find",
-    "procurar": "search",
-    "listar": "list",
-    "mostrar": "show",
-    "ver": "view",
-    "analisar": "analyze",
-    "instalar": "install",
-    "instalado": "installed",
-    # misc
-    "rede": "network",
-    "programa": "program",
-    "programas": "programs",
-    "software": "software",
-    "partilha": "share",
-    "ligacao": "connection",
-    "prefetch": "prefetch",
-    "browser": "browser",
-    "email": "email",
-    "correio": "email",
-}
-
 
 def _normalize(text: str) -> str:
     """Strip accents for diacritic-independent comparison."""
     return unicodedata.normalize("NFD", text).encode("ascii", "ignore").decode("ascii")
 
 
-def _translate_pt(text: str) -> str:
-    """Replace Portuguese words with English equivalents before keyword matching."""
-    words = text.split()
-    translated = []
-    for w in words:
-        bare = re.sub(r"[^a-zA-ZÀ-ÿ0-9\-]", "", w)  # strip punctuation
-        key = _normalize(bare.lower())
-        key_deplural = key.rstrip("s")
-        mapped = _PT_TO_EN.get(key) or _PT_TO_EN.get(key_deplural)
-        translated.append(mapped if mapped else w)
-    return " ".join(translated)
-
-
 def _tokenize(text: str) -> set[str]:
     """Tokenize text into normalised words, removing stop words and accents."""
-    translated = _translate_pt(text)
-    normalized = _normalize(translated.lower())
+    normalized = _normalize(text.lower())
     words = re.findall(r"[a-zA-Z0-9_./\-]+", normalized)
     return {w for w in words if w not in _STOP_WORDS and len(w) > 1}
 
@@ -206,7 +130,7 @@ def select_skills(
     Returns at most `max_skills` skills, sorted by relevance score.
     """
     query_tokens = _tokenize(query)
-    query_lower = _normalize(_translate_pt(query).lower())  # translated + accent-stripped
+    query_lower = _normalize(query.lower())
 
     if not query_tokens:
         return []

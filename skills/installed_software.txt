@@ -55,3 +55,13 @@ find '/forensics' \( -iname '*veracrypt*' -o -iname '*truecrypt*' -o -iname '*bc
 - VeraCrypt and TrueCrypt appear in Uninstall keys when installed via the standard installer.
 - Always run BOTH the 64-bit (`/Uninstall`) and 32-bit (`/WOW6432Node/.../Uninstall`) registry paths in Step 1.
 - Run ALL four steps before concluding — a program missed in Step 1 may appear in Steps 2–4.
+
+## CRITICAL: TrueCrypt ≠ VeraCrypt
+
+TrueCrypt and VeraCrypt are DIFFERENT programs. Do NOT confuse them:
+- TrueCrypt: legacy disk encryption, discontinued in 2014. Registry display name: "TrueCrypt"
+- VeraCrypt: successor to TrueCrypt, still maintained. Registry display name: "VeraCrypt"
+
+If the registry grep output shows "TrueCrypt" → report **TrueCrypt**, NOT VeraCrypt.
+If the registry grep output shows "VeraCrypt" → report **VeraCrypt**, NOT TrueCrypt.
+ALWAYS report what you actually find in the evidence — never assume one is the other.
