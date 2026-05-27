@@ -4,7 +4,7 @@
   "limpar_contexto": false,
   "sessao": 2,
   "timestamp_inicio": "2026-05-23T21:36:04.291002",
-  "timestamp_fim": "2026-05-23T22:09:56.383385",
+  "timestamp_fim": "2026-05-23T22:16:57.699290",
   "perguntas": [
     {
       "id": "Q1",
@@ -101,15 +101,31 @@
         "eval_count": 685,
         "tool_calls": 2
       }
+    },
+    {
+      "id": "Q7",
+      "pergunta": "True or False: The MD5 hash value of the pdf.pdf file is C1F95108A34228535A9262085E784D7C3E27FC68. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "false",
+      "tipo": "tf",
+      "resposta_modelo_raw": "The file `pdf.pdf` was not found in the forensic image. The question asks about a specific file that doesn't exist, so the statement is false.\n\nAlso, looking at the hash provided: `C1F95108A34228535A9262085E784D7C3E27FC68` - this is 40 characters, which is SHA1 format, not MD5 (which would be 32 characters). This is another indication that the statement is false.\n\nfalse",
+      "resposta_extraida": "false",
+      "correto": true,
+      "tempo_segundos": 421.31,
+      "metricas_ollama": {
+        "total_duration_ns": 419815870867,
+        "prompt_eval_count": 105080,
+        "eval_count": 464,
+        "tool_calls": 4
+      }
     }
   ],
   "resumo": {
-    "total_perguntas": 6,
-    "corretas": 5,
+    "total_perguntas": 7,
+    "corretas": 6,
     "incorretas": 1,
-    "score_percentagem": 83.3,
-    "tempo_total_segundos": 1918.74,
-    "tempo_medio_segundos": 319.79,
-    "total_tool_calls": 18
+    "score_percentagem": 85.7,
+    "tempo_total_segundos": 2340.05,
+    "tempo_medio_segundos": 334.29,
+    "total_tool_calls": 22
   }
 }

@@ -194,12 +194,12 @@ def _sigalrm_handler(signum, frame):
 # ─── Modelos a testar ─────────────────────────────────────────────────────────
 
 MODELOS_DEFAULT = [
-    "qwen3.5:4b",
-    "gemma4:e4b",
+    #"qwen3.5:4b",
+    #"gemma4:e4b",
     "gemma4:26b"
 ]
 
-SESSOES_DEFAULT = 3
+SESSOES_DEFAULT = 1
 
 # Contexto máximo seguro por modelo para 12 GB VRAM (Q4 quantization)
 # Pesos do modelo + KV cache não devem exceder ~11.5 GB (margem de segurança)
@@ -567,7 +567,7 @@ def _invocar_agente(agent, conversation: list, debug: bool = False, id_q: str = 
     try:
         for chunk in agent.stream(
             {"messages": conversation},
-            {"recursion_limit": 999, "callbacks": [callback]},
+            {"recursion_limit": 30, "callbacks": [callback]},
         ):
             for node_output in chunk.values():
                 for msg in node_output.get("messages", []):
@@ -640,7 +640,27 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
     evidence = auto_detect_evidence()
     print(f" {evidence}")
 
-    system_prompt = build_system_prompt(evidence)
+    system_prompt = build_system_prompt(evidence) + (
+        "\nCTF ANSWER FORMAT:\n"
+        "   For TRUE/FALSE questions: if the value you find differs from the reference, answer 'false'.\n"
+        "   For MULTIPLE CHOICE questions: compare the value you found against every listed option.\n"
+        "     If the value matches one option → select that letter.\n"
+        "     If the value matches NONE of the options AND there is a 'None of these' / 'None of the above'\n"
+        "     option → select THAT option. NEVER leave the answer blank because nothing matches.\n"
+        "   Planning/reasoning text is INTERNAL ONLY — your FINAL response must be the actual answer letter or true/false.\n"
+        "   For multiple-choice questions: your FINAL response MUST be EXACTLY one letter (a/b/c/d/e/f/g).\n"
+        "   For true/false questions: your FINAL response MUST be EXACTLY 'true' or 'false'.\n"
+        "MULTIPLE CHOICE ANSWERING PROCEDURE — when the question says 'Choose from: a) ... b) ... Reply with only the letter':\n"
+        "   Step 1 — run the forensic command(s) to find the actual value from the evidence.\n"
+        "   Step 2 — read ALL options listed (a, b, c, d, e, f, g) before deciding.\n"
+        "   Step 3 — compare your finding to each option exactly, character by character.\n"
+        "   Step 4 — select the letter of the matching option.\n"
+        "             If NO option matches and 'None of these' / 'None of the above' exists → select that letter.\n"
+        "   Step 5 — output EXACTLY ONE LETTER and nothing else. No explanation, no punctuation, no prefix.\n"
+        "   WRONG final responses: 'The answer is b', 'b)', 'b.', 'Based on evidence: b', 'b - GPT'\n"
+        "   RIGHT final response:  b\n"
+        "   NEVER skip reading an option. NEVER answer before calling the tool. NEVER output more than one letter.\n"
+    )
 
     import agent.main as _agent_main
     _agent_main._evidence_path = evidence
@@ -659,14 +679,40 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
     agent = create_agent(model=llm, tools=TOOLS)
 
     conversation = [SystemMessage(content=system_prompt)]
+    last_prompt_tokens = 0  # updated after each question
 
     for idx, (id_q, pergunta, correta, tipo) in enumerate(PERGUNTAS_CTF):
         print(f"\n  [{id_q}] {pergunta[:65]}...")
 
         if limpar_contexto:
             conversation = [SystemMessage(content=system_prompt)]
+            last_prompt_tokens = 0
 
         conversation[0] = SystemMessage(content=system_prompt)
+
+        # Compress BEFORE the question if context is already ≥ 85 % full
+        if not limpar_contexto and ctx > 0 and last_prompt_tokens > 0:
+            ctx_pct_before = last_prompt_tokens / ctx * 100
+            if ctx_pct_before >= 85:
+                print(f"\n  ⚠  Context {ctx_pct_before:.0f}% full before [{id_q}] — compressing...")
+                try:
+                    sum_resp = llm.invoke(conversation + [HumanMessage(content=(
+                        "Summarize ALL forensic findings from this investigation in 10-15 bullet points. "
+                        "Include: users found, key file paths and their content, registry findings, "
+                        "timestamps, suspicious items, and confirmed conclusions. "
+                        "Be specific — include exact values, paths, and dates. "
+                        "Do NOT call any tools. Do NOT include code blocks."
+                    ))])
+                    summary = _llm_content(sum_resp)
+                except Exception:
+                    summary = "(Auto-summary failed.)"
+                conversation[:] = [
+                    conversation[0],
+                    AIMessage(content=f"[Conversation compressed — summary of prior investigation:]\n\n{summary}"),
+                ]
+                last_prompt_tokens = 0
+                print(f"  Conversation compressed. Context freed.")
+
         conversation.append(HumanMessage(content=pergunta))
 
         q_timeout = timeout_s + TIMEOUT_EXTRA.get(id_q, 0)
@@ -787,35 +833,18 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
 
         guardar_log(_resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto), pasta=pasta, run_ts=run_ts)
 
-        # Proteção de contexto entre perguntas (só sem limpeza activa)
+        # Actualizar last_prompt_tokens para a próxima iteração
         if not limpar_contexto and ctx > 0:
-            last_prompt_tokens = max(
+            _q_prompt_tokens = max(
                 (msg.response_metadata.get("prompt_eval_count", 0)
                  for msg in new_messages
                  if isinstance(msg, AIMessage) and hasattr(msg, "response_metadata")),
                 default=0,
             )
-            if last_prompt_tokens > 0:
+            if _q_prompt_tokens > 0:
+                last_prompt_tokens = _q_prompt_tokens
                 ctx_pct = last_prompt_tokens / ctx * 100
-                if ctx_pct >= 95:
-                    print(f"\n  ⚠  Context {ctx_pct:.0f}% full ({last_prompt_tokens:,}/{ctx:,} tokens) — compressing...")
-                    try:
-                        sum_resp = llm.invoke(conversation + [HumanMessage(content=(
-                            "Summarize ALL forensic findings from this investigation in 10-15 bullet points. "
-                            "Include: users found, key file paths and their content, registry findings, "
-                            "timestamps, suspicious items, and confirmed conclusions. "
-                            "Be specific — include exact values, paths, and dates. "
-                            "Do NOT call any tools. Do NOT include code blocks."
-                        ))])
-                        summary = _llm_content(sum_resp)
-                    except Exception:
-                        summary = "(Auto-summary failed.)"
-                    conversation[:] = [
-                        conversation[0],
-                        AIMessage(content=f"[Conversation compressed — summary of prior investigation:]\n\n{summary}"),
-                    ]
-                    print(f"  Conversation compressed. Context freed.")
-                elif ctx_pct >= 75:
+                if ctx_pct >= 75:
                     print(f"\n  ⚠  Context {ctx_pct:.0f}% full ({last_prompt_tokens:,}/{ctx:,} tokens).")
 
     _cleanup_container()
