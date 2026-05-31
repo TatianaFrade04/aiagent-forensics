@@ -195,11 +195,11 @@ def _sigalrm_handler(signum, frame):
 
 MODELOS_DEFAULT = [
     #"qwen3.5:4b",
-    #"gemma4:e4b",
+    "gemma4:e4b",
     "gemma4:26b"
 ]
 
-SESSOES_DEFAULT = 1
+SESSOES_DEFAULT = 2
 
 # Contexto máximo seguro por modelo para 12 GB VRAM (Q4 quantization)
 # Pesos do modelo + KV cache não devem exceder ~11.5 GB (margem de segurança)
@@ -559,6 +559,7 @@ def _unload_all_models(base_url: str) -> None:
 def _invocar_agente(agent, conversation: list, debug: bool = False, id_q: str = "",
                     timeout_s: int = TIMEOUT_PER_QUESTION) -> list:
     """Corre agent.stream() e devolve a lista de novas mensagens."""
+    from langgraph.errors import GraphRecursionError
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
     new_messages = []
     callback = TimingCallback(id_q)
@@ -567,7 +568,7 @@ def _invocar_agente(agent, conversation: list, debug: bool = False, id_q: str = 
     try:
         for chunk in agent.stream(
             {"messages": conversation},
-            {"recursion_limit": 30, "callbacks": [callback]},
+            {"recursion_limit": 60, "callbacks": [callback]},
         ):
             for node_output in chunk.values():
                 for msg in node_output.get("messages", []):
@@ -583,6 +584,28 @@ def _invocar_agente(agent, conversation: list, debug: bool = False, id_q: str = 
                         elif isinstance(msg, ToolMessage):
                             out = msg.content[:300] if isinstance(msg.content, str) else str(msg.content)[:300]
                             print(f"  [ToolMessage] {out!r}")
+    except GraphRecursionError:
+        print(f"\n  [!] [{id_q}] Recursion limit hit — forcing final answer...")
+        _logger.warning("[%s] GraphRecursionError — retrying with stop instruction.", id_q)
+        signal.alarm(0)
+        try:
+            stop_msg = HumanMessage(content=(
+                "STOP exploring. Based on what you have found so far, "
+                "give your FINAL answer now. "
+                "Reply with ONLY the answer letter (for multiple choice) "
+                "or ONLY 'true' or 'false' (for true/false). No explanation."
+            ))
+            signal.signal(signal.SIGALRM, _sigalrm_handler)
+            signal.alarm(min(timeout_s, 120))
+            for chunk in agent.stream(
+                {"messages": conversation + new_messages + [stop_msg]},
+                {"recursion_limit": 10, "callbacks": [callback]},
+            ):
+                for node_output in chunk.values():
+                    for msg in node_output.get("messages", []):
+                        new_messages.append(msg)
+        except Exception as e2:
+            _logger.warning("[%s] Stop-instruction retry also failed: %s", id_q, e2)
     except _QuestionTimeout:
         print(f"\n  [!] [{id_q}] Timeout after {timeout_s}s — question marked as wrong.")
         _logger.warning("[%s] timeout after %ds — question unanswered.", id_q, timeout_s)
