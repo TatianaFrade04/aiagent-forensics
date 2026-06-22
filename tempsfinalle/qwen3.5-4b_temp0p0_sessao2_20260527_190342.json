@@ -5,7 +5,7 @@
   "limpar_contexto": false,
   "sessao": 2,
   "timestamp_inicio": "2026-05-27T19:22:45.730345",
-  "timestamp_fim": "2026-05-27T19:29:05.537080",
+  "timestamp_fim": "2026-05-28T19:17:55.604947",
   "perguntas": [
     {
       "id": "Q1",
@@ -150,15 +150,95 @@
         "eval_count": 517,
         "tool_calls": 2
       }
+    },
+    {
+      "id": "Q14",
+      "pergunta": "What is the logical file size in bytes (decimal) of the PLEAS.txt file? Choose from: a) 110,592  b) 122,336  c) 122,880  d) 108,227. Reply with only the letter.",
+      "resposta_correta": "b",
+      "tipo": "mc",
+      "resposta_modelo_raw": "",
+      "resposta_extraida": "",
+      "correto": false,
+      "tempo_segundos": 81165.93,
+      "metricas_ollama": {
+        "total_duration_ns": 80985334436525,
+        "prompt_eval_count": 22293302,
+        "eval_count": 49238,
+        "tool_calls": 500
+      }
+    },
+    {
+      "id": "Q15",
+      "pergunta": "What is the full name of the user that has the RID number 0x3EB? Choose from: a) Administrator  b) Betty Boop  c) Joe T. Nameless  d) BillyBob  e) Guest. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "c",
+      "resposta_extraida": "c",
+      "correto": true,
+      "tempo_segundos": 964.32,
+      "metricas_ollama": {
+        "total_duration_ns": 963392524777,
+        "prompt_eval_count": 179955,
+        "eval_count": 259,
+        "tool_calls": 2
+      }
+    },
+    {
+      "id": "Q16",
+      "pergunta": "When was the last login date and time for the user \"Jimmy Wilson\"? Choose from: a) February 18, 2014 12:38:16 UTC  b) January 19, 2014 06:22:12 UTC  c) March 03, 2014 11:11:11 UTC  d) None of these times are correct  e) February 19, 2014 13:30:58 UTC  f) April 01, 2014 00:00:01 UTC  g) February 17, 2014 17:38:22 UTC. Reply with only the letter.",
+      "resposta_correta": "d",
+      "tipo": "mc",
+      "resposta_modelo_raw": "e",
+      "resposta_extraida": "e",
+      "correto": false,
+      "tempo_segundos": 413.84,
+      "metricas_ollama": {
+        "total_duration_ns": 413760632099,
+        "prompt_eval_count": 61926,
+        "eval_count": 291,
+        "tool_calls": 0
+      }
+    },
+    {
+      "id": "Q17",
+      "pergunta": "True or False: jose.Badguy@hushmail.com and robert.ripoff@gmx.com sent emails to the user Jimmy Wilson. Reply with only \"true\" or \"false\".",
+      "resposta_correta": "true",
+      "tipo": "tf",
+      "resposta_modelo_raw": "true",
+      "resposta_extraida": "true",
+      "correto": true,
+      "tempo_segundos": 1875.32,
+      "metricas_ollama": {
+        "total_duration_ns": 1868451884529,
+        "prompt_eval_count": 381612,
+        "eval_count": 642,
+        "tool_calls": 5
+      }
+    },
+    {
+      "id": "Q18",
+      "pergunta": "What program did the user Jimmy Wilson have set to run when he logged on to the computer? Choose from: a) None of the other answers are correct  b) Notepad.exe  c) StinkyNot.exe  d) MSAccess.exe  e) MSWord.exe. Reply with only the letter.",
+      "resposta_correta": "c",
+      "tipo": "mc",
+      "resposta_modelo_raw": "a",
+      "resposta_extraida": "a",
+      "correto": false,
+      "tempo_segundos": 1310.63,
+      "metricas_ollama": {
+        "total_duration_ns": 1309208455136,
+        "prompt_eval_count": 255230,
+        "eval_count": 577,
+        "tool_calls": 3
+      }
     }
   ],
   "resumo": {
-    "total_perguntas": 9,
-    "corretas": 6,
-    "incorretas": 3,
-    "score_percentagem": 66.7,
-    "tempo_total_segundos": 363.75,
-    "tempo_medio_segundos": 40.42,
-    "total_tool_calls": 24
+    "total_perguntas": 14,
+    "corretas": 8,
+    "incorretas": 6,
+    "score_percentagem": 57.1,
+    "tempo_total_segundos": 86093.79,
+    "tempo_medio_segundos": 6149.56,
+    "total_tool_calls": 534
   }
 }
