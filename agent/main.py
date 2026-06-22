@@ -879,10 +879,8 @@ def main():
         evidence = auto_detect_evidence()
         print(f"[*] Evidence : {evidence} (auto-detected)")
 
-    global _evidence_path, _skills_cache
+    global _evidence_path
     _evidence_path = evidence
-    _skills_cache = load_skills()
-    print(f"[*] Skills loaded: {len(_skills_cache)} ({', '.join(s.name for s in _skills_cache)})")
 
     from rag.indexer import clear_collection, list_indexed_documents
     indexed = list_indexed_documents()
