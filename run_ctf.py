@@ -194,19 +194,29 @@ def _sigalrm_handler(signum, frame):
 # ─── Modelos a testar ─────────────────────────────────────────────────────────
 
 MODELOS_DEFAULT = [
-    #"qwen3.5:4b",
-    "gemma4:e4b",
-    "gemma4:26b"
+    #"gemma4:e4b",
+    "gemma4:26b",
+    "qwen3.5:4b",
 ]
 
-SESSOES_DEFAULT = 2
+TEMPERATURAS_DEFAULT = [
+    #0.0,
+    #0.1,
+    0.2,
+    0.3,
+    0.5,
+    0.7,
+    1.0,
+]
+
+SESSOES_DEFAULT = 6
 
 # Contexto máximo seguro por modelo para 12 GB VRAM (Q4 quantization)
 # Pesos do modelo + KV cache não devem exceder ~11.5 GB (margem de segurança)
 MODEL_CTX_12GB: dict[str, int] = {
-    "gemma4:e4b":      131072,  # 4B, GQA com poucos KV heads — KV cache muito eficiente
-    "gemma4:26b":       32768,  # 26B — pesos ~8 GB, pouco espaço para KV cache
-    "qwen3.5:4b":       65536,  # 4B
+    "gemma4:e4b":      32768,  # 4B, GQA com poucos KV heads — KV cache muito eficiente
+    #"gemma4:26b":       32768,  # 26B — pesos ~8 GB, pouco espaço para KV cache
+    "qwen3.5:4b":       32768,  # 4B
 }
 
 
@@ -490,10 +500,13 @@ def guardar_log(dados: dict, pasta: str = "logs_ctf_sem_limpeza_1505_limpeza", r
     ms = modelo_safe(dados["modelo"])
     ts = f"_{run_ts}" if run_ts else ""
     limpo = "_contexto_limpo" if dados.get("limpar_contexto") else ""
-    caminho = f"{pasta}/{ms}_sessao{dados['sessao']}{limpo}{ts}.json"
+    temp = dados.get("temperatura")
+    temp_str = f"_temp{str(temp).replace('.', 'p')}" if temp is not None else ""
+    caminho = f"{pasta}/{ms}{temp_str}_sessao{dados['sessao']}{limpo}{ts}.json"
     with open(caminho, "w", encoding="utf-8") as f:
         json.dump(dados, f, ensure_ascii=False, indent=2)
     print(f"  → Guardado: {caminho}")
+
 
 
 # ─── Core ─────────────────────────────────────────────────────────────────────
@@ -643,7 +656,7 @@ def _invocar_agente(agent, conversation: list, debug: bool = False, id_q: str = 
     return new_messages
 
 
-def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, run_ts: str = "", limpar_contexto: bool = False, pasta: str = "logs_ctf_sem_limpeza_1505_limpeza", timeout_s: int = TIMEOUT_PER_QUESTION) -> dict:
+def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, run_ts: str = "", limpar_contexto: bool = False, pasta: str = "logs_ctf_sem_limpeza_1505_limpeza", timeout_s: int = TIMEOUT_PER_QUESTION, temperatura: float | None = None) -> dict:
     """Runs the agent directly and sends all CTF questions in sequence."""
     print(f"\n{'='*60}")
     print(f"  MODEL: {modelo}  |  CTX: {ctx}  |  SESSION: {sessao}/{SESSOES_DEFAULT}")
@@ -693,7 +706,7 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
     llm = ChatOllama(
         model=modelo,
-        temperature=0.3,
+        temperature=temperatura if temperatura is not None else 0.3,
         num_ctx=ctx,
         keep_alive=-1,
         reasoning=suporta_thinking(modelo),
@@ -854,7 +867,7 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
             "metricas_ollama": metricas,
         })
 
-        guardar_log(_resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto), pasta=pasta, run_ts=run_ts)
+        guardar_log(_resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto, temperatura), pasta=pasta, run_ts=run_ts)
 
         # Actualizar last_prompt_tokens para a próxima iteração
         if not limpar_contexto and ctx > 0:
@@ -871,16 +884,16 @@ def correr_sessao_ctf(modelo: str, sessao: int, ctx: int, debug: bool = False, r
                     print(f"\n  ⚠  Context {ctx_pct:.0f}% full ({last_prompt_tokens:,}/{ctx:,} tokens).")
 
     _cleanup_container()
-    res = _resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto)
+    res = _resumo(modelo, sessao, timestamp_inicio, resultados, ctx, limpar_contexto, temperatura)
     res["duracao_wall_segundos"] = round(time.time() - t_wall_inicio, 1)
     return res
 
 
-def _resumo(modelo, sessao, timestamp_inicio, resultados, ctx: int = 0, limpar_contexto: bool = False):
+def _resumo(modelo, sessao, timestamp_inicio, resultados, ctx: int = 0, limpar_contexto: bool = False, temperatura: float | None = None):
     corretas = sum(1 for r in resultados if r.get("correto", False))
     total = len(resultados)
     tempo_total = sum(r["tempo_segundos"] for r in resultados)
-    return {
+    d = {
         "modelo": modelo,
         "ctx": ctx,
         "limpar_contexto": limpar_contexto,
@@ -898,6 +911,9 @@ def _resumo(modelo, sessao, timestamp_inicio, resultados, ctx: int = 0, limpar_c
             "total_tool_calls": sum(r["metricas_ollama"]["tool_calls"] for r in resultados),
         },
     }
+    if temperatura is not None:
+        d["temperatura"] = temperatura
+    return d
 
 
 # ─── Helpers de apresentação ──────────────────────────────────────────────────
@@ -947,6 +963,9 @@ def parse_args():
                    help="Clear conversation context between questions (each question is independent)")
     p.add_argument("--timeout",        type=int, default=TIMEOUT_PER_QUESTION,
                    help=f"Timeout per question in seconds (default: {TIMEOUT_PER_QUESTION})")
+    p.add_argument("--temperatures",   nargs="+", type=float, default=None,
+                   help="Temperatures to evaluate (default: TEMPERATURAS_DEFAULT). "
+                        "Pass --temperatures 0.3 to run a single temperature.")
     return p.parse_args()
 
 
@@ -954,14 +973,16 @@ def main():
     args = parse_args()
     modelos = [args.only_model] if args.only_model else args.models
     sessoes = args.sessions
+    temperaturas = args.temperatures if args.temperatures is not None else TEMPERATURAS_DEFAULT
 
-    total = len(modelos) * sessoes
+    total = len(modelos) * sessoes * (len(temperaturas) if temperaturas else 1)
     modo_label = "clean context between questions" if args.clear_context else "accumulated context"
     print(f"\n🔬 CTF Scoring — AIAgent@forensics")
-    print(f"   Mode     : {modo_label}")
-    print(f"   Sessions : {sessoes} per model")
-    print(f"   Questions: {len(PERGUNTAS_CTF)} (with ground truth)")
-    print(f"   Total    : {total} sessions\n")
+    print(f"   Mode        : {modo_label}")
+    print(f"   Sessions    : {sessoes} per model" + (f" × {len(temperaturas)} temperatures" if temperaturas else ""))
+    print(f"   Temperatures: {temperaturas if temperaturas else '[default 0.3]'}")
+    print(f"   Questions   : {len(PERGUNTAS_CTF)} (with ground truth)")
+    print(f"   Total       : {total} sessions\n")
     print(f"   Models and max context (12 GB VRAM):")
     _imprimir_tabela_contextos(modelos, args.ctx)
 
@@ -1006,31 +1027,34 @@ def main():
         else:
             print(" FAILED — continuing anyway")
 
-        for sessao in range(1, sessoes + 1):
-            try:
-                dados = correr_sessao_ctf(modelo, sessao, ctx=ctx, debug=args.debug, run_ts=run_ts, limpar_contexto=args.clear_context, pasta=args.output_dir, timeout_s=args.timeout)
-                guardar_log(dados, pasta=args.output_dir, run_ts=run_ts)
-                todos_resultados.append(dados)
+        temp_list = temperaturas
+        for temperatura in temp_list:
+            temp_label = f"  temp={temperatura}" if temperatura is not None else ""
+            for sessao in range(1, sessoes + 1):
+                try:
+                    dados = correr_sessao_ctf(modelo, sessao, ctx=ctx, debug=args.debug, run_ts=run_ts, limpar_contexto=args.clear_context, pasta=args.output_dir, timeout_s=args.timeout, temperatura=temperatura)
+                    guardar_log(dados, pasta=args.output_dir, run_ts=run_ts)
+                    todos_resultados.append(dados)
 
-                dur_sessao = dados.get("duracao_wall_segundos", 0.0)
-                tempos_sessoes.append(dur_sessao)
-                sessoes_concluidas += 1
+                    dur_sessao = dados.get("duracao_wall_segundos", 0.0)
+                    tempos_sessoes.append(dur_sessao)
+                    sessoes_concluidas += 1
 
-                r = dados["resumo"]
-                restantes = total - sessoes_concluidas
-                if restantes > 0:
-                    media = sum(tempos_sessoes) / len(tempos_sessoes)
-                    eta_str = f"  |  ETA remaining: ~{_formatar_duracao(restantes * media)}"
-                else:
-                    eta_str = "  |  Last session done"
-                print(f"\n  📊 {modelo} session {sessao}: {r['corretas']}/{r['total_perguntas']} ({r['score_percentagem']}%)  |  duration: {_formatar_duracao(dur_sessao)}{eta_str}")
+                    r = dados["resumo"]
+                    restantes = total - sessoes_concluidas
+                    if restantes > 0:
+                        media = sum(tempos_sessoes) / len(tempos_sessoes)
+                        eta_str = f"  |  ETA remaining: ~{_formatar_duracao(restantes * media)}"
+                    else:
+                        eta_str = "  |  Last session done"
+                    print(f"\n  📊 {modelo}{temp_label} session {sessao}: {r['corretas']}/{r['total_perguntas']} ({r['score_percentagem']}%)  |  duration: {_formatar_duracao(dur_sessao)}{eta_str}")
 
-            except KeyboardInterrupt:
-                print("\n[!] Interrupted.")
-                sys.exit(0)
-            except Exception as e:
-                print(f"\n[ERROR] {modelo} session {sessao}: {e}")
-                continue
+                except KeyboardInterrupt:
+                    print("\n[!] Interrupted.")
+                    sys.exit(0)
+                except Exception as e:
+                    print(f"\n[ERROR] {modelo}{temp_label} session {sessao}: {e}")
+                    continue
 
     duracao = round(time.time() - inicio_global, 1)
     print(f"\n{'='*90}")

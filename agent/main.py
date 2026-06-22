@@ -782,8 +782,8 @@ _default_evidence_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="AIAgent@forensics — LLM agent for forensic investigation")
-    parser.add_argument("--model",    default=os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
-                        help="Ollama model (default: qwen3.5:4b)")
+    parser.add_argument("--model",    default=os.getenv("OLLAMA_MODEL", "gemma4:e4b"),
+                        help="Ollama model (default: gemma4:e4b)")
     parser.add_argument("--url",      default=os.getenv("OLLAMA_URL", "http://localhost:11434"),
                         help="Ollama server URL (default: http://localhost:11434)")
     parser.add_argument("--ctx",      type=int,   default=32768,
@@ -794,8 +794,11 @@ def parse_args() -> argparse.Namespace:
                         help="Forensic partition directory (default: auto-detected)")
     parser.add_argument("--dir", default=_default_evidence_dir,
                         help=f"Host directory containing the forensic image (default: {_default_evidence_dir})")
-    parser.add_argument("--think", action="store_true", default=True,
-                        help="Enable model reasoning mode (reasoning=True)")
+    # ── ALTERAÇÃO 1: substituído --think por --no-thinking ──────────────────
+    parser.add_argument("--no-thinking", dest="thinking", action="store_false",
+                        help="Disable chain-of-thought reasoning (faster, less precise)")
+    parser.set_defaults(thinking=True)
+    # ────────────────────────────────────────────────────────────────────────
     parser.add_argument("--debug", action="store_true", default=False,
                         help="Show raw AIMessage fields for inspection")
     parser.add_argument("--no-clear-rag", dest="clear_rag", action="store_false",
@@ -856,6 +859,9 @@ def main():
     print(BANNER)
     print(f"[*] Model    : {args.model} via {args.url}")
     print(f"[*] Context  : {args.ctx} tokens | Temperature: {args.temp}")
+    # ── ALTERAÇÃO 2: mostrar modo de thinking no banner ─────────────────────
+    print(f"[*] Thinking : {'enabled' if args.thinking else 'disabled'}")
+    # ────────────────────────────────────────────────────────────────────────
     sys.modules["agent.tools"].FORENSICS_IMAGE_PATH = os.path.abspath(args.dir)
     print(f"[*] Image dir: {sys.modules['agent.tools'].FORENSICS_IMAGE_PATH}")
     start_container(no_mount=args.no_mount, allow_network=args.allow_network)
@@ -888,14 +894,16 @@ def main():
     else:
         print("[*] RAG: empty collection.")
 
+    # ── ALTERAÇÃO 3: reasoning controlado por args.thinking ─────────────────
     llm = ChatOllama(
         model=args.model,
         base_url=args.url,
         temperature=args.temp,
         num_ctx=args.ctx,
         keep_alive=-1,
-        reasoning=True,  # Always enabled for better user experience
+        reasoning=args.thinking,
     )
+    # ────────────────────────────────────────────────────────────────────────
     effective_ctx = get_model_context(args.url, args.model, fallback=args.ctx)
     if effective_ctx != args.ctx:
         print(f"[*] Native ctx : {effective_ctx} tokens (configured: {args.ctx} — Ollama uses native context)")
