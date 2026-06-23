@@ -502,3 +502,75 @@ Swap:           14Gi       179Mi        14Gi
 [KERNEL ERRORS]
 ----------------------------------------------------------
 
+--- CHECKPOINT: 23/06/2026 23:18:03 ---
+[DOCKER STATS]
+ID: 665892c6fc3f | Nome: forensics | CPU: 0.00% | Mem: 8.602MiB / 2GiB
+[HOST RAM]
+               total        used        free      shared  buff/cache   available
+Mem:            62Gi       5,9Gi        13Gi        11Mi        43Gi        56Gi
+Swap:           14Gi       179Mi        14Gi
+[LOOP DEVICES]
+/dev/loop1: []: (/var/lib/snapd/snaps/snapd_26382.snap)
+/dev/loop29: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop57: []: (/forensics_ewf/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop19: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop47: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop75: []: (/var/lib/snapd/snaps/firefox_8191.snap)
+/dev/loop37: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop27: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop55: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop17: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop45: []: (/var/lib/snapd/snaps/snapd-desktop-integration_361.snap)
+/dev/loop73: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop8: []: (/var/lib/snapd/snaps/gnome-3-38-2004_143.snap)
+/dev/loop35: []: (/var/lib/snapd/snaps/snapd-desktop-integration_357.snap)
+/dev/loop25: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop53: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop15: []: (/var/lib/snapd/snaps/core22_2411.snap)
+/dev/loop43: []: (/var/lib/snapd/snaps/firefox_8107.snap)
+/dev/loop6: []: (/var/lib/snapd/snaps/core24_1499.snap)
+/dev/loop33: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop23: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop51: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop13: []: (/var/lib/snapd/snaps/snap-store_1113.snap)
+/dev/loop41: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop4: []: (/var/lib/snapd/snaps/core22_2045.snap)
+/dev/loop31: []: (/var/lib/snapd/snaps/core24_1587.snap)
+/dev/loop21: []: (/var/lib/snapd/snaps/mesa-2404_1165.snap)
+/dev/loop11: []: (/var/lib/snapd/snaps/gtk-common-themes_1534.snap)
+/dev/loop2: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop58: []: (/var/lib/snapd/snaps/snapd_26865.snap)
+/dev/loop48: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop38: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop0: []: (/var/lib/snapd/snaps/bare_5.snap)
+/dev/loop28: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop56: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop18: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop46: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop9: []: (/var/lib/snapd/snaps/core20_2769.snap)
+/dev/loop36: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop26: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop54: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop16: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop44: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop7: []: (/var/lib/snapd/snaps/gnome-3-38-2004_140.snap)
+/dev/loop34: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop24: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop52: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop14: []: (/var/lib/snapd/snaps/snap-store_1216.snap)
+/dev/loop42: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop5: []: (/var/lib/snapd/snaps/core20_2717.snap)
+/dev/loop32: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop22: []: (/var/lib/snapd/snaps/gnome-46-2404_153.snap)
+/dev/loop50: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop12: []: (/var/lib/snapd/snaps/gtk-common-themes_1535.snap)
+/dev/loop40: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop3: []: (/var/lib/snapd/snaps/gnome-42-2204_247.snap)
+/dev/loop30: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop20: []: (/var/lib/snapd/snaps/firefox_8054.snap)
+/dev/loop49: []: (/ewf1), offset 33619968, sizelimit 855638016
+/dev/loop10: []: (/var/lib/snapd/snaps/gnome-42-2204_202.snap)
+/dev/loop39: []: (/ewf1), offset 33619968, sizelimit 855638016
+[KERNEL ERRORS]
+----------------------------------------------------------
+
