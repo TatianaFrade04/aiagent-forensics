@@ -29,7 +29,7 @@ jobs:
           echo "LOOP=$LOOP" >> $GITHUB_ENV
           echo "[+] Loop device criado no host: $LOOP"
 
-      - name: Correr o container
+      - name: Correr o container e verificar que montou
         run: |
           docker run --rm \
             --cap-add SYS_ADMIN \
@@ -37,18 +37,7 @@ jobs:
             --device /dev/loop-control \
             --device /dev/fuse \
             --device ${{ env.LOOP }} \
-            --security-opt apparmor:unconfined \
-            -v "$PWD/forensics_raw:/forensics_raw" \
-            forensics-test
-
-      - name: Verificar que montou
-        run: |
-          docker run --rm \
-            --cap-add SYS_ADMIN \
-            --cap-add MKNOD \
-            --device /dev/loop-control \
-            --device /dev/fuse \
-            --device ${{ env.LOOP }} \
+            --device-cgroup-rule 'b 7:* rmw' \
             --security-opt apparmor:unconfined \
             -v "$PWD/forensics_raw:/forensics_raw" \
             forensics-test \
